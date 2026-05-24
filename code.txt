@@ -3,15 +3,17 @@ import psycopg2
 import os
 from flask import Flask, jsonify, send_from_directory, abort, request
 from flask_cors import CORS
+import glob
+from pathlib import Path
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
 
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
 def get_db_config():
-    config_path = os.path.join(os.path.dirname(__file__), 'telegram_admin_panel', 'config_db.txt')
+    config_path = Path(__file__).parent / 'telegram_admin_panel' / 'config_db.txt'
     config = {}
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         for line in f:
             if '=' in line:
                 k, v = line.strip().split('=', 1)
@@ -50,7 +52,6 @@ def flags():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Исключаем служебный флаг "Скрытый" из списка для фильтрации
         cur.execute("SELECT id, name FROM flags WHERE lower(name) != 'скрытый' ORDER BY id;")
         rows = cur.fetchall()
         cur.close()
@@ -60,18 +61,16 @@ def flags():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-# ----- API: список товаров с фильтрацией по типу и флагам, исключая скрытые -----
+# ----- API: список товаров с фильтрацией -----
 @app.route('/api/products')
 def products():
     try:
-        # Получаем параметры фильтрации
         type_id = request.args.get('type_id', type=int)
         flag_ids = request.args.getlist('flag_ids', type=int)
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Подзапрос для исключения товаров с флагом "Скрытый" (регистронезависимо)
         hidden_flag_condition = """
             NOT EXISTS (
                 SELECT 1 FROM flags_for_products fp
@@ -81,7 +80,6 @@ def products():
         """
 
         if flag_ids:
-            # Формируем запрос: товары, у которых есть ВСЕ указанные флаги, и нет скрытого флага
             query = f"""
                 SELECT p.code, p.name
                 FROM products p
@@ -103,7 +101,6 @@ def products():
             params.append(len(flag_ids))
             cur.execute(query, params)
         else:
-            # Без фильтра по флагам, но исключаем скрытые товары
             query = f"""
                 SELECT code, name
                 FROM products p
@@ -125,17 +122,116 @@ def products():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+# ----- API: детальная информация о товаре по коду -----
+@app.route('/api/product/<code>')
+def product_details(code):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Основные данные товара + тип
+        cur.execute("""
+            SELECT p.id, p.code, p.name, p.products_type_id, pt.name as type_name
+            FROM products p
+            JOIN products_type pt ON p.products_type_id = pt.id
+            WHERE p.code = %s
+        """, (code,))
+        product_row = cur.fetchone()
+        if not product_row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Product not found'}), 404
+
+        prod_id = product_row[0]
+        product_data = {
+            'id': prod_id,
+            'code': product_row[1],
+            'name': product_row[2],
+            'products_type_id': product_row[3],
+            'type_name': product_row[4]
+        }
+
+        # 2. Стоимости по типам материалов
+        cur.execute("""
+            SELECT mt.id, mt.name, mfp.cost
+            FROM materials_for_products mfp
+            JOIN materials_type mt ON mfp.materials_type_id = mt.id
+            WHERE mfp.products_id = %s
+            ORDER BY mt.id
+        """, (prod_id,))
+        costs = [{'id': r[0], 'name': r[1], 'cost': r[2]} for r in cur.fetchall()]
+
+        # 3. Основные характеристики (глобальные + значения товара)
+        cur.execute("""
+            SELECT mft.id, mft.name, COALESCE(pmf.value, '') as value
+            FROM main_features_types mft
+            LEFT JOIN product_main_features pmf 
+                ON mft.id = pmf.feature_id AND pmf.products_id = %s
+            ORDER BY mft.id
+        """, (prod_id,))
+        main_features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
+
+        # 4. Дополнительные характеристики
+        cur.execute("""
+            SELECT id, name, value
+            FROM product_extra_features
+            WHERE products_id = %s
+            ORDER BY id
+        """, (prod_id,))
+        extra_features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        # 5. Фотографии (сканируем папку media/products/<code>/)
+        media_dir = Path(__file__).parent / 'media' / 'products' / code
+        photos = {'preview': None, 'size': None, 'main': []}
+        if media_dir.is_dir():
+            # preview
+            preview_path = media_dir / 'preview.webp'
+            if preview_path.exists():
+                photos['preview'] = f'/media/products/{code}/preview.webp'
+            # size (схема)
+            size_path = media_dir / 'size.webp'
+            if size_path.exists():
+                photos['size'] = f'/media/products/{code}/size.webp'
+            # основные фото (числовые имена)
+            main_files = sorted(media_dir.glob('[0-9]*.webp'), key=lambda p: int(p.stem))
+            photos['main'] = [f'/media/products/{code}/{p.name}' for p in main_files]
+
+        # Формируем ответ
+        result = {
+            'product': product_data,
+            'costs': costs,
+            'main_features': main_features,
+            'extra_features': extra_features,
+            'photos': photos
+        }
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"API /api/product/<code> error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 # ----- Статические файлы -----
 @app.route('/')
 def index():
     return send_from_directory('webpages', 'catalog.html')
 
+@app.route('/product/<code>')
+def product_page(code):
+    return send_from_directory('webpages', 'product_card.html')
+
 @app.route('/catalog.css')
 def catalog_css():
     return send_from_directory('webpages', 'catalog.css')
 
+@app.route('/product_card.css')
+def product_card_css():
+    return send_from_directory('webpages', 'product_card.css')
+
 @app.route('/media/<path:filename>')
 def media_files(filename):
+    # filename может содержать слеши, send_from_directory сам преобразует их в путь ОС
     return send_from_directory('media', filename)
 
 @app.route('/favicon.ico')
@@ -144,9 +240,10 @@ def favicon():
 
 # ----- Запуск -----
 if __name__ == '__main__':
-    os.makedirs('webpages', exist_ok=True)
-    os.makedirs('media/products', exist_ok=True)
-    os.makedirs('media/interface', exist_ok=True)
+    # Создаём необходимые папки, если их нет
+    Path('webpages').mkdir(exist_ok=True)
+    Path('media/products').mkdir(parents=True, exist_ok=True)
+    Path('media/interface').mkdir(parents=True, exist_ok=True)
     app.run(host='0.0.0.0', port=5000, debug=True)
 
 ===== Файл: collect_text_files.py =====
@@ -3873,7 +3970,6 @@ footer {
 <main class="goods">
     <h1 class="header">Каталог мебели</h1>
 
-    <!-- Блок фильтров – адаптивный, без лишних отступов -->
     <div class="filters">
         <div class="filter-group">
             <label for="type-select">Тип товара:</label>
@@ -3899,42 +3995,20 @@ footer {
             <div class="phone-label">Звонок по России бесплатный</div>
             <div class="phone-number">8 (999) 700-05-50</div>
             <div class="social-icons">
-                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank" rel="noopener noreferrer">
-                    <img src="/media/interface/vk.svg" alt="VK" class="vk-svg">
-                </a>
-                <a href="https://t.me/lutohayse" class="tg" target="_blank" rel="noopener noreferrer">
-                    <img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg">
-                </a>
+                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank"><img src="/media/interface/vk.svg" alt="VK" class="vk-svg"></a>
+                <a href="https://t.me/lutohayse" class="tg" target="_blank"><img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg"></a>
             </div>
         </div>
         <nav class="footer-nav">
-            <div class="footer-column">
-                <h4>О нас</h4>
-                <ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul>
-            </div>
-            <div class="footer-column">
-                <h4>Покупки</h4>
-                <ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul>
-            </div>
-            <div class="footer-column">
-                <h4>Сотрудничество</h4>
-                <ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul>
-            </div>
+            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
+            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
+            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
         </nav>
     </div>
-    <div class="footer-bottom">
-        <div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div>
-    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
 </footer>
 
-<!-- Модальное окно для "О нас" -->
-<div id="aboutModal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>Декларация о соответствии</h2>
-        <p>Регистрационный номер декларации о соответствии: ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p>
-    </div>
-</div>
+<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
 <script>
     const gridContainer = document.getElementById('catalog-grid');
@@ -3964,11 +4038,11 @@ footer {
         for (const prod of products) {
             const imagePath = `/media/products/${encodeURIComponent(prod.code)}/preview.webp`;
             html += `
-                <div class="slider-items">
+                <a href="/product/${encodeURIComponent(prod.code)}" class="slider-items">
                     <img src="${imagePath}" alt="${escapeHtml(prod.name)}" loading="lazy" onerror="this.src='/media/interface/placeholder.png'">
                     <div class="product-name">${escapeHtml(prod.name)}</div>
                     <div class="code-name">Код: ${escapeHtml(prod.code)}</div>
-                </div>
+                </a>
             `;
         }
         gridContainer.innerHTML = html;
@@ -3978,13 +4052,11 @@ footer {
     async function loadProducts() {
         const typeId = typeSelect.value;
         const selectedFlags = Array.from(document.querySelectorAll('.flag-checkbox:checked')).map(cb => cb.value);
-
         let url = '/api/products?';
         const params = new URLSearchParams();
         if (typeId) params.append('type_id', typeId);
         selectedFlags.forEach(fid => params.append('flag_ids', fid));
         url += params.toString();
-
         try {
             loader.style.display = 'block';
             gridContainer.style.display = 'none';
@@ -4015,7 +4087,6 @@ footer {
                     typeSelect.appendChild(option);
                 });
             }
-
             const flagsResp = await fetch('/api/flags');
             if (flagsResp.ok) {
                 const flags = await flagsResp.json();
@@ -4032,7 +4103,6 @@ footer {
                     flagsContainer.appendChild(label);
                 });
             }
-
             await loadProducts();
         } catch (err) {
             console.error('Ошибка загрузки фильтров:', err);
@@ -4041,27 +4111,716 @@ footer {
 
     function onChangeFilter() {
         if (currentTimeout) clearTimeout(currentTimeout);
-        currentTimeout = setTimeout(() => {
-            loadProducts();
-        }, 300);
+        currentTimeout = setTimeout(() => loadProducts(), 300);
     }
 
     typeSelect.addEventListener('change', onChangeFilter);
     flagsContainer.addEventListener('change', (e) => {
-        if (e.target.classList.contains('flag-checkbox')) {
-            onChangeFilter();
-        }
+        if (e.target.classList.contains('flag-checkbox')) onChangeFilter();
     });
 
-    // Модальное окно
     const modal = document.getElementById('aboutModal');
     const aboutLink = document.getElementById('aboutLink');
     const closeSpan = document.querySelector('.close');
     aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
-    closeSpan.onclick = () => { modal.style.display = 'none'; };
+    closeSpan.onclick = () => modal.style.display = 'none';
     window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 
     loadFilters();
+</script>
+</body>
+</html>
+
+===== Файл: webpages\product_card.css =====
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+:root {
+    --main-color: #000;
+    --accent-color: #628b35;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    background-color: #fff;
+    color: var(--main-color);
+}
+
+/* ===== ХЕДЕР (как в каталоге) ===== */
+.main__header {
+    padding: 10px 0;
+    box-shadow: inset 0px -1px 0px rgba(0,0,0,0.1);
+    background-color: #f9f9f9;
+}
+.header__container {
+    max-width: 1920px;
+    margin: 0 auto;
+    padding: 0 55px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.menu__body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.menu__list {
+    display: flex;
+    align-items: center;
+    column-gap: 40px;
+    list-style: none;
+}
+.menu__link {
+    text-decoration: none;
+    color: var(--main-color);
+    font-weight: 500;
+    transition: color 0.3s;
+}
+.menu__link:hover { color: var(--accent-color); }
+.logo {
+    font-size: 35px;
+    font-weight: 700;
+}
+.logo-link {
+    display: inline-flex;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--main-color);
+}
+.logo-sub {
+    font-size: 24px;
+    font-weight: 400;
+    margin-left: 2px;
+}
+@media (max-width: 768px) {
+    .header__container { justify-content: center; gap: 15px; }
+    .menu__list { column-gap: 20px; }
+    .logo-sub { font-size: 18px; }
+}
+@media (max-width: 480px) {
+    .menu__list { gap: 15px; }
+    .menu__link { font-size: 13px; }
+    .logo { font-size: 24px; }
+    .logo-sub { font-size: 14px; }
+}
+
+/* ===== ДВЕ КОЛОНКИ ===== */
+.page-container.two-col-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    max-width: 1600px;
+    margin: 40px auto;
+    padding: 0 40px;
+}
+.left-info {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+}
+@media (max-width: 992px) {
+    .page-container.two-col-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ===== ПАНЕЛЬ ТОВАРА (левая верхняя) ===== */
+.product-panel {
+    background: #f9f9f9;
+    border-radius: 16px;
+    padding: 25px 30px;
+}
+.product-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 15px;
+}
+.price-current {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 15px 0;
+}
+.material-selector {
+    margin: 15px 0;
+}
+.material-selector label {
+    font-weight: 600;
+    margin-right: 10px;
+}
+.material-select {
+    padding: 8px 12px;
+    border-radius: 30px;
+    border: 1px solid #ccc;
+    font-family: inherit;
+}
+.copy {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    margin: 10px 0;
+}
+.copy p {
+    font-weight: 500;
+    margin-right: 10px;
+}
+.copy img {
+    width: 20px;
+}
+.copy-text {
+    font-size: 14px;
+    color: #555;
+    margin-bottom: 20px;
+}
+.btn-cart-container {
+    position: relative;
+}
+.btn-cart {
+    display: flex;
+    justify-content: center;
+    background: #a7c584;
+    color: #fff;
+    font-weight: 700;
+    padding: 12px 24px;
+    border-radius: 8px;
+    text-decoration: none;
+    text-align: center;
+}
+.btn-cart:hover { background: #6b8a47; }
+.dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    opacity: 0;
+    visibility: hidden;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+    list-style: none;
+    margin-top: 5px;
+    transition: 0.2s;
+}
+.btn-cart-container.open .dropdown {
+    opacity: 1;
+    visibility: visible;
+}
+.dropdown-item {
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    text-decoration: none;
+    color: #333;
+    border-bottom: 1px solid #eee;
+}
+.dropdown-item img { width: 20px; }
+.dropdown-item:hover { background: #f5f5f5; }
+
+/* ===== СХЕМА И ХАРАКТЕРИСТИКИ ===== */
+.size-schema-block {
+    background: #fff;
+    border-radius: 16px;
+    padding: 10px;
+}
+.dimensions-img {
+    width: 100%;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.dimensions-img:active { transform: scale(1.05); }
+.features-title {
+    font-size: 18px;
+    margin: 25px 0 10px;
+    font-weight: 700;
+}
+.spec-table {
+    width: 100%;
+    font-size: 14px;
+    border-collapse: collapse;
+}
+.spec-table tr {
+    border-bottom: 1px solid #eee;
+}
+.spec-table td {
+    padding: 8px 0;
+}
+.spec-table td:first-child {
+    width: 200px;
+    color: #666;
+    font-weight: 500;
+}
+@media (max-width: 600px) {
+    .spec-table td:first-child { width: 130px; }
+}
+
+/* ===== ПРАВАЯ ГАЛЕРЕЯ ===== */
+.right-gallery {
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    background: #fafafa;
+}
+#slider {
+    display: flex;
+    transition: transform 0.3s ease;
+}
+.slide {
+    flex: 0 0 100%;
+}
+.slide img {
+    width: 100%;
+    display: block;
+}
+.slider-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 15px 0 10px;
+}
+.dot {
+    width: 10px;
+    height: 10px;
+    background: #ccc;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.dot.active {
+    background: #628b35;
+}
+.slider-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0,0,0,0.5);
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 20px;
+    z-index: 10;
+}
+.slider-arrow-left { left: 10px; }
+.slider-arrow-right { right: 10px; }
+@media (min-width: 768px) {
+    .slider-arrow { display: block; }
+}
+@media (max-width: 767px) {
+    .slider-arrow { display: block; background: rgba(0,0,0,0.3); }
+}
+
+/* ===== ФУТЕР, МОДАЛКА, КОПИ-МОДАЛ ===== */
+footer {
+    margin-top: 60px;
+    background: #fff;
+    border-top: 1px solid #ddd;
+    padding: 40px 20px 20px;
+}
+.footer-top {
+    max-width: 1200px;
+    margin: 0 auto 30px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+/* остальные стили футера – как в catalog.css */
+.footer-left .logo { font-size: 28px; }
+.social-icons { display: flex; gap: 15px; }
+.vk-svg, .tg-svg { width: 38px; }
+.footer-nav { display: flex; gap: 40px; flex-wrap: wrap; }
+.footer-column ul { list-style: none; }
+.footer-column a { text-decoration: none; color: #777; }
+.footer-bottom {
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+    border-top: 1px solid #ddd;
+    padding-top: 15px;
+}
+.copy-modal {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 8px;
+    opacity: 0;
+    transition: 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+}
+.copy-modal.show { opacity: 1; }
+.modal {
+    display: none;
+    position: fixed;
+    left:0; top:0;
+    width:100%; height:100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    margin: 20% auto;
+    padding: 20px;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 12px;
+}
+.close {
+    float: right;
+    font-size: 28px;
+    cursor: pointer;
+}
+
+===== Файл: webpages\product_card.html =====
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>LUTOhayse – товар</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/product_card.css">
+</head>
+<body>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+                <nav class="menu__body menu__body-user">
+                    <ul class="menu__list">
+                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="page-container two-col-layout" id="productRoot">
+    <!-- Левый блок – будет заполняться динамически -->
+    <div class="left-info">
+        <aside class="product-panel">
+            <h1 class="product-title" id="productTitle">Загрузка...</h1>
+            <div id="copyModal" class="copy-modal">Текст скопирован!</div>
+
+            <div class="price-block">
+                <div class="price-current" id="priceCurrent">0 <sup>₽</sup></div>
+            </div>
+
+            <!-- Выпадающий список материалов -->
+            <div class="material-selector" id="materialSelectorBlock" style="display: none;">
+                <label for="materialSelect">Материал:</label>
+                <select id="materialSelect" class="material-select"></select>
+            </div>
+
+            <div class="copy">
+                <p id="productCode">---</p>
+                <img src="/media/interface/copy.png" alt="Копировать код">
+            </div>
+            <div class="copy-text">
+                <p>*Прежде чем перейти к заказу, скопируйте код позиции, нажав на значок копирования</p>
+            </div>
+
+            <div class="btn-cart-container">
+                <a href="#" class="btn-cart" id="btnAddToCart">Заказать</a>
+                <ul class="dropdown">
+                    <li><a href="https://vk.com/im/convo/-237299700" class="dropdown-item" target="_blank">Через чат-бот ВКонтакте<img src="/media/svg/vkontakte.svg" alt="VK"></a></li>
+                    <li><a href="https://wa.me/79997000550" class="dropdown-item" target="_blank">Через Whatsapp <img src="/media/svg/whatsapp.svg" alt="WhatsApp"></a></li>
+                    <li><a href="tel:+79997000550" class="dropdown-item">Позвоните нам (+7 999 700 05 50)<img src="/media/svg/phone.svg" alt="Phone"></a></li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Схема (size фото) и характеристики -->
+        <div class="size-schema-block">
+            <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
+            <div id="featuresContainer">
+                <!-- сюда будут подставлены основные и дополнительные характеристики -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка – основные фото (галерея) -->
+    <section class="right-gallery desktop-gallery" id="gallerySection">
+        <div class="gallery-wrapper" id="slider">
+            <!-- слайды будут добавлены JS -->
+        </div>
+        <div class="slider-dots" id="sliderDots"></div>
+    </section>
+</main>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div class="social-icons">
+                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank">
+                    <img src="/media/interface/vk.svg" alt="VK" class="vk-svg">
+                </a>
+                <a href="https://t.me/lutohayse" class="tg" target="_blank">
+                    <img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg">
+                </a>
+            </div>
+        </div>
+        <nav class="footer-nav">
+            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
+            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
+            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
+        </nav>
+    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+</footer>
+
+<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
+
+<script>
+    // Получаем код товара из URL (последняя часть пути)
+    const pathParts = window.location.pathname.split('/');
+    const productCode = pathParts[pathParts.length - 1];
+    if (!productCode) {
+        document.getElementById('productTitle').innerText = 'Ошибка: товар не указан';
+    } else {
+        loadProduct(productCode);
+    }
+
+    async function loadProduct(code) {
+        try {
+            const resp = await fetch(`/api/product/${code}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            renderProduct(data);
+        } catch (err) {
+            console.error(err);
+            document.getElementById('productTitle').innerText = 'Ошибка загрузки товара';
+        }
+    }
+
+    function renderProduct(data) {
+        const product = data.product;
+        const costs = data.costs || [];
+        const mainFeatures = data.main_features || [];
+        const extraFeatures = data.extra_features || [];
+        const photos = data.photos || { preview: null, size: null, main: [] };
+
+        // Заголовок, код
+        document.getElementById('productTitle').innerText = product.name;
+        const codeSpan = document.getElementById('productCode');
+        codeSpan.innerText = product.code;
+
+        // Материалы и цена
+        const materialSelect = document.getElementById('materialSelect');
+        const priceSpan = document.getElementById('priceCurrent');
+        const materialBlock = document.getElementById('materialSelectorBlock');
+        if (costs.length > 0) {
+            materialBlock.style.display = 'block';
+            materialSelect.innerHTML = '';
+            costs.forEach(c => {
+                const option = document.createElement('option');
+                option.value = c.cost;
+                option.textContent = `${c.name} — ${c.cost} ₽`;
+                option.dataset.id = c.id;
+                materialSelect.appendChild(option);
+            });
+            priceSpan.innerHTML = `${costs[0].cost} <sup>₽</sup>`;
+            materialSelect.addEventListener('change', (e) => {
+                priceSpan.innerHTML = `${e.target.value} <sup>₽</sup>`;
+            });
+        } else {
+            materialBlock.style.display = 'none';
+            priceSpan.innerHTML = `--- <sup>₽</sup>`;
+        }
+
+        // Схема (size фото)
+        const sizeImg = document.getElementById('sizeImage');
+        if (photos.size) {
+            sizeImg.src = photos.size;
+            sizeImg.alt = 'Габаритный чертёж';
+        } else {
+            sizeImg.style.display = 'none';
+        }
+
+        // Характеристики: сначала основные, потом дополнительные
+        const featuresContainer = document.getElementById('featuresContainer');
+        featuresContainer.innerHTML = '';
+
+        if (mainFeatures.length) {
+            const mainTitle = document.createElement('h3');
+            mainTitle.textContent = 'Основные характеристики';
+            mainTitle.className = 'features-title';
+            featuresContainer.appendChild(mainTitle);
+            const mainTable = createFeatureTable(mainFeatures);
+            featuresContainer.appendChild(mainTable);
+        }
+
+        if (extraFeatures.length) {
+            const extraTitle = document.createElement('h3');
+            extraTitle.textContent = 'Дополнительные характеристики';
+            extraTitle.className = 'features-title';
+            featuresContainer.appendChild(extraTitle);
+            const extraTable = createFeatureTable(extraFeatures, true);
+            featuresContainer.appendChild(extraTable);
+        }
+
+        // Галерея основных фото
+        const slider = document.getElementById('slider');
+        slider.innerHTML = '';
+        if (photos.main.length === 0 && !photos.preview) {
+            slider.innerHTML = '<div class="slide"><img src="/media/interface/placeholder.png" alt="Нет фото"></div>';
+        } else {
+            // сначала preview, если есть
+            const allMainPhotos = [...photos.main];
+            if (photos.preview && !allMainPhotos.includes(photos.preview)) {
+                allMainPhotos.unshift(photos.preview);
+            }
+            allMainPhotos.forEach(src => {
+                const slideDiv = document.createElement('div');
+                slideDiv.className = 'slide';
+                const img = document.createElement('img');
+                img.src = src;
+                img.alt = 'Фото товара';
+                slideDiv.appendChild(img);
+                slider.appendChild(slideDiv);
+            });
+        }
+        initSlider(); // инициализация слайдера после загрузки фото
+    }
+
+    function createFeatureTable(features, isExtra = false) {
+        const table = document.createElement('table');
+        table.className = 'spec-table';
+        const tbody = document.createElement('tbody');
+        features.forEach(f => {
+            const row = tbody.insertRow();
+            const cellName = row.insertCell(0);
+            const cellValue = row.insertCell(1);
+            cellName.textContent = isExtra ? f.name : f.name;
+            cellValue.textContent = f.value || '—';
+        });
+        table.appendChild(tbody);
+        return table;
+    }
+
+    // Копирование кода
+    const copyBlock = document.querySelector('.copy');
+    const copyModal = document.getElementById('copyModal');
+    copyBlock.addEventListener('click', () => {
+        const code = document.getElementById('productCode').innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            copyModal.textContent = `Код товара "${code}" скопирован!`;
+            copyModal.classList.add('show');
+            setTimeout(() => copyModal.classList.remove('show'), 2000);
+        });
+    });
+
+    // Выпадающее меню "Заказать"
+    const btnCartContainer = document.querySelector('.btn-cart-container');
+    const btnCart = document.getElementById('btnAddToCart');
+    btnCart.addEventListener('click', (e) => {
+        e.preventDefault();
+        btnCartContainer.classList.toggle('open');
+    });
+    document.addEventListener('click', (e) => {
+        if (!btnCartContainer.contains(e.target)) btnCartContainer.classList.remove('open');
+    });
+
+    // Модальное окно "О нас"
+    const modal = document.getElementById('aboutModal');
+    const aboutLink = document.getElementById('aboutLink');
+    const closeSpan = document.querySelector('.close');
+    aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
+    closeSpan.onclick = () => modal.style.display = 'none';
+    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+    // Слайдер (адаптивный, с точками и стрелками)
+    function initSlider() {
+        const slider = document.getElementById('slider');
+        if (!slider) return;
+        const slides = Array.from(slider.querySelectorAll('.slide'));
+        if (slides.length <= 1) return;
+
+        let current = 0;
+        const dotsContainer = document.getElementById('sliderDots');
+        dotsContainer.innerHTML = '';
+        slides.forEach((_, i) => {
+            const dot = document.createElement('div');
+            dot.className = 'dot' + (i === 0 ? ' active' : '');
+            dot.addEventListener('click', () => goToSlide(i));
+            dotsContainer.appendChild(dot);
+        });
+
+        function updateSlides() {
+            const shift = -current * 100;
+            slider.style.transform = `translateX(${shift}%)`;
+            document.querySelectorAll('.dot').forEach((d, i) => {
+                d.classList.toggle('active', i === current);
+            });
+        }
+
+        function goToSlide(index) {
+            current = Math.max(0, Math.min(index, slides.length - 1));
+            updateSlides();
+        }
+
+        function next() { goToSlide(current + 1); }
+        function prev() { goToSlide(current - 1); }
+
+        // Стрелки
+        let leftArrow = document.querySelector('.slider-arrow-left');
+        let rightArrow = document.querySelector('.slider-arrow-right');
+        if (!leftArrow) {
+            const gallery = document.querySelector('.right-gallery');
+            leftArrow = document.createElement('button');
+            rightArrow = document.createElement('button');
+            leftArrow.className = 'slider-arrow slider-arrow-left';
+            rightArrow.className = 'slider-arrow slider-arrow-right';
+            leftArrow.innerHTML = '←';
+            rightArrow.innerHTML = '→';
+            gallery.appendChild(leftArrow);
+            gallery.appendChild(rightArrow);
+        }
+        leftArrow.onclick = () => { prev(); };
+        rightArrow.onclick = () => { next(); };
+
+        // Свайп для мобильных
+        let startX = 0;
+        slider.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; });
+        slider.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - startX;
+            if (Math.abs(dx) > 50) {
+                if (dx < 0) next(); else prev();
+            }
+        });
+
+        slider.style.display = 'flex';
+        slider.style.transition = 'transform 0.3s ease';
+        updateSlides();
+    }
+    // Если фото загружаются позже, повторный вызов после рендера
+    window.addEventListener('load', () => {
+        if (document.getElementById('slider').children.length) initSlider();
+    });
 </script>
 </body>
 </html>

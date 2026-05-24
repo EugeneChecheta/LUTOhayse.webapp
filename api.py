@@ -3,15 +3,16 @@ import os
 from flask import Flask, jsonify, send_from_directory, abort, request
 from flask_cors import CORS
 import glob
+from pathlib import Path
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
 
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
 def get_db_config():
-    config_path = os.path.join(os.path.dirname(__file__), 'telegram_admin_panel', 'config_db.txt')
+    config_path = Path(__file__).parent / 'telegram_admin_panel' / 'config_db.txt'
     config = {}
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         for line in f:
             if '=' in line:
                 k, v = line.strip().split('=', 1)
@@ -120,7 +121,7 @@ def products():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-# ----- НОВЫЙ API: детальная информация о товаре по коду -----
+# ----- API: детальная информация о товаре по коду -----
 @app.route('/api/product/<code>')
 def product_details(code):
     try:
@@ -182,21 +183,20 @@ def product_details(code):
         conn.close()
 
         # 5. Фотографии (сканируем папку media/products/<code>/)
-        media_dir = os.path.join(os.path.dirname(__file__), 'media', 'products', code)
+        media_dir = Path(__file__).parent / 'media' / 'products' / code
         photos = {'preview': None, 'size': None, 'main': []}
-        if os.path.isdir(media_dir):
+        if media_dir.is_dir():
             # preview
-            preview_path = os.path.join(media_dir, 'preview.webp')
-            if os.path.exists(preview_path):
+            preview_path = media_dir / 'preview.webp'
+            if preview_path.exists():
                 photos['preview'] = f'/media/products/{code}/preview.webp'
             # size (схема)
-            size_path = os.path.join(media_dir, 'size.webp')
-            if os.path.exists(size_path):
+            size_path = media_dir / 'size.webp'
+            if size_path.exists():
                 photos['size'] = f'/media/products/{code}/size.webp'
             # основные фото (числовые имена)
-            main_files = glob.glob(os.path.join(media_dir, '[0-9]*.webp'))
-            main_files.sort(key=lambda x: int(os.path.basename(x).split('.')[0]))
-            photos['main'] = [f'/media/products/{code}/{os.path.basename(f)}' for f in main_files]
+            main_files = sorted(media_dir.glob('[0-9]*.webp'), key=lambda p: int(p.stem))
+            photos['main'] = [f'/media/products/{code}/{p.name}' for p in main_files]
 
         # Формируем ответ
         result = {
@@ -218,7 +218,6 @@ def index():
 
 @app.route('/product/<code>')
 def product_page(code):
-    # Просто отдаём HTML‑страницу, данные подтянутся через API
     return send_from_directory('webpages', 'product_card.html')
 
 @app.route('/catalog.css')
@@ -231,6 +230,7 @@ def product_card_css():
 
 @app.route('/media/<path:filename>')
 def media_files(filename):
+    # filename может содержать слеши, send_from_directory сам преобразует их в путь ОС
     return send_from_directory('media', filename)
 
 @app.route('/favicon.ico')
@@ -239,7 +239,8 @@ def favicon():
 
 # ----- Запуск -----
 if __name__ == '__main__':
-    os.makedirs('webpages', exist_ok=True)
-    os.makedirs('media/products', exist_ok=True)
-    os.makedirs('media/interface', exist_ok=True)
+    # Создаём необходимые папки, если их нет
+    Path('webpages').mkdir(exist_ok=True)
+    Path('media/products').mkdir(parents=True, exist_ok=True)
+    Path('media/interface').mkdir(parents=True, exist_ok=True)
     app.run(host='0.0.0.0', port=5000, debug=True)

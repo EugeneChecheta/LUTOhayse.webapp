@@ -71,7 +71,7 @@
         <div class="size-schema-block">
             <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
             <div id="featuresContainer">
-                <!-- сюда будут подставлены основные и дополнительные характеристики -->
+                <!-- сюда будут подставлены основные, дополнительные и статические характеристики -->
             </div>
         </div>
     </div>
@@ -173,11 +173,12 @@
         if (photos.size) {
             sizeImg.src = photos.size;
             sizeImg.alt = 'Габаритный чертёж';
+            sizeImg.style.display = 'block';
         } else {
             sizeImg.style.display = 'none';
         }
 
-        // Характеристики: сначала основные, потом дополнительные
+        // Характеристики: основные + дополнительные + статические
         const featuresContainer = document.getElementById('featuresContainer');
         featuresContainer.innerHTML = '';
 
@@ -199,13 +200,15 @@
             featuresContainer.appendChild(extraTable);
         }
 
+        // ВСЕГДА добавляем статические характеристики (универсальные для всех товаров)
+        appendStaticFeatures(featuresContainer);
+
         // Галерея основных фото
         const slider = document.getElementById('slider');
         slider.innerHTML = '';
         if (photos.main.length === 0 && !photos.preview) {
             slider.innerHTML = '<div class="slide"><img src="/media/interface/placeholder.png" alt="Нет фото"></div>';
         } else {
-            // сначала preview, если есть
             const allMainPhotos = [...photos.main];
             if (photos.preview && !allMainPhotos.includes(photos.preview)) {
                 allMainPhotos.unshift(photos.preview);
@@ -220,7 +223,7 @@
                 slider.appendChild(slideDiv);
             });
         }
-        initSlider(); // инициализация слайдера после загрузки фото
+        initSlider();
     }
 
     function createFeatureTable(features, isExtra = false) {
@@ -236,6 +239,46 @@
         });
         table.appendChild(tbody);
         return table;
+    }
+
+    // Функция добавления статических универсальных характеристик
+    function appendStaticFeatures(container) {
+        const staticFeatures = [
+            { name: "Срок производства", value: "21 день" },
+            { name: "Требуется сборка", value: "Нет" },
+            { name: "Декларация до", value: "10.09.2030" },
+            { name: "Декларация от", value: "11.09.2025" },
+            { name: "Декларация", value: "ЕАЭС N RU Д-RU.PA08.B.13389/25" },
+            { name: "Материал общий", value: "ППУ ST, Синтепон, Спанбонд, Холлофайбер, Брус сосна просушенная в\\с, березовая фанера в\\с, термовойлок" },
+            { name: "Материал каркаса", value: "Сосновый брус/березовая фанера" },
+            { name: "Страна производства", value: "Россия" },
+            { name: "Бренд", value: "LUTOhayse" },
+            { name: "Мягкость сиденья", value: "Средняя" },
+            { name: "Наполнитель сиденья", value: "Пенополиуретан" },
+            { name: "Наполнение подушек", value: "Крошка ППУ" },
+            { name: "Тип сборки", value: "Не требует сборки, только установить фурнитуру" },
+            { name: "Наличие ножек", value: "Да" },
+            { name: "Наполнение", value: "ППУ" },
+            { name: "Особенности", value: "Ортопедические свойства; на ножках" }
+        ];
+
+        const staticTitle = document.createElement('h3');
+        staticTitle.textContent = 'Общие характеристики';
+        staticTitle.className = 'features-title';
+        container.appendChild(staticTitle);
+
+        const staticTable = document.createElement('table');
+        staticTable.className = 'spec-table';
+        const tbody = document.createElement('tbody');
+        staticFeatures.forEach(f => {
+            const row = tbody.insertRow();
+            const cellName = row.insertCell(0);
+            const cellValue = row.insertCell(1);
+            cellName.textContent = f.name;
+            cellValue.textContent = f.value;
+        });
+        staticTable.appendChild(tbody);
+        container.appendChild(staticTable);
     }
 
     // Копирование кода
@@ -333,6 +376,7 @@
         slider.style.transition = 'transform 0.3s ease';
         updateSlides();
     }
+
     // Если фото загружаются позже, повторный вызов после рендера
     window.addEventListener('load', () => {
         if (document.getElementById('slider').children.length) initSlider();
