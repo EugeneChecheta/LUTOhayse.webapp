@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>LUTOhayse – товар</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/product_card.css">
+</head>
+<body>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+                <nav class="menu__body menu__body-user">
+                    <ul class="menu__list">
+                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="page-container two-col-layout" id="productRoot">
+    <!-- Левый блок – будет заполняться динамически -->
+    <div class="left-info">
+        <aside class="product-panel">
+            <h1 class="product-title" id="productTitle">Загрузка...</h1>
+            <div id="copyModal" class="copy-modal">Текст скопирован!</div>
+
+            <div class="price-block">
+                <div class="price-current" id="priceCurrent">0 <sup>₽</sup></div>
+            </div>
+
+            <!-- Выпадающий список материалов -->
+            <div class="material-selector" id="materialSelectorBlock" style="display: none;">
+                <label for="materialSelect">Материал:</label>
+                <select id="materialSelect" class="material-select"></select>
+            </div>
+
+            <div class="copy">
+                <p id="productCode">---</p>
+                <img src="/media/interface/copy.png" alt="Копировать код">
+            </div>
+            <div class="copy-text">
+                <p>*Прежде чем перейти к заказу, скопируйте код позиции, нажав на значок копирования</p>
+            </div>
+
+            <div class="btn-cart-container">
+                <a href="#" class="btn-cart" id="btnAddToCart">Заказать</a>
+                <ul class="dropdown">
+                    <li><a href="https://vk.com/im/convo/-237299700" class="dropdown-item" target="_blank">Через чат-бот ВКонтакте<img src="/media/svg/vkontakte.svg" alt="VK"></a></li>
+                    <li><a href="https://wa.me/79997000550" class="dropdown-item" target="_blank">Через Whatsapp <img src="/media/svg/whatsapp.svg" alt="WhatsApp"></a></li>
+                    <li><a href="tel:+79997000550" class="dropdown-item">Позвоните нам (+7 999 700 05 50)<img src="/media/svg/phone.svg" alt="Phone"></a></li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Схема (size фото) и характеристики -->
+        <div class="size-schema-block">
+            <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
+            <div id="featuresContainer">
+                <!-- сюда будут подставлены основные и дополнительные характеристики -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка – основные фото (галерея) -->
+    <section class="right-gallery desktop-gallery" id="gallerySection">
+        <div class="gallery-wrapper" id="slider">
+            <!-- слайды будут добавлены JS -->
+        </div>
+        <div class="slider-dots" id="sliderDots"></div>
+    </section>
+</main>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div class="social-icons">
+                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank">
+                    <img src="/media/interface/vk.svg" alt="VK" class="vk-svg">
+                </a>
+                <a href="https://t.me/lutohayse" class="tg" target="_blank">
+                    <img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg">
+                </a>
+            </div>
+        </div>
+        <nav class="footer-nav">
+            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
+            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
+            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
+        </nav>
+    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+</footer>
+
+<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
+
+<script>
+    // Получаем код товара из URL (последняя часть пути)
+    const pathParts = window.location.pathname.split('/');
+    const productCode = pathParts[pathParts.length - 1];
+    if (!productCode) {
+        document.getElementById('productTitle').innerText = 'Ошибка: товар не указан';
+    } else {
+        loadProduct(productCode);
+    }
+
+    async function loadProduct(code) {
+        try {
+            const resp = await fetch(`/api/product/${code}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            renderProduct(data);
+        } catch (err) {
+            console.error(err);
+            document.getElementById('productTitle').innerText = 'Ошибка загрузки товара';
+        }
+    }
+
+    function renderProduct(data) {
+        const product = data.product;
+        const costs = data.costs || [];
+        const mainFeatures = data.main_features || [];
+        const extraFeatures = data.extra_features || [];
+        const photos = data.photos || { preview: null, size: null, main: [] };
+
+        // Заголовок, код
+        document.getElementById('productTitle').innerText = product.name;
+        const codeSpan = document.getElementById('productCode');
+        codeSpan.innerText = product.code;
+
+        // Материалы и цена
+        const materialSelect = document.getElementById('materialSelect');
+        const priceSpan = document.getElementById('priceCurrent');
+        const materialBlock = document.getElementById('materialSelectorBlock');
+        if (costs.length > 0) {
+            materialBlock.style.display = 'block';
+            materialSelect.innerHTML = '';
+            costs.forEach(c => {
+                const option = document.createElement('option');
+                option.value = c.cost;
+                option.textContent = `${c.name} — ${c.cost} ₽`;
+                option.dataset.id = c.id;
+                materialSelect.appendChild(option);
+            });
+            priceSpan.innerHTML = `${costs[0].cost} <sup>₽</sup>`;
+            materialSelect.addEventListener('change', (e) => {
+                priceSpan.innerHTML = `${e.target.value} <sup>₽</sup>`;
+            });
+        } else {
+            materialBlock.style.display = 'none';
+            priceSpan.innerHTML = `--- <sup>₽</sup>`;
+        }
+
+        // Схема (size фото)
+        const sizeImg = document.getElementById('sizeImage');
+        if (photos.size) {
+            sizeImg.src = photos.size;
+            sizeImg.alt = 'Габаритный чертёж';
+        } else {
+            sizeImg.style.display = 'none';
+        }
+
+        // Характеристики: сначала основные, потом дополнительные
+        const featuresContainer = document.getElementById('featuresContainer');
+        featuresContainer.innerHTML = '';
+
+        if (mainFeatures.length) {
+            const mainTitle = document.createElement('h3');
+            mainTitle.textContent = 'Основные характеристики';
+            mainTitle.className = 'features-title';
+            featuresContainer.appendChild(mainTitle);
+            const mainTable = createFeatureTable(mainFeatures);
+            featuresContainer.appendChild(mainTable);
+        }
+
+        if (extraFeatures.length) {
+            const extraTitle = document.createElement('h3');
+            extraTitle.textContent = 'Дополнительные характеристики';
+            extraTitle.className = 'features-title';
+            featuresContainer.appendChild(extraTitle);
+            const extraTable = createFeatureTable(extraFeatures, true);
+            featuresContainer.appendChild(extraTable);
+        }
+
+        // Галерея основных фото
+        const slider = document.getElementById('slider');
+        slider.innerHTML = '';
+        if (photos.main.length === 0 && !photos.preview) {
+            slider.innerHTML = '<div class="slide"><img src="/media/interface/placeholder.png" alt="Нет фото"></div>';
+        } else {
+            // сначала preview, если есть
+            const allMainPhotos = [...photos.main];
+            if (photos.preview && !allMainPhotos.includes(photos.preview)) {
+                allMainPhotos.unshift(photos.preview);
+            }
+            allMainPhotos.forEach(src => {
+                const slideDiv = document.createElement('div');
+                slideDiv.className = 'slide';
+                const img = document.createElement('img');
+                img.src = src;
+                img.alt = 'Фото товара';
+                slideDiv.appendChild(img);
+                slider.appendChild(slideDiv);
+            });
+        }
+        initSlider(); // инициализация слайдера после загрузки фото
+    }
+
+    function createFeatureTable(features, isExtra = false) {
+        const table = document.createElement('table');
+        table.className = 'spec-table';
+        const tbody = document.createElement('tbody');
+        features.forEach(f => {
+            const row = tbody.insertRow();
+            const cellName = row.insertCell(0);
+            const cellValue = row.insertCell(1);
+            cellName.textContent = isExtra ? f.name : f.name;
+            cellValue.textContent = f.value || '—';
+        });
+        table.appendChild(tbody);
+        return table;
+    }
+
+    // Копирование кода
+    const copyBlock = document.querySelector('.copy');
+    const copyModal = document.getElementById('copyModal');
+    copyBlock.addEventListener('click', () => {
+        const code = document.getElementById('productCode').innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            copyModal.textContent = `Код товара "${code}" скопирован!`;
+            copyModal.classList.add('show');
+            setTimeout(() => copyModal.classList.remove('show'), 2000);
+        });
+    });
+
+    // Выпадающее меню "Заказать"
+    const btnCartContainer = document.querySelector('.btn-cart-container');
+    const btnCart = document.getElementById('btnAddToCart');
+    btnCart.addEventListener('click', (e) => {
+        e.preventDefault();
+        btnCartContainer.classList.toggle('open');
+    });
+    document.addEventListener('click', (e) => {
+        if (!btnCartContainer.contains(e.target)) btnCartContainer.classList.remove('open');
+    });
+
+    // Модальное окно "О нас"
+    const modal = document.getElementById('aboutModal');
+    const aboutLink = document.getElementById('aboutLink');
+    const closeSpan = document.querySelector('.close');
+    aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
+    closeSpan.onclick = () => modal.style.display = 'none';
+    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+    // Слайдер (адаптивный, с точками и стрелками)
+    function initSlider() {
+        const slider = document.getElementById('slider');
+        if (!slider) return;
+        const slides = Array.from(slider.querySelectorAll('.slide'));
+        if (slides.length <= 1) return;
+
+        let current = 0;
+        const dotsContainer = document.getElementById('sliderDots');
+        dotsContainer.innerHTML = '';
+        slides.forEach((_, i) => {
+            const dot = document.createElement('div');
+            dot.className = 'dot' + (i === 0 ? ' active' : '');
+            dot.addEventListener('click', () => goToSlide(i));
+            dotsContainer.appendChild(dot);
+        });
+
+        function updateSlides() {
+            const shift = -current * 100;
+            slider.style.transform = `translateX(${shift}%)`;
+            document.querySelectorAll('.dot').forEach((d, i) => {
+                d.classList.toggle('active', i === current);
+            });
+        }
+
+        function goToSlide(index) {
+            current = Math.max(0, Math.min(index, slides.length - 1));
+            updateSlides();
+        }
+
+        function next() { goToSlide(current + 1); }
+        function prev() { goToSlide(current - 1); }
+
+        // Стрелки
+        let leftArrow = document.querySelector('.slider-arrow-left');
+        let rightArrow = document.querySelector('.slider-arrow-right');
+        if (!leftArrow) {
+            const gallery = document.querySelector('.right-gallery');
+            leftArrow = document.createElement('button');
+            rightArrow = document.createElement('button');
+            leftArrow.className = 'slider-arrow slider-arrow-left';
+            rightArrow.className = 'slider-arrow slider-arrow-right';
+            leftArrow.innerHTML = '←';
+            rightArrow.innerHTML = '→';
+            gallery.appendChild(leftArrow);
+            gallery.appendChild(rightArrow);
+        }
+        leftArrow.onclick = () => { prev(); };
+        rightArrow.onclick = () => { next(); };
+
+        // Свайп для мобильных
+        let startX = 0;
+        slider.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; });
+        slider.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - startX;
+            if (Math.abs(dx) > 50) {
+                if (dx < 0) next(); else prev();
+            }
+        });
+
+        slider.style.display = 'flex';
+        slider.style.transition = 'transform 0.3s ease';
+        updateSlides();
+    }
+    // Если фото загружаются позже, повторный вызов после рендера
+    window.addEventListener('load', () => {
+        if (document.getElementById('slider').children.length) initSlider();
+    });
+</script>
+</body>
+</html>

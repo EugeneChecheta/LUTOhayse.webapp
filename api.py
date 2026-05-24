@@ -2,6 +2,7 @@ import psycopg2
 import os
 from flask import Flask, jsonify, send_from_directory, abort, request
 from flask_cors import CORS
+import glob
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -49,7 +50,6 @@ def flags():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Исключаем служебный флаг "Скрытый" из списка для фильтрации
         cur.execute("SELECT id, name FROM flags WHERE lower(name) != 'скрытый' ORDER BY id;")
         rows = cur.fetchall()
         cur.close()
@@ -59,18 +59,16 @@ def flags():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-# ----- API: список товаров с фильтрацией по типу и флагам, исключая скрытые -----
+# ----- API: список товаров с фильтрацией -----
 @app.route('/api/products')
 def products():
     try:
-        # Получаем параметры фильтрации
         type_id = request.args.get('type_id', type=int)
         flag_ids = request.args.getlist('flag_ids', type=int)
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Подзапрос для исключения товаров с флагом "Скрытый" (регистронезависимо)
         hidden_flag_condition = """
             NOT EXISTS (
                 SELECT 1 FROM flags_for_products fp
@@ -80,7 +78,6 @@ def products():
         """
 
         if flag_ids:
-            # Формируем запрос: товары, у которых есть ВСЕ указанные флаги, и нет скрытого флага
             query = f"""
                 SELECT p.code, p.name
                 FROM products p
@@ -102,7 +99,6 @@ def products():
             params.append(len(flag_ids))
             cur.execute(query, params)
         else:
-            # Без фильтра по флагам, но исключаем скрытые товары
             query = f"""
                 SELECT code, name
                 FROM products p
@@ -124,14 +120,114 @@ def products():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+# ----- НОВЫЙ API: детальная информация о товаре по коду -----
+@app.route('/api/product/<code>')
+def product_details(code):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Основные данные товара + тип
+        cur.execute("""
+            SELECT p.id, p.code, p.name, p.products_type_id, pt.name as type_name
+            FROM products p
+            JOIN products_type pt ON p.products_type_id = pt.id
+            WHERE p.code = %s
+        """, (code,))
+        product_row = cur.fetchone()
+        if not product_row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Product not found'}), 404
+
+        prod_id = product_row[0]
+        product_data = {
+            'id': prod_id,
+            'code': product_row[1],
+            'name': product_row[2],
+            'products_type_id': product_row[3],
+            'type_name': product_row[4]
+        }
+
+        # 2. Стоимости по типам материалов
+        cur.execute("""
+            SELECT mt.id, mt.name, mfp.cost
+            FROM materials_for_products mfp
+            JOIN materials_type mt ON mfp.materials_type_id = mt.id
+            WHERE mfp.products_id = %s
+            ORDER BY mt.id
+        """, (prod_id,))
+        costs = [{'id': r[0], 'name': r[1], 'cost': r[2]} for r in cur.fetchall()]
+
+        # 3. Основные характеристики (глобальные + значения товара)
+        cur.execute("""
+            SELECT mft.id, mft.name, COALESCE(pmf.value, '') as value
+            FROM main_features_types mft
+            LEFT JOIN product_main_features pmf 
+                ON mft.id = pmf.feature_id AND pmf.products_id = %s
+            ORDER BY mft.id
+        """, (prod_id,))
+        main_features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
+
+        # 4. Дополнительные характеристики
+        cur.execute("""
+            SELECT id, name, value
+            FROM product_extra_features
+            WHERE products_id = %s
+            ORDER BY id
+        """, (prod_id,))
+        extra_features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        # 5. Фотографии (сканируем папку media/products/<code>/)
+        media_dir = os.path.join(os.path.dirname(__file__), 'media', 'products', code)
+        photos = {'preview': None, 'size': None, 'main': []}
+        if os.path.isdir(media_dir):
+            # preview
+            preview_path = os.path.join(media_dir, 'preview.webp')
+            if os.path.exists(preview_path):
+                photos['preview'] = f'/media/products/{code}/preview.webp'
+            # size (схема)
+            size_path = os.path.join(media_dir, 'size.webp')
+            if os.path.exists(size_path):
+                photos['size'] = f'/media/products/{code}/size.webp'
+            # основные фото (числовые имена)
+            main_files = glob.glob(os.path.join(media_dir, '[0-9]*.webp'))
+            main_files.sort(key=lambda x: int(os.path.basename(x).split('.')[0]))
+            photos['main'] = [f'/media/products/{code}/{os.path.basename(f)}' for f in main_files]
+
+        # Формируем ответ
+        result = {
+            'product': product_data,
+            'costs': costs,
+            'main_features': main_features,
+            'extra_features': extra_features,
+            'photos': photos
+        }
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"API /api/product/<code> error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 # ----- Статические файлы -----
 @app.route('/')
 def index():
     return send_from_directory('webpages', 'catalog.html')
 
+@app.route('/product/<code>')
+def product_page(code):
+    # Просто отдаём HTML‑страницу, данные подтянутся через API
+    return send_from_directory('webpages', 'product_card.html')
+
 @app.route('/catalog.css')
 def catalog_css():
     return send_from_directory('webpages', 'catalog.css')
+
+@app.route('/product_card.css')
+def product_card_css():
+    return send_from_directory('webpages', 'product_card.css')
 
 @app.route('/media/<path:filename>')
 def media_files(filename):
