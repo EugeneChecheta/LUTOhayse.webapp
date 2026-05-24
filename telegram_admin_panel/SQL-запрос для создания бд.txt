@@ -1,753 +1,141 @@
 -- #########################################################################
--- #
 -- # LUTO SHOP DATABASE
--- # PostgreSQL Production Structure
--- #
--- # Назначение:
--- # База данных интернет-магазина / Telegram WebApp
--- #
--- # Возможности:
--- # - хранение товаров
--- # - типы товаров
--- # - материалы
--- # - типы материалов
--- # - флаги и фильтры
--- # - стоимость изготовления
--- # - поддержка API
--- # - поддержка Telegram Bot
--- # - поддержка WebApp
--- #
--- #########################################################################
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # УДАЛЕНИЕ ТАБЛИЦ
--- #
--- # CASCADE автоматически удаляет:
--- # - внешние ключи
--- # - зависимости
--- # - индексы
--- #
--- # Используется для полного пересоздания структуры.
--- #
--- #########################################################################
+-- # PostgreSQL Production Structure (расширенная)
 -- #########################################################################
 
 DROP TABLE IF EXISTS flags_for_products CASCADE;
 DROP TABLE IF EXISTS materials_for_products CASCADE;
+DROP TABLE IF EXISTS product_main_features CASCADE;
+DROP TABLE IF EXISTS product_extra_features CASCADE;
 
 DROP TABLE IF EXISTS flags CASCADE;
 DROP TABLE IF EXISTS materials CASCADE;
 DROP TABLE IF EXISTS materials_type CASCADE;
+DROP TABLE IF EXISTS main_features_types CASCADE;
 
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS products_type CASCADE;
 
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: products_type
--- #
--- # Назначение:
--- # Хранит типы товаров.
--- #
--- # Примеры:
--- # - 3D-модель
--- # - Услуга
--- # - Физический товар
--- # - Подписка
--- #
--- # Связи:
--- # products_type (1) ---> (N) products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== products_type ====================
 CREATE TABLE products_type (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    --
-    -- GENERATED ALWAYS AS IDENTITY:
-    -- PostgreSQL автоматически увеличивает ID.
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- Название типа товара
-    --
-    -- UNIQUE:
-    -- запрещает дублирование.
-    -- =====================================================
-
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
-
-COMMENT ON TABLE products_type IS
-'Типы товаров интернет-магазина';
-
-COMMENT ON COLUMN products_type.id IS
-'Уникальный ID типа товара';
-
-COMMENT ON COLUMN products_type.name IS
-'Название типа товара';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: products
--- #
--- # Назначение:
--- # Главная таблица системы.
--- #
--- # Хранит:
--- # - товары
--- # - услуги
--- # - цифровые продукты
--- #
--- # Связи:
--- #
--- # products_type (1) ---> (N) products
--- #
--- # products (1) ---> (N) flags_for_products
--- #
--- # products (1) ---> (N) materials_for_products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== products ====================
 CREATE TABLE products (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- Код товара
-    --
-    -- Используется:
-    -- - API
-    -- - Telegram Bot
-    -- - WebApp
-    -- - внешними скриптами
-    --
-    -- UNIQUE:
-    -- запрещает одинаковые коды.
-    -- =====================================================
-
     code VARCHAR(100) NOT NULL UNIQUE,
-
-
-    -- =====================================================
-    -- Название товара
-    -- =====================================================
-
     name VARCHAR(200) NOT NULL,
-
-
-    -- =====================================================
-    -- Тип товара
-    --
-    -- FOREIGN KEY:
-    -- связь с products_type
-    -- =====================================================
-
     products_type_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- FOREIGN KEY
-    --
-    -- ON DELETE RESTRICT:
-    -- запрещает удалить тип товара,
-    -- если к нему привязаны товары.
-    -- =====================================================
-
     CONSTRAINT fk_products_type
         FOREIGN KEY (products_type_id)
         REFERENCES products_type(id)
         ON DELETE RESTRICT
 );
 
-
-COMMENT ON TABLE products IS
-'Главная таблица товаров и услуг';
-
-COMMENT ON COLUMN products.id IS
-'Уникальный ID товара';
-
-COMMENT ON COLUMN products.code IS
-'Уникальный код товара для API и Telegram Bot';
-
-COMMENT ON COLUMN products.name IS
-'Название товара';
-
-COMMENT ON COLUMN products.products_type_id IS
-'Тип товара';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: flags
--- #
--- # Назначение:
--- # Хранит флаги и фильтры товаров.
--- #
--- # Примеры:
--- # - Новинка
--- # - Хит
--- # - Скидка
--- # - Premium
--- #
--- # Связи:
--- #
--- # flags (1) ---> (N) flags_for_products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== flags ====================
 CREATE TABLE flags (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- Название флага
-    --
-    -- UNIQUE:
-    -- запрещает дублирование.
-    -- =====================================================
-
     name VARCHAR(50) NOT NULL UNIQUE
 );
 
-
-COMMENT ON TABLE flags IS
-'Флаги и фильтры товаров';
-
-COMMENT ON COLUMN flags.id IS
-'Уникальный ID флага';
-
-COMMENT ON COLUMN flags.name IS
-'Название флага';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: flags_for_products
--- #
--- # MANY TO MANY
--- #
--- # Назначение:
--- # Связывает товары и флаги.
--- #
--- # Логика:
--- #
--- # Один товар:
--- # - может иметь много флагов
--- #
--- # Один флаг:
--- # - может принадлежать многим товарам
--- #
--- # Связи:
--- #
--- # products (1) ---> (N) flags_for_products
--- #
--- # flags (1) ---> (N) flags_for_products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== flags_for_products ====================
 CREATE TABLE flags_for_products (
-
-    -- =====================================================
-    -- ID товара
-    -- =====================================================
-
     products_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- ID флага
-    -- =====================================================
-
     flags_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- COMPOSITE PRIMARY KEY
-    --
-    -- Запрещает:
-    --
-    -- product 1 + flag 1
-    -- product 1 + flag 1
-    --
-    -- =====================================================
-
     PRIMARY KEY (products_id, flags_id),
-
-
-    -- =====================================================
-    -- FOREIGN KEY -> products
-    --
-    -- ON DELETE CASCADE:
-    -- если удалить товар,
-    -- связи удаляются автоматически.
-    -- =====================================================
-
     CONSTRAINT fk_ffp_product
         FOREIGN KEY (products_id)
         REFERENCES products(id)
         ON DELETE CASCADE,
-
-
-    -- =====================================================
-    -- FOREIGN KEY -> flags
-    --
-    -- ON DELETE CASCADE:
-    -- если удалить флаг,
-    -- связи удаляются автоматически.
-    -- =====================================================
-
     CONSTRAINT fk_ffp_flag
         FOREIGN KEY (flags_id)
         REFERENCES flags(id)
         ON DELETE CASCADE
 );
 
-
-COMMENT ON TABLE flags_for_products IS
-'Связь MANY TO MANY между товарами и флагами';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: materials_type
--- #
--- # Назначение:
--- # Хранит категории материалов.
--- #
--- # Примеры:
--- # - PLA
--- # - PETG
--- # - ABS
--- #
--- # Связи:
--- #
--- # materials_type (1) ---> (N) materials
--- #
--- # materials_type (1) ---> (N) materials_for_products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== materials_type ====================
 CREATE TABLE materials_type (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- Название типа материала
-    -- =====================================================
-
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
-
-COMMENT ON TABLE materials_type IS
-'Типы материалов';
-
-COMMENT ON COLUMN materials_type.id IS
-'Уникальный ID типа материала';
-
-COMMENT ON COLUMN materials_type.name IS
-'Название типа материала';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: materials
--- #
--- # Назначение:
--- # Хранит конкретные материалы.
--- #
--- # Примеры:
--- # - PLA_RED
--- # - PLA_WHITE
--- # - PETG_BLACK
--- #
--- # Связи:
--- #
--- # materials_type (1) ---> (N) materials
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== materials ====================
 CREATE TABLE materials (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- Код материала
-    --
-    -- Используется:
-    -- - API
-    -- - Telegram Bot
-    -- - WebApp
-    -- =====================================================
-
     code VARCHAR(100) NOT NULL UNIQUE,
-
-
-    -- =====================================================
-    -- Название материала
-    -- =====================================================
-
     name VARCHAR(200) NOT NULL,
-
-
-    -- =====================================================
-    -- Тип материала
-    -- =====================================================
-
     materials_type_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- FOREIGN KEY -> materials_type
-    --
-    -- ON DELETE RESTRICT:
-    -- запрещает удалить тип материала,
-    -- если есть материалы.
-    -- =====================================================
-
     CONSTRAINT fk_materials_type
         FOREIGN KEY (materials_type_id)
         REFERENCES materials_type(id)
         ON DELETE RESTRICT
 );
 
-
-COMMENT ON TABLE materials IS
-'Конкретные материалы';
-
-COMMENT ON COLUMN materials.id IS
-'Уникальный ID материала';
-
-COMMENT ON COLUMN materials.code IS
-'Код материала';
-
-COMMENT ON COLUMN materials.name IS
-'Название материала';
-
-COMMENT ON COLUMN materials.materials_type_id IS
-'Тип материала';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ТАБЛИЦА: materials_for_products
--- #
--- # MANY TO MANY + BUSINESS DATA
--- #
--- # Назначение:
--- # Хранит:
--- # - доступные материалы
--- # - стоимость изготовления
--- #
--- # Пример:
--- #
--- # Товар:
--- # Корпус Arduino
--- #
--- # PLA  -> 500₽
--- # PETG -> 900₽
--- #
--- # Связи:
--- #
--- # products (1) ---> (N) materials_for_products
--- #
--- # materials_type (1) ---> (N) materials_for_products
--- #
--- #########################################################################
--- #########################################################################
-
+-- ==================== materials_for_products ====================
 CREATE TABLE materials_for_products (
-
-    -- =====================================================
-    -- PRIMARY KEY
-    -- =====================================================
-
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-
-    -- =====================================================
-    -- ID товара
-    -- =====================================================
-
     products_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- ID типа материала
-    -- =====================================================
-
     materials_type_id INTEGER NOT NULL,
-
-
-    -- =====================================================
-    -- Стоимость изготовления
-    --
-    -- CHECK:
-    -- запрещает отрицательные значения.
-    -- =====================================================
-
     cost INTEGER NOT NULL CHECK (cost >= 0),
-
-
-    -- =====================================================
-    -- FOREIGN KEY -> products
-    --
-    -- ON DELETE CASCADE:
-    -- при удалении товара
-    -- автоматически удаляются материалы.
-    -- =====================================================
-
     CONSTRAINT fk_mfp_product
         FOREIGN KEY (products_id)
         REFERENCES products(id)
         ON DELETE CASCADE,
-
-
-    -- =====================================================
-    -- FOREIGN KEY -> materials_type
-    --
-    -- ON DELETE RESTRICT:
-    -- нельзя удалить тип материала,
-    -- если он используется.
-    -- =====================================================
-
     CONSTRAINT fk_mfp_material_type
         FOREIGN KEY (materials_type_id)
         REFERENCES materials_type(id)
         ON DELETE RESTRICT,
-
-
-    -- =====================================================
-    -- UNIQUE
-    --
-    -- Запрещает:
-    --
-    -- product 1 + PLA
-    -- product 1 + PLA
-    --
-    -- =====================================================
-
-    CONSTRAINT uq_product_material_type
-        UNIQUE(products_id, materials_type_id)
+    CONSTRAINT uq_product_material_type UNIQUE(products_id, materials_type_id)
 );
 
+-- ==================== НОВЫЕ ТАБЛИЦЫ ====================
+-- Типы основных характеристик (справочник)
+CREATE TABLE main_features_types (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
 
-COMMENT ON TABLE materials_for_products IS
-'Доступные материалы для товаров и стоимость изготовления';
+-- Значения основных характеристик для товаров
+CREATE TABLE product_main_features (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    products_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_pmf_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_pmf_feature
+        FOREIGN KEY (feature_id)
+        REFERENCES main_features_types(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_product_feature UNIQUE(products_id, feature_id)
+);
 
-COMMENT ON COLUMN materials_for_products.id IS
-'Уникальный ID связи';
+-- Дополнительные характеристики (пары "название" -> "значение")
+CREATE TABLE product_extra_features (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    products_id INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_pef_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE
+);
 
-COMMENT ON COLUMN materials_for_products.products_id IS
-'ID товара';
+-- ==================== ИНДЕКСЫ ====================
+CREATE INDEX idx_products_code ON products(code);
+CREATE INDEX idx_products_type ON products(products_type_id);
+CREATE INDEX idx_materials_code ON materials(code);
+CREATE INDEX idx_flags_name ON flags(name);
+CREATE INDEX idx_materials_type_name ON materials_type(name);
+CREATE INDEX idx_mfp_product ON materials_for_products(products_id);
+CREATE INDEX idx_ffp_product ON flags_for_products(products_id);
 
-COMMENT ON COLUMN materials_for_products.materials_type_id IS
-'ID типа материала';
-
-COMMENT ON COLUMN materials_for_products.cost IS
-'Стоимость изготовления';
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ИНДЕКСЫ
--- #
--- # Назначение:
--- # Ускоряют:
--- # - SELECT
--- # - JOIN
--- # - WHERE
--- # - фильтрацию
--- # - API
--- #
--- #########################################################################
--- #########################################################################
-
-CREATE INDEX idx_products_code
-    ON products(code);
-
-CREATE INDEX idx_products_type
-    ON products(products_type_id);
-
-CREATE INDEX idx_materials_code
-    ON materials(code);
-
-CREATE INDEX idx_flags_name
-    ON flags(name);
-
-CREATE INDEX idx_materials_type_name
-    ON materials_type(name);
-
-CREATE INDEX idx_mfp_product
-    ON materials_for_products(products_id);
-
-CREATE INDEX idx_ffp_product
-    ON flags_for_products(products_id);
-
-
-
--- #########################################################################
--- #########################################################################
--- #
--- # ПРИМЕРЫ РАБОТЫ БАЗЫ
--- #
--- #########################################################################
--- #########################################################################
-
-
--- =====================================================
--- СОЗДАНИЕ ТИПА ТОВАРА
--- =====================================================
-
--- INSERT INTO products_type (name)
--- VALUES ('3D-модель');
-
-
--- =====================================================
--- СОЗДАНИЕ ТОВАРА
--- =====================================================
-
--- INSERT INTO products (
---     code,
---     name,
---     products_type_id
--- )
--- VALUES (
---     'MODEL001',
---     'Корпус Arduino',
---     1
--- );
-
-
--- =====================================================
--- СОЗДАНИЕ ФЛАГА
--- =====================================================
-
--- INSERT INTO flags (name)
--- VALUES ('Новинка');
-
-
--- =====================================================
--- ПРИВЯЗКА ФЛАГА К ТОВАРУ
--- =====================================================
-
--- INSERT INTO flags_for_products (
---     products_id,
---     flags_id
--- )
--- VALUES (
---     1,
---     1
--- );
-
-
--- =====================================================
--- СОЗДАНИЕ ТИПА МАТЕРИАЛА
--- =====================================================
-
--- INSERT INTO materials_type (name)
--- VALUES ('PLA');
-
-
--- =====================================================
--- СОЗДАНИЕ МАТЕРИАЛА
--- =====================================================
-
--- INSERT INTO materials (
---     code,
---     name,
---     materials_type_id
--- )
--- VALUES (
---     'PLA_RED',
---     'Красный PLA',
---     1
--- );
-
-
--- =====================================================
--- ПРИВЯЗКА МАТЕРИАЛА К ТОВАРУ
--- =====================================================
-
--- INSERT INTO materials_for_products (
---     products_id,
---     materials_type_id,
---     cost
--- )
--- VALUES (
---     1,
---     1,
---     500
--- );
-
-
-
--- #########################################################################
--- #
--- # ИТОГ
--- #
--- # После выполнения скрипта база данных будет:
--- #
--- # - нормализована
--- # - готова к production
--- # - готова к Telegram WebApp
--- # - готова к REST API
--- # - готова к масштабированию
--- # - защищена от дублирования
--- # - оптимизирована индексами
--- #
--- #########################################################################
+-- Новые индексы
+CREATE INDEX idx_main_features_types_name ON main_features_types(name);
+CREATE INDEX idx_pmf_product ON product_main_features(products_id);
+CREATE INDEX idx_pef_product ON product_extra_features(products_id);
