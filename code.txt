@@ -915,9 +915,11 @@ async def edit_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_flag_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, flag_id, page = query.data.split("_")
-    flag_id = int(flag_id)
-    page = int(page)
+    # callback_data: flag_del_confirm_{flag_id}_{page}
+    parts = query.data.split("_")
+    # parts: ['flag', 'del', 'confirm', flag_id, page]
+    flag_id = int(parts[3])
+    page = int(parts[4])
     context.user_data["del_flag_id"] = flag_id
     context.user_data["del_flag_page"] = page
     flags, _ = await db.get_flags(0, 1000)
@@ -1009,9 +1011,11 @@ async def edit_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_prodtype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, type_id, page = query.data.split("_")
-    type_id = int(type_id)
-    page = int(page)
+    # callback_data: prodtype_del_confirm_{type_id}_{page}
+    parts = query.data.split("_")
+    # parts: ['prodtype', 'del', 'confirm', type_id, page]
+    type_id = int(parts[3])
+    page = int(parts[4])
     context.user_data["del_prodtype_id"] = type_id
     context.user_data["del_prodtype_page"] = page
     types, _ = await db.get_product_types(0, 1000)
@@ -1103,9 +1107,11 @@ async def edit_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_mattype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, mt_id, page = query.data.split("_")
-    mt_id = int(mt_id)
-    page = int(page)
+    # callback_data: mattype_del_confirm_{mt_id}_{page}
+    parts = query.data.split("_")
+    # parts: ['mattype', 'del', 'confirm', mt_id, page]
+    mt_id = int(parts[3])
+    page = int(parts[4])
     context.user_data["del_mattype_id"] = mt_id
     context.user_data["del_mattype_page"] = page
     types, _ = await db.get_material_types(0, 1000)
@@ -1197,9 +1203,11 @@ async def edit_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_mainfeat_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, feat_id, page = query.data.split("_")
-    feat_id = int(feat_id)
-    page = int(page)
+    # callback_data: mainfeat_del_confirm_{feat_id}_{page}
+    parts = query.data.split("_")
+    # parts: ['mainfeat', 'del', 'confirm', feat_id, page]
+    feat_id = int(parts[3])
+    page = int(parts[4])
     context.user_data["del_mainfeat_id"] = feat_id
     context.user_data["del_mainfeat_page"] = page
     features, _ = await db.get_main_feature_types(0, 1000)
@@ -1456,9 +1464,12 @@ async def product_main_features_menu(update: Update, context: ContextTypes.DEFAU
 async def product_main_feature_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, feature_id, prod_id = query.data.split("_")
-    context.user_data["edit_mainfeat_feature_id"] = int(feature_id)
-    context.user_data["edit_mainfeat_prod_id"] = int(prod_id)
+    # callback data: prod_mainfeat_edit_{feature_id}_{prod_id}
+    parts = query.data.split("_")
+    feature_id = int(parts[3])   # после prod_mainfeat_edit
+    prod_id = int(parts[4])
+    context.user_data["edit_mainfeat_feature_id"] = feature_id
+    context.user_data["edit_mainfeat_prod_id"] = prod_id
     await query.edit_message_text("Введите новое значение для этой характеристики:", reply_markup=CANCEL_KEYBOARD)
     return PROD_MAIN_FEATURE_EDIT
 
@@ -1538,9 +1549,11 @@ async def product_extra_save_new(update: Update, context: ContextTypes.DEFAULT_T
 async def product_extra_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, feat_id, prod_id = query.data.split("_")
-    context.user_data["edit_extra_id"] = int(feat_id)
-    context.user_data["edit_extra_prod_id"] = int(prod_id)
+    parts = query.data.split("_")
+    feat_id = int(parts[3])
+    prod_id = int(parts[4])
+    context.user_data["edit_extra_id"] = feat_id
+    context.user_data["edit_extra_prod_id"] = prod_id
     keyboard = [
         [InlineKeyboardButton("✏️ Название", callback_data="extra_edit_name")],
         [InlineKeyboardButton("✏️ Значение", callback_data="extra_edit_value")],
@@ -1605,21 +1618,22 @@ async def product_extra_update_value(update: Update, context: ContextTypes.DEFAU
 async def product_extra_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, feat_id, prod_id = query.data.split("_")
-    await db.delete_product_extra_feature(int(feat_id))
-    await query.edit_message_text("✅ Характеристика удалена.")
+    parts = query.data.split("_")
+    feat_id = int(parts[3])
+    prod_id = int(parts[4])
+    await db.delete_product_extra_feature(feat_id)
     # обновить меню
-    features = await db.get_product_extra_features(int(prod_id))
+    features = await db.get_product_extra_features(prod_id)
     text = "*Дополнительные характеристики*\n\n"
     keyboard = []
     for f in features:
         text += f"• **{f['name']}**: {f['value']}\n"
         keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{int(prod_id)}"),
-            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{int(prod_id)}")
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{prod_id}"),
+            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{prod_id}")
         ])
-    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{int(prod_id)}")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{int(prod_id)}")])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return PROD_EXTRA_FEATURES
 
