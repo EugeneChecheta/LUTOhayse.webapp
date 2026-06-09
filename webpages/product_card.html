@@ -33,35 +33,27 @@
 </header>
 
 <main class="page-container two-col-layout" id="productRoot">
-    <!-- Левый блок – будет заполняться динамически -->
+    <!-- Левый блок -->
     <div class="left-info">
         <aside class="product-panel">
             <h1 class="product-title" id="productTitle">Загрузка...</h1>
-            <div id="copyModal" class="copy-modal">Текст скопирован!</div>
 
             <div class="price-block">
-                <div class="price-current" id="priceCurrent">0 <sup>₽</sup></div>
+                <div class="price-current" id="priceCurrent">--- <sup>₽</sup></div>
             </div>
 
-            <!-- Выпадающий список материалов -->
-            <div class="material-selector" id="materialSelectorBlock" style="display: none;">
-                <label for="materialSelect">Материал:</label>
-                <select id="materialSelect" class="material-select"></select>
+            <!-- Блок выбранного материала -->
+            <div class="selected-material" id="selectedMaterialBlock">
+                <span id="selectedMaterialText">Материал не выбран</span>
+                <button id="chooseMaterialBtn" class="choose-material-btn">Выбрать материал</button>
             </div>
 
-            <div class="copy">
-                <p id="productCode">---</p>
-                <img src="/media/interface/copy.png" alt="Копировать код">
-            </div>
-            <div class="copy-text">
-                <p>*Прежде чем перейти к заказу, скопируйте код позиции, нажав на значок копирования</p>
-            </div>
-
-            <div class="btn-cart-container">
+            <!-- Кнопка заказа (активируется после выбора материала) -->
+            <div class="btn-cart-container" id="orderBtnContainer" style="display: none;">
                 <a href="#" class="btn-cart" id="btnAddToCart">Заказать</a>
                 <ul class="dropdown">
-                    <li><a href="https://vk.com/im/convo/-237299700" class="dropdown-item" target="_blank">Через чат-бот ВКонтакте<img src="/media/svg/vkontakte.svg" alt="VK"></a></li>
-                    <li><a href="https://wa.me/79997000550" class="dropdown-item" target="_blank">Через Whatsapp <img src="/media/svg/whatsapp.svg" alt="WhatsApp"></a></li>
+                    <li><a href="#" id="vkOrderLink" class="dropdown-item" target="_blank">Через чат-бот ВКонтакте<img src="/media/svg/vkontakte.svg" alt="VK"></a></li>
+                    <li><a href="#" id="waOrderLink" class="dropdown-item" target="_blank">Через Whatsapp <img src="/media/svg/whatsapp.svg" alt="WhatsApp"></a></li>
                     <li><a href="tel:+79997000550" class="dropdown-item">Позвоните нам (+7 999 700 05 50)<img src="/media/svg/phone.svg" alt="Phone"></a></li>
                 </ul>
             </div>
@@ -70,20 +62,26 @@
         <!-- Схема (size фото) и характеристики -->
         <div class="size-schema-block">
             <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
-            <div id="featuresContainer">
-                <!-- сюда будут подставлены основные, дополнительные и статические характеристики -->
-            </div>
+            <div id="featuresContainer"></div>
         </div>
     </div>
 
     <!-- Правая колонка – основные фото (галерея) -->
     <section class="right-gallery desktop-gallery" id="gallerySection">
-        <div class="gallery-wrapper" id="slider">
-            <!-- слайды будут добавлены JS -->
-        </div>
+        <div class="gallery-wrapper" id="slider"></div>
         <div class="slider-dots" id="sliderDots"></div>
     </section>
 </main>
+
+<!-- Модальное окно выбора материалов -->
+<div id="materialModal" class="modal material-modal">
+    <div class="modal-content material-modal-content">
+        <span class="close-modal">&times;</span>
+        <h2>Выберите материал</h2>
+        <div class="tabs" id="materialTabs"></div>
+        <div id="materialsList" class="materials-container"></div>
+    </div>
+</div>
 
 <footer>
     <div class="footer-top">
@@ -112,7 +110,11 @@
 <div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
 <script>
-    // Получаем код товара из URL (последняя часть пути)
+    // ---------- Глобальные переменные ----------
+    let productData = null;        // полные данные товара (из API)
+    let selectedMaterial = null;   // выбранный материал { id, code, name, type_id, type_name, photo_url }
+
+    // Получаем код товара из URL
     const pathParts = window.location.pathname.split('/');
     const productCode = pathParts[pathParts.length - 1];
     if (!productCode) {
@@ -121,18 +123,20 @@
         loadProduct(productCode);
     }
 
+    // ---------- Загрузка данных товара ----------
     async function loadProduct(code) {
         try {
             const resp = await fetch(`/api/product/${code}`);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            renderProduct(data);
+            productData = await resp.json();
+            renderProduct(productData);
         } catch (err) {
             console.error(err);
             document.getElementById('productTitle').innerText = 'Ошибка загрузки товара';
         }
     }
 
+    // ---------- Отрисовка товара ----------
     function renderProduct(data) {
         const product = data.product;
         const costs = data.costs || [];
@@ -140,33 +144,9 @@
         const extraFeatures = data.extra_features || [];
         const photos = data.photos || { preview: null, size: null, main: [] };
 
-        // Заголовок, код
         document.getElementById('productTitle').innerText = product.name;
-        const codeSpan = document.getElementById('productCode');
-        codeSpan.innerText = product.code;
-
-        // Материалы и цена
-        const materialSelect = document.getElementById('materialSelect');
-        const priceSpan = document.getElementById('priceCurrent');
-        const materialBlock = document.getElementById('materialSelectorBlock');
-        if (costs.length > 0) {
-            materialBlock.style.display = 'block';
-            materialSelect.innerHTML = '';
-            costs.forEach(c => {
-                const option = document.createElement('option');
-                option.value = c.cost;
-                option.textContent = `${c.name} — ${c.cost} ₽`;
-                option.dataset.id = c.id;
-                materialSelect.appendChild(option);
-            });
-            priceSpan.innerHTML = `${costs[0].cost} <sup>₽</sup>`;
-            materialSelect.addEventListener('change', (e) => {
-                priceSpan.innerHTML = `${e.target.value} <sup>₽</sup>`;
-            });
-        } else {
-            materialBlock.style.display = 'none';
-            priceSpan.innerHTML = `--- <sup>₽</sup>`;
-        }
+        // Цена пока не выбрана
+        document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
 
         // Схема (size фото)
         const sizeImg = document.getElementById('sizeImage');
@@ -178,7 +158,7 @@
             sizeImg.style.display = 'none';
         }
 
-        // Характеристики: основные + дополнительные + статические
+        // Характеристики
         const featuresContainer = document.getElementById('featuresContainer');
         featuresContainer.innerHTML = '';
 
@@ -200,7 +180,6 @@
             featuresContainer.appendChild(extraTable);
         }
 
-        // ВСЕГДА добавляем статические характеристики (универсальные для всех товаров)
         appendStaticFeatures(featuresContainer);
 
         // Галерея основных фото
@@ -224,6 +203,9 @@
             });
         }
         initSlider();
+
+        // Сохраняем costs в глобальной переменной для доступа при выборе материала
+        window.productCosts = costs; // массив {id, name, cost} где id - materials_type_id
     }
 
     function createFeatureTable(features, isExtra = false) {
@@ -241,7 +223,6 @@
         return table;
     }
 
-    // Функция добавления статических универсальных характеристик
     function appendStaticFeatures(container) {
         const staticFeatures = [
             { name: "Срок производства", value: "21 день" },
@@ -281,38 +262,7 @@
         container.appendChild(staticTable);
     }
 
-    // Копирование кода
-    const copyBlock = document.querySelector('.copy');
-    const copyModal = document.getElementById('copyModal');
-    copyBlock.addEventListener('click', () => {
-        const code = document.getElementById('productCode').innerText;
-        navigator.clipboard.writeText(code).then(() => {
-            copyModal.textContent = `Код товара "${code}" скопирован!`;
-            copyModal.classList.add('show');
-            setTimeout(() => copyModal.classList.remove('show'), 2000);
-        });
-    });
-
-    // Выпадающее меню "Заказать"
-    const btnCartContainer = document.querySelector('.btn-cart-container');
-    const btnCart = document.getElementById('btnAddToCart');
-    btnCart.addEventListener('click', (e) => {
-        e.preventDefault();
-        btnCartContainer.classList.toggle('open');
-    });
-    document.addEventListener('click', (e) => {
-        if (!btnCartContainer.contains(e.target)) btnCartContainer.classList.remove('open');
-    });
-
-    // Модальное окно "О нас"
-    const modal = document.getElementById('aboutModal');
-    const aboutLink = document.getElementById('aboutLink');
-    const closeSpan = document.querySelector('.close');
-    aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
-    closeSpan.onclick = () => modal.style.display = 'none';
-    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
-
-    // Слайдер (адаптивный, с точками и стрелками)
+    // ---------- Слайдер ----------
     function initSlider() {
         const slider = document.getElementById('slider');
         if (!slider) return;
@@ -345,7 +295,6 @@
         function next() { goToSlide(current + 1); }
         function prev() { goToSlide(current - 1); }
 
-        // Стрелки
         let leftArrow = document.querySelector('.slider-arrow-left');
         let rightArrow = document.querySelector('.slider-arrow-right');
         if (!leftArrow) {
@@ -362,7 +311,6 @@
         leftArrow.onclick = () => { prev(); };
         rightArrow.onclick = () => { next(); };
 
-        // Свайп для мобильных
         let startX = 0;
         slider.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; });
         slider.addEventListener('touchend', (e) => {
@@ -377,10 +325,177 @@
         updateSlides();
     }
 
-    // Если фото загружаются позже, повторный вызов после рендера
-    window.addEventListener('load', () => {
-        if (document.getElementById('slider').children.length) initSlider();
+    // ---------- Работа с модальным окном выбора материалов ----------
+    const modal = document.getElementById('materialModal');
+    const chooseBtn = document.getElementById('chooseMaterialBtn');
+    const closeModalSpan = document.querySelector('.close-modal');
+
+    // Загружаем все материалы из API
+    let allMaterials = [];
+    async function loadMaterials() {
+        try {
+            const resp = await fetch('/api/materials');
+            if (!resp.ok) throw new Error('Ошибка загрузки материалов');
+            allMaterials = await resp.json();
+        } catch (err) {
+            console.error(err);
+            allMaterials = [];
+        }
+    }
+
+    // Открытие модалки с отрисовкой табов и карточек
+    async function openMaterialModal() {
+        if (allMaterials.length === 0) {
+            await loadMaterials();
+        }
+        renderMaterialTabsAndGrid();
+        modal.style.display = 'block';
+    }
+
+    function renderMaterialTabsAndGrid() {
+        // Группируем материалы по типам
+        const groups = {};
+        allMaterials.forEach(mat => {
+            if (!groups[mat.materials_type_id]) {
+                groups[mat.materials_type_id] = {
+                    type_id: mat.materials_type_id,
+                    type_name: mat.type_name,
+                    items: []
+                };
+            }
+            groups[mat.materials_type_id].items.push(mat);
+        });
+        const typeIds = Object.keys(groups).map(Number);
+
+        // Создаём табы
+        const tabsContainer = document.getElementById('materialTabs');
+        tabsContainer.innerHTML = '';
+        typeIds.forEach((typeId, idx) => {
+            const tab = document.createElement('div');
+            tab.className = 'tab' + (idx === 0 ? ' active' : '');
+            tab.dataset.type = typeId;
+            tab.textContent = groups[typeId].type_name;
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('#materialTabs .tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                renderMaterialGrid(groups[typeId].items);
+            });
+            tabsContainer.appendChild(tab);
+        });
+
+        // Показываем первую группу
+        if (typeIds.length) {
+            renderMaterialGrid(groups[typeIds[0]].items);
+        } else {
+            document.getElementById('materialsList').innerHTML = '<p>Нет доступных материалов</p>';
+        }
+    }
+
+    function renderMaterialGrid(materials) {
+        const container = document.getElementById('materialsList');
+        container.innerHTML = '';
+        materials.forEach(mat => {
+            const card = document.createElement('div');
+            card.className = 'material-card';
+            card.dataset.id = mat.id;
+            card.dataset.code = mat.code;
+            card.dataset.name = mat.name;
+            card.dataset.typeId = mat.materials_type_id;
+            card.dataset.typeName = mat.type_name;
+            card.dataset.photo = mat.photo_url || '/media/interface/placeholder.png';
+
+            const img = document.createElement('img');
+            img.src = card.dataset.photo;
+            img.alt = mat.name;
+            img.onerror = () => { img.src = '/media/interface/placeholder.png'; };
+
+            const nameSpan = document.createElement('div');
+            nameSpan.className = 'material-name';
+            nameSpan.textContent = mat.name;
+
+            const codeSpan = document.createElement('div');
+            codeSpan.className = 'material-code';
+            codeSpan.textContent = `Код: ${mat.code}`;
+
+            card.appendChild(img);
+            card.appendChild(nameSpan);
+            card.appendChild(codeSpan);
+
+            card.addEventListener('click', () => selectMaterial(mat));
+            container.appendChild(card);
+        });
+    }
+
+    function selectMaterial(mat) {
+        selectedMaterial = mat;
+        // Обновляем отображение в основном блоке
+        const selectedText = document.getElementById('selectedMaterialText');
+        selectedText.innerHTML = `Выбран материал: <strong>${mat.name}</strong> (${mat.code})`;
+
+        // Обновляем цену: ищем в productData.costs запись с materials_type_id == mat.materials_type_id
+        if (window.productCosts && window.productCosts.length) {
+            const costEntry = window.productCosts.find(c => c.id === mat.materials_type_id);
+            if (costEntry) {
+                document.getElementById('priceCurrent').innerHTML = `${costEntry.cost} <sup>₽</sup>`;
+            } else {
+                document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
+            }
+        } else {
+            document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
+        }
+
+        // Показываем кнопку заказа
+        document.getElementById('orderBtnContainer').style.display = 'block';
+
+        // Закрываем модалку
+        modal.style.display = 'none';
+    }
+
+    chooseBtn.addEventListener('click', openMaterialModal);
+    if (closeModalSpan) {
+        closeModalSpan.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+    }
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
     });
+
+    // ---------- Кнопка заказа (выпадающее меню с параметрами) ----------
+    const orderContainer = document.getElementById('orderBtnContainer');
+    const btnCart = document.getElementById('btnAddToCart');
+    const vkLink = document.getElementById('vkOrderLink');
+    const waLink = document.getElementById('waOrderLink');
+
+    function updateOrderLinks() {
+        if (!selectedMaterial || !productData) return;
+        const product = productData.product;
+        const message = `Здравствуйте! Хочу заказать товар:\nКод товара: ${product.code}\nНазвание: ${product.name}\nВыбранный материал: ${selectedMaterial.name} (${selectedMaterial.code})`;
+        const encodedMsg = encodeURIComponent(message);
+        vkLink.href = `https://vk.com/im/convo/-237299700?text=${encodedMsg}`;
+        waLink.href = `https://wa.me/79997000550?text=${encodedMsg}`;
+    }
+
+    btnCart.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (selectedMaterial) {
+            orderContainer.classList.toggle('open');
+            updateOrderLinks();
+        } else {
+            alert('Сначала выберите материал!');
+        }
+    });
+    document.addEventListener('click', (e) => {
+        if (!orderContainer.contains(e.target)) orderContainer.classList.remove('open');
+    });
+
+    // ---------- Модалка "О нас" ----------
+    const aboutModal = document.getElementById('aboutModal');
+    const aboutLink = document.getElementById('aboutLink');
+    const closeAboutSpan = aboutModal.querySelector('.close');
+    aboutLink.onclick = (e) => { e.preventDefault(); aboutModal.style.display = 'block'; };
+    closeAboutSpan.onclick = () => aboutModal.style.display = 'none';
+    window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
 </script>
 </body>
 </html>

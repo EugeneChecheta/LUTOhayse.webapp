@@ -211,6 +211,42 @@ def product_details(code):
         app.logger.error(f"API /api/product/<code> error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+# ========= НОВЫЙ ЭНДПОИНТ: список материалов =========
+@app.route('/api/materials')
+def get_materials():
+    """Возвращает все материалы с их типами и URL фото."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name
+            FROM materials m
+            JOIN materials_type mt ON m.materials_type_id = mt.id
+            ORDER BY mt.id, m.id
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        materials = []
+        media_base = Path(__file__).parent / 'media' / 'materials'
+        for row in rows:
+            code = row[1]
+            photo_path = media_base / f"{code}.webp"
+            photo_url = f"/media/materials/{code}.webp" if photo_path.exists() else None
+            materials.append({
+                'id': row[0],
+                'code': code,
+                'name': row[2],
+                'materials_type_id': row[3],
+                'type_name': row[4],
+                'photo_url': photo_url
+            })
+        return jsonify(materials)
+    except Exception as e:
+        app.logger.error(f"API /api/materials error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 # ----- Статические файлы -----
 @app.route('/')
 def index():
@@ -230,7 +266,6 @@ def product_card_css():
 
 @app.route('/media/<path:filename>')
 def media_files(filename):
-    # filename может содержать слеши, send_from_directory сам преобразует их в путь ОС
     return send_from_directory('media', filename)
 
 @app.route('/favicon.ico')
@@ -239,8 +274,8 @@ def favicon():
 
 # ----- Запуск -----
 if __name__ == '__main__':
-    # Создаём необходимые папки, если их нет
     Path('webpages').mkdir(exist_ok=True)
     Path('media/products').mkdir(parents=True, exist_ok=True)
+    Path('media/materials').mkdir(parents=True, exist_ok=True)
     Path('media/interface').mkdir(parents=True, exist_ok=True)
     app.run(host='0.0.0.0', port=5000, debug=True)
