@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL).
-Добавлена поддержка фотографий товаров (preview, основные фото, size).
-Добавлена поддержка основных характеристик (справочник) и дополнительных характеристик (произвольные пары "название-значение").
-
-Функционал:
-- Управление товарами (CRUD)
-- Управление флагами / тегами
-- Управление типами товаров
-- Управление типами материалов
-- Управление основными характеристиками (глобальный справочник)
-- Для каждого товара: установка значений основных характеристик, добавление/редактирование/удаление дополнительных характеристик
-- Загрузка/удаление/просмотр фото (preview, size, основные)
-- Поиск товаров по ключевому слову, по типу и флагам
-- Пагинация всех списков
+Добавлена поддержка материалов: CRUD, фотографии (одно фото на материал).
 """
 
 import asyncio
@@ -21,7 +9,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Optional, Tuple
 import io
 
 import asyncpg
@@ -70,7 +58,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния разговоров (добавлены новые)
+# Состояния разговоров (расширены для материалов)
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
@@ -98,24 +86,35 @@ logger = logging.getLogger(__name__)
     PHOTO_DELETE_SELECT,
     SEARCH_TYPE_SELECT,
     SEARCH_FLAGS_SELECT,
-    # Новые состояния для основных характеристик (справочник)
     ADD_MAIN_FEATURE_NAME,
     EDIT_MAIN_FEATURE_NAME,
     DELETE_MAIN_FEATURE_CONFIRM,
-    # Состояния для основных характеристик товара
     PROD_MAIN_FEATURES,
     PROD_MAIN_FEATURE_EDIT,
-    # Состояния для дополнительных характеристик товара
     PROD_EXTRA_FEATURES,
     PROD_EXTRA_FEATURE_ADD_NAME,
     PROD_EXTRA_FEATURE_ADD_VALUE,
     PROD_EXTRA_FEATURE_EDIT_NAME,
     PROD_EXTRA_FEATURE_EDIT_VALUE,
-) = range(36)
+    # Новые состояния для управления материалами
+    ADD_MAT_TYPE_SELECT,
+    ADD_MAT_CODE,
+    ADD_MAT_NAME,
+    ADD_MAT_PHOTO,
+    EDIT_MAT_SELECT,
+    EDIT_MAT_NAME,
+    EDIT_MAT_CODE,
+    EDIT_MAT_TYPE,
+    EDIT_MAT_PHOTO,
+    DELETE_MAT_CONFIRM,
+) = range(46)
 
 # Путь к папке media
-MEDIA_BASE = Path(__file__).parent.parent / "media" / "products"
-MEDIA_BASE.mkdir(parents=True, exist_ok=True)
+MEDIA_BASE = Path(__file__).parent.parent / "media"
+PRODUCTS_MEDIA = MEDIA_BASE / "products"
+MATERIALS_MEDIA = MEDIA_BASE / "materials"
+PRODUCTS_MEDIA.mkdir(parents=True, exist_ok=True)
+MATERIALS_MEDIA.mkdir(parents=True, exist_ok=True)
 
 # ------------------------- Декоратор проверки администратора -------------------------
 def admin_only(func):
@@ -131,7 +130,7 @@ def admin_only(func):
         return await func(update, context)
     return wrapper
 
-# ------------------------- Работа с базой данных (расширена) -------------------------
+# ------------------------- Работа с базой данных -------------------------
 class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -442,10 +441,71 @@ class Database:
                 row = await conn.fetchrow("SELECT id FROM products WHERE code = $1", code)
             return row is None
 
+    # ---------- Методы для материалов ----------
+    async def get_materials(self, offset=0, limit=10):
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM materials")
+            rows = await conn.fetch(
+                "SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name "
+                "FROM materials m "
+                "JOIN materials_type mt ON m.materials_type_id = mt.id "
+                "ORDER BY m.id OFFSET $1 LIMIT $2",
+                offset, limit
+            )
+            return [dict(r) for r in rows], total
+
+    async def get_material_by_id(self, material_id: int):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name "
+                "FROM materials m "
+                "JOIN materials_type mt ON m.materials_type_id = mt.id "
+                "WHERE m.id = $1", material_id
+            )
+            return dict(row) if row else None
+
+    async def get_material_by_code(self, code: str):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, code, name, materials_type_id FROM materials WHERE code = $1", code
+            )
+            return dict(row) if row else None
+
+    async def create_material(self, code: str, name: str, material_type_id: int) -> int:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                "INSERT INTO materials (code, name, materials_type_id) VALUES ($1, $2, $3) RETURNING id",
+                code, name, material_type_id
+            )
+
+    async def update_material(self, material_id: int, code: str, name: str, material_type_id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE materials SET code = $1, name = $2, materials_type_id = $3 WHERE id = $4",
+                code, name, material_type_id, material_id
+            )
+
+    async def delete_material(self, material_id: int):
+        async with self.pool.acquire() as conn:
+            # Проверяем, используется ли материал в materials_for_products
+            used = await conn.fetchval("SELECT 1 FROM materials_for_products WHERE materials_type_id = "
+                                       "(SELECT materials_type_id FROM materials WHERE id = $1) LIMIT 1", material_id)
+            if used:
+                raise ValueError("Материал используется в товарах, сначала удалите связи.")
+            await conn.execute("DELETE FROM materials WHERE id = $1", material_id)
+
+    async def is_material_code_unique(self, code: str, exclude_id: Optional[int] = None) -> bool:
+        async with self.pool.acquire() as conn:
+            if exclude_id:
+                row = await conn.fetchrow("SELECT id FROM materials WHERE code = $1 AND id != $2", code, exclude_id)
+            else:
+                row = await conn.fetchrow("SELECT id FROM materials WHERE code = $1", code)
+            return row is None
+
 db_pool = None
 db = None
 
-# ------------------------- Работа с фото (без изменений) -------------------------
+# ------------------------- Работа с фото товаров -------------------------
 async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
     for attempt in range(max_retries):
         try:
@@ -458,7 +518,7 @@ async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
     return None
 
 def get_product_media_dir(product_code: str) -> Path:
-    return MEDIA_BASE / product_code
+    return PRODUCTS_MEDIA / product_code
 
 def ensure_media_dir(product_code: str) -> Path:
     path = get_product_media_dir(product_code)
@@ -562,6 +622,44 @@ async def send_product_photos(chat_id: int, product_code: str, context: ContextT
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
 
+# ------------------------- Работа с фото материалов -------------------------
+def get_material_photo_path(material_code: str) -> Path:
+    return MATERIALS_MEDIA / f"{material_code}.webp"
+
+async def save_material_photo(file, material_code: str) -> bool:
+    try:
+        photo_bytes = await file.download_as_bytearray()
+        img = Image.open(io.BytesIO(photo_bytes))
+        if img.mode in ('RGBA', 'LA', 'P'):
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+        filepath = get_material_photo_path(material_code)
+        img.save(filepath, 'WEBP', quality=85)
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения фото материала: {e}")
+        return False
+
+async def delete_material_photo(material_code: str):
+    path = get_material_photo_path(material_code)
+    if path.exists():
+        path.unlink()
+
+async def move_material_photo(old_code: str, new_code: str):
+    old_path = get_material_photo_path(old_code)
+    new_path = get_material_photo_path(new_code)
+    if old_path.exists():
+        old_path.rename(new_path)
+
+async def send_material_photo(chat_id: int, material_code: str, context: ContextTypes.DEFAULT_TYPE):
+    path = get_material_photo_path(material_code)
+    if path.exists():
+        with open(path, 'rb') as f:
+            await context.bot.send_photo(chat_id=chat_id, photo=f)
+    else:
+        await context.bot.send_message(chat_id=chat_id, text="❌ У материала нет фото.")
+
 # ------------------------- Вспомогательные функции -------------------------
 CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
 
@@ -584,13 +682,14 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new
         [InlineKeyboardButton("🏷️ Флаги / Теги", callback_data="menu_flags")],
         [InlineKeyboardButton("📂 Типы товаров", callback_data="menu_prod_types")],
         [InlineKeyboardButton("🧱 Типы материалов", callback_data="menu_mat_types")],
+        [InlineKeyboardButton("🧰 Материалы", callback_data="menu_materials")],
         [InlineKeyboardButton("📊 Основные характеристики", callback_data="menu_main_features")],
         [InlineKeyboardButton("🔍 Поиск товаров", callback_data="menu_search")],
     ]
     await send_or_edit_message(update, context, "🔧 *Главное меню*",
                                InlineKeyboardMarkup(keyboard), new_message)
 
-# ------------------------- Управление флагами (без изменений, но оставлено) -------------------------
+# ------------------------- Управление флагами -------------------------
 async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -661,9 +760,7 @@ async def edit_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_flag_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # callback_data: flag_del_confirm_{flag_id}_{page}
     parts = query.data.split("_")
-    # parts: ['flag', 'del', 'confirm', flag_id, page]
     flag_id = int(parts[3])
     page = int(parts[4])
     context.user_data["del_flag_id"] = flag_id
@@ -686,7 +783,7 @@ async def delete_flag_execute(update: Update, context: ContextTypes.DEFAULT_TYPE
     await show_flags(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами товаров (сокращённо, логика та же) -------------------------
+# ------------------------- Управление типами товаров -------------------------
 async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -757,9 +854,7 @@ async def edit_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_prodtype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # callback_data: prodtype_del_confirm_{type_id}_{page}
     parts = query.data.split("_")
-    # parts: ['prodtype', 'del', 'confirm', type_id, page]
     type_id = int(parts[3])
     page = int(parts[4])
     context.user_data["del_prodtype_id"] = type_id
@@ -782,7 +877,7 @@ async def delete_prodtype_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_prod_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами материалов (сокращённо) -------------------------
+# ------------------------- Управление типами материалов -------------------------
 async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -853,9 +948,7 @@ async def edit_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_mattype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # callback_data: mattype_del_confirm_{mt_id}_{page}
     parts = query.data.split("_")
-    # parts: ['mattype', 'del', 'confirm', mt_id, page]
     mt_id = int(parts[3])
     page = int(parts[4])
     context.user_data["del_mattype_id"] = mt_id
@@ -949,9 +1042,7 @@ async def edit_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_mainfeat_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # callback_data: mainfeat_del_confirm_{feat_id}_{page}
     parts = query.data.split("_")
-    # parts: ['mainfeat', 'del', 'confirm', feat_id, page]
     feat_id = int(parts[3])
     page = int(parts[4])
     context.user_data["del_mainfeat_id"] = feat_id
@@ -974,221 +1065,277 @@ async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_main_features(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Расширенный поиск (без изменений, но оставлен) -------------------------
-async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("🔍 Поиск по ключевому слову", callback_data="search_keyword")],
-        [InlineKeyboardButton("🏷️ Поиск по типу и флагам", callback_data="search_advanced")],
-        [InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")],
-    ]
-    await query.edit_message_text("Выберите способ поиска:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def search_keyword_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("🔍 Введите ключевое слово для поиска (по названию или коду):",
-                                                  reply_markup=CANCEL_KEYBOARD)
-    return SEARCH_KEYWORD
-
-async def search_keyword_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyword = update.message.text
-    await show_products(update, context, search=keyword, page=0)
-    return ConversationHandler.END
-
-async def search_advanced_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["search_type_id"] = None
-    context.user_data["search_flag_ids"] = set()
-    await show_type_selection(update, context)
-    return SEARCH_TYPE_SELECT
-
-async def show_type_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+# ------------------------- Управление материалами -------------------------
+async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
-    types, total = await db.get_product_types(offset, limit)
+    materials, total = await db.get_materials(offset, limit)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     if page >= total_pages:
         page = total_pages - 1
         offset = page * limit
-        types, total = await db.get_product_types(offset, limit)
-    selected_id = context.user_data.get("search_type_id")
-    text = "*Выберите тип товара (один)*\n\n"
-    if selected_id:
-        sel_type = await db.get_product_type_by_id(selected_id)
-        text += f"✅ Выбран: {sel_type['name'] if sel_type else 'ID '+str(selected_id)}\n\n"
+        materials, total = await db.get_materials(offset, limit)
+    text = "*Материалы*\n\n"
+    if not materials:
+        text += "Нет материалов."
     else:
-        text += "❌ Тип не выбран (поиск по всем типам)\n\n"
+        for m in materials:
+            text += f"`{m['id']}` – {m['name']} (код: {m['code']}, тип: {m['type_name']})\n"
+    text += f"\nСтраница {page+1} из {max(1, total_pages)}"
     keyboard = []
-    for t in types:
-        mark = "✅ " if selected_id == t['id'] else "❌ "
-        keyboard.append([InlineKeyboardButton(f"{mark}{t['name']}", callback_data=f"search_type_toggle_{t['id']}")])
+    for m in materials:
+        keyboard.append([
+            InlineKeyboardButton(f"📄 {m['name']}", callback_data=f"mat_details_{m['id']}_{page}"),
+            InlineKeyboardButton("✏️", callback_data=f"mat_edit_{m['id']}_{page}"),
+            InlineKeyboardButton("🗑️", callback_data=f"mat_del_confirm_{m['id']}_{page}")
+        ])
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"search_type_page_{page-1}"))
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"materials_page_{page-1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"search_type_page_{page+1}"))
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"materials_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("🚫 Пропустить (выбрать все типы)", callback_data="search_type_skip")])
-    keyboard.append([InlineKeyboardButton("▶ Далее → выбор флагов", callback_data="search_type_next")])
-    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
-    context.user_data["search_type_page"] = page
+    keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
+    keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
+    context.user_data["materials_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
-async def search_type_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def materials_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split("_")[-1])
+    await show_materials(update, context, page)
+
+async def material_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, _, mat_id, page = query.data.split("_")
+    mat_id = int(mat_id)
+    page = int(page)
+    material = await db.get_material_by_id(mat_id)
+    if not material:
+        await query.edit_message_text("❌ Материал не найден.")
+        return
+    text = (f"*Материал ID {material['id']}*\n\n"
+            f"📛 *Название:* {material['name']}\n"
+            f"🔢 *Код:* {material['code']}\n"
+            f"📂 *Тип:* {material['type_name']} (id {material['materials_type_id']})")
+    keyboard = [
+        [InlineKeyboardButton("🖼️ Посмотреть фото", callback_data=f"mat_view_photo_{mat_id}_{page}")],
+        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"mat_edit_{mat_id}_{page}")],
+        [InlineKeyboardButton("◀ К списку материалов", callback_data=f"materials_page_{page}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, _, _, mat_id, page = query.data.split("_")
+    mat_id = int(mat_id)
+    page = int(page)
+    material = await db.get_material_by_id(mat_id)
+    if material:
+        await send_material_photo(update.effective_chat.id, material['code'], context)
+    else:
+        await query.edit_message_text("❌ Материал не найден.")
+    await material_details(update, context)
+
+async def add_material_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    types, _ = await db.get_material_types(0, 1000)
+    if not types:
+        await update.callback_query.edit_message_text("❌ Нет типов материалов. Сначала создайте тип материала.")
+        return ConversationHandler.END
+    keyboard = [[InlineKeyboardButton(t['name'], callback_data=f"mat_add_type_{t['id']}")] for t in types]
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
+    await update.callback_query.edit_message_text("Выберите тип материала:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ADD_MAT_TYPE_SELECT
+
+async def add_material_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     type_id = int(query.data.split("_")[-1])
-    current = context.user_data.get("search_type_id")
-    context.user_data["search_type_id"] = None if current == type_id else type_id
-    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
+    context.user_data["new_mat_type_id"] = type_id
+    await query.edit_message_text("Введите *уникальный код* материала:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    return ADD_MAT_CODE
 
-async def search_type_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["search_type_id"] = None
-    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
+async def add_material_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    if not await db.is_material_code_unique(code):
+        await update.message.reply_text("❌ Материал с таким кодом уже существует. Введите другой код:", reply_markup=CANCEL_KEYBOARD)
+        return ADD_MAT_CODE
+    context.user_data["new_mat_code"] = code
+    await update.message.reply_text("Введите *название* материала:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    return ADD_MAT_NAME
 
-async def search_type_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_flag_selection(update, context)
-    return SEARCH_FLAGS_SELECT
+async def add_material_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text
+    context.user_data["new_mat_name"] = name
+    await update.message.reply_text("Теперь отправьте *фото* материала (одно изображение).", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    return ADD_MAT_PHOTO
 
-async def show_flag_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
-    limit = 8
-    offset = page * limit
-    flags, total = await db.get_flags(offset, limit)
-    total_pages = (total + limit - 1) // limit if total > 0 else 1
-    if page >= total_pages:
-        page = total_pages - 1
-        offset = page * limit
-        flags, total = await db.get_flags(offset, limit)
-    selected_ids = context.user_data.get("search_flag_ids", set())
-    text = "*Выберите флаги (можно несколько)*\n\n"
-    if selected_ids:
-        text += f"✅ Выбрано флагов: {len(selected_ids)}\n\n"
-    else:
-        text += "❌ Флаги не выбраны (поиск без фильтра по флагам)\n\n"
-    keyboard = []
-    for f in flags:
-        mark = "✅ " if f['id'] in selected_ids else "❌ "
-        keyboard.append([InlineKeyboardButton(f"{mark}{f['name']}", callback_data=f"search_flag_toggle_{f['id']}")])
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"search_flag_page_{page-1}"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"search_flag_page_{page+1}"))
-    if nav:
-        keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("🚫 Сбросить все флаги", callback_data="search_flag_reset")])
-    keyboard.append([InlineKeyboardButton("🔍 Поиск", callback_data="search_flag_finish")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к выбору типа", callback_data="search_back_to_type")])
-    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
-    context.user_data["search_flag_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
-
-async def search_flag_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    flag_id = int(query.data.split("_")[-1])
-    selected = context.user_data.get("search_flag_ids", set())
-    if flag_id in selected:
-        selected.remove(flag_id)
-    else:
-        selected.add(flag_id)
-    context.user_data["search_flag_ids"] = selected
-    await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
-
-async def search_flag_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["search_flag_ids"] = set()
-    await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
-
-async def search_flag_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    type_id = context.user_data.get("search_type_id")
-    flag_ids = list(context.user_data.get("search_flag_ids", set()))
-    await show_products(update, context, search=None, type_id=type_id, flag_ids=flag_ids, page=0)
-    context.user_data.pop("search_type_id", None)
-    context.user_data.pop("search_flag_ids", None)
+async def add_material_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        await update.message.reply_text("❌ Пожалуйста, отправьте фото.", reply_markup=CANCEL_KEYBOARD)
+        return ADD_MAT_PHOTO
+    try:
+        photo_file = await download_photo_with_retry(update.message.photo[-1])
+        code = context.user_data["new_mat_code"]
+        success = await save_material_photo(photo_file, code)
+        if not success:
+            await update.message.reply_text("❌ Ошибка при сохранении фото. Попробуйте ещё раз.")
+            return ADD_MAT_PHOTO
+        mat_id = await db.create_material(code, context.user_data["new_mat_name"], context.user_data["new_mat_type_id"])
+        await update.message.reply_text(f"✅ Материал создан, ID = {mat_id}.")
+        await show_materials(update, context, 0)
+    except Exception as e:
+        logger.error(f"Ошибка добавления материала: {e}")
+        await update.message.reply_text("❌ Ошибка при создании материала.")
     return ConversationHandler.END
 
-async def search_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
-    return SEARCH_TYPE_SELECT
-
-# ------------------------- Работа с товарами (просмотр, редактирование) -------------------------
-async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
-    product = await db.get_product_by_id(prod_id)
-    if not product:
-        await send_or_edit_message(update, context, "❌ Товар не найден.",
-                                   InlineKeyboardMarkup([[InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")]]),
-                                   new_message=True)
-        return
-    prod_type = await db.get_product_type_by_id(product["products_type_id"])
-    type_name = prod_type["name"] if prod_type else "Неизвестно"
-    flags = await db.get_product_flags(prod_id)
-    flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
-    costs = await db.get_costs_for_product(prod_id)
-    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽" for c in costs) if costs else "нет"
-    # Основные характеристики
-    main_feats = await db.get_product_main_features(prod_id)
-    main_feats_text = "\n".join(f"• {f['feature_name']}: {f['value']}" for f in main_feats if f['value']) if main_feats else "нет"
-    # Дополнительные характеристики
-    extra_feats = await db.get_product_extra_features(prod_id)
-    extra_feats_text = "\n".join(f"• {f['name']}: {f['value']}" for f in extra_feats) if extra_feats else "нет"
-
-    text = (
-        f"*Подробнее о товаре ID {prod_id}*\n\n"
-        f"📛 *Название:* {product['name']}\n"
-        f"🔢 *Код:* {product['code']}\n"
-        f"📂 *Тип:* {type_name}\n"
-        f"🏷️ *Флаги:* {flags_text}\n"
-        f"💰 *Стоимости:*\n{costs_text}\n"
-        f"📋 *Основные характеристики:*\n{main_feats_text}\n"
-        f"➕ *Дополнительные характеристики:*\n{extra_feats_text}"
-    )
+async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, _, mat_id, page = query.data.split("_")
+    mat_id = int(mat_id)
+    page = int(page)
+    context.user_data["edit_mat_id"] = mat_id
+    context.user_data["edit_mat_page"] = page
+    material = await db.get_material_by_id(mat_id)
+    if not material:
+        await query.edit_message_text("❌ Материал не найден.")
+        return ConversationHandler.END
+    text = (f"*Редактирование материала ID {mat_id}*\n\n"
+            f"📛 *Название:* {material['name']}\n"
+            f"🔢 *Код:* {material['code']}\n"
+            f"📂 *Тип:* {material['type_name']} (id {material['materials_type_id']})")
     keyboard = [
-        [InlineKeyboardButton("🖼️ Посмотреть фото", callback_data=f"details_photos_{prod_id}")],
-        [InlineKeyboardButton("◀ К списку товаров", callback_data="menu_products")],
+        [InlineKeyboardButton("✏️ Название", callback_data="mat_edit_name"),
+         InlineKeyboardButton("✏️ Код", callback_data="mat_edit_code")],
+        [InlineKeyboardButton("✏️ Тип материала", callback_data="mat_edit_type"),
+         InlineKeyboardButton("🖼️ Фото", callback_data="mat_edit_photo")],
+        [InlineKeyboardButton("🗑️ Удалить материал", callback_data="mat_edit_delete")],
+        [InlineKeyboardButton("◀ К списку материалов", callback_data=f"materials_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return EDIT_MAT_SELECT
 
-async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
-    product = await db.get_product_by_id(prod_id)
-    if not product:
-        await send_or_edit_message(update, context, "❌ Товар не найден.",
-                                   InlineKeyboardMarkup([[InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")]]),
-                                   new_message=True)
-        return
-    prod_type = await db.get_product_type_by_id(product["products_type_id"])
-    type_name = prod_type["name"] if prod_type else "Неизвестно"
-    flags = await db.get_product_flags(prod_id)
-    flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
-    costs = await db.get_costs_for_product(prod_id)
-    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽ (id {c['id']})" for c in costs) if costs else "нет"
-    text = (
-        f"*Редактирование товара ID {prod_id}*\n\n"
-        f"📛 *Название:* {product['name']}\n"
-        f"🔢 *Код:* {product['code']}\n"
-        f"📂 *Тип:* {type_name} (id {product['products_type_id']})\n"
-        f"🏷️ *Флаги:* {flags_text}\n"
-        f"💰 *Стоимости:*\n{costs_text}"
-    )
+async def material_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новое название материала:", reply_markup=CANCEL_KEYBOARD)
+    return EDIT_MAT_NAME
+
+async def material_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text
+    mat_id = context.user_data["edit_mat_id"]
+    material = await db.get_material_by_id(mat_id)
+    await db.update_material(mat_id, material['code'], new_name, material['materials_type_id'])
+    await update.message.reply_text("✅ Название обновлено.")
+    await show_materials(update, context, context.user_data["edit_mat_page"])
+    return ConversationHandler.END
+
+async def material_edit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новый код материала (уникальный):", reply_markup=CANCEL_KEYBOARD)
+    return EDIT_MAT_CODE
+
+async def material_update_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_code = update.message.text.strip()
+    mat_id = context.user_data["edit_mat_id"]
+    material = await db.get_material_by_id(mat_id)
+    if not await db.is_material_code_unique(new_code, exclude_id=mat_id):
+        await update.message.reply_text("❌ Код уже существует. Введите другой:", reply_markup=CANCEL_KEYBOARD)
+        return EDIT_MAT_CODE
+    old_code = material['code']
+    await db.update_material(mat_id, new_code, material['name'], material['materials_type_id'])
+    await move_material_photo(old_code, new_code)
+    await update.message.reply_text("✅ Код обновлён, фото переименовано.")
+    await show_materials(update, context, context.user_data["edit_mat_page"])
+    return ConversationHandler.END
+
+async def material_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    types, _ = await db.get_material_types(0, 1000)
+    if not types:
+        await query.edit_message_text("❌ Нет типов материалов. Сначала создайте тип.")
+        return ConversationHandler.END
+    keyboard = [[InlineKeyboardButton(t['name'], callback_data=f"mat_upd_type_{t['id']}")] for t in types]
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
+    await query.edit_message_text("Выберите новый тип материала:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_MAT_TYPE
+
+async def material_update_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    new_type_id = int(query.data.split("_")[-1])
+    mat_id = context.user_data["edit_mat_id"]
+    material = await db.get_material_by_id(mat_id)
+    await db.update_material(mat_id, material['code'], material['name'], new_type_id)
+    await query.edit_message_text("✅ Тип материала обновлён.")
+    await show_materials(update, context, context.user_data["edit_mat_page"])
+    return ConversationHandler.END
+
+async def material_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Отправьте новое фото для материала (одно изображение).", reply_markup=CANCEL_KEYBOARD)
+    return EDIT_MAT_PHOTO
+
+async def material_update_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        await update.message.reply_text("❌ Отправьте фото.", reply_markup=CANCEL_KEYBOARD)
+        return EDIT_MAT_PHOTO
+    try:
+        photo_file = await download_photo_with_retry(update.message.photo[-1])
+        mat_id = context.user_data["edit_mat_id"]
+        material = await db.get_material_by_id(mat_id)
+        await delete_material_photo(material['code'])
+        success = await save_material_photo(photo_file, material['code'])
+        if success:
+            await update.message.reply_text("✅ Фото обновлено.")
+        else:
+            await update.message.reply_text("❌ Ошибка сохранения фото.")
+    except Exception as e:
+        logger.error(f"Ошибка обновления фото материала: {e}")
+        await update.message.reply_text("❌ Не удалось обновить фото.")
+    await show_materials(update, context, context.user_data["edit_mat_page"])
+    return ConversationHandler.END
+
+async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    mat_id = context.user_data["edit_mat_id"]
+    material = await db.get_material_by_id(mat_id)
     keyboard = [
-        [InlineKeyboardButton("✏️ Название", callback_data=f"prod_edit_name_{prod_id}"),
-         InlineKeyboardButton("✏️ Код", callback_data=f"prod_edit_code_{prod_id}")],
-        [InlineKeyboardButton("✏️ Тип товара", callback_data=f"prod_edit_type_{prod_id}"),
-         InlineKeyboardButton("🏷️ Флаги", callback_data=f"prod_edit_flags_{prod_id}")],
-        [InlineKeyboardButton("💰 Управление стоимостью", callback_data=f"prod_edit_costs_{prod_id}"),
-         InlineKeyboardButton("📸 Управление фото", callback_data=f"prod_manage_photos_{prod_id}")],
-        [InlineKeyboardButton("📋 Основные характеристики", callback_data=f"prod_main_features_{prod_id}"),
-         InlineKeyboardButton("➕ Доп. характеристики", callback_data=f"prod_extra_features_{prod_id}")],
-        [InlineKeyboardButton("🗑️ Удалить товар", callback_data=f"prod_delete_confirm_{prod_id}")],
-        [InlineKeyboardButton("◀ К списку товаров", callback_data="menu_products"),
-         InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="mat_del_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data=f"materials_page_{context.user_data['edit_mat_page']}")]
     ]
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
+    await query.edit_message_text(f"Удалить материал *{material['name']}* (ID {mat_id}) навсегда?",
+                                  reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return DELETE_MAT_CONFIRM
+
+async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    mat_id = context.user_data["edit_mat_id"]
+    material = await db.get_material_by_id(mat_id)
+    if material:
+        try:
+            await db.delete_material(mat_id)
+            await delete_material_photo(material['code'])
+            await query.edit_message_text("✅ Материал удалён.")
+        except ValueError as e:
+            await query.edit_message_text(f"❌ {e}")
+    else:
+        await query.edit_message_text("❌ Материал не найден.")
+    await show_materials(update, context, context.user_data["edit_mat_page"])
+    return ConversationHandler.END
 
 # ------------------------- Основные характеристики товара -------------------------
 async def product_main_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1210,9 +1357,8 @@ async def product_main_features_menu(update: Update, context: ContextTypes.DEFAU
 async def product_main_feature_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # callback data: prod_mainfeat_edit_{feature_id}_{prod_id}
     parts = query.data.split("_")
-    feature_id = int(parts[3])   # после prod_mainfeat_edit
+    feature_id = int(parts[3])
     prod_id = int(parts[4])
     context.user_data["edit_mainfeat_feature_id"] = feature_id
     context.user_data["edit_mainfeat_prod_id"] = prod_id
@@ -1225,7 +1371,7 @@ async def product_main_feature_save(update: Update, context: ContextTypes.DEFAUL
     feature_id = context.user_data["edit_mainfeat_feature_id"]
     await db.set_product_main_feature(prod_id, feature_id, value)
     await update.message.reply_text("✅ Значение сохранено.")
-    # возвращаемся в меню основных характеристик
+    # Показываем обновлённый список
     features = await db.get_product_main_features(prod_id)
     text = "*Основные характеристики товара*\n\n"
     keyboard = []
@@ -1277,7 +1423,6 @@ async def product_extra_save_new(update: Update, context: ContextTypes.DEFAULT_T
     prod_id = context.user_data["extra_prod_id"]
     await db.add_product_extra_feature(prod_id, name, value)
     await update.message.reply_text("✅ Характеристика добавлена.")
-    # вернуться в меню дополнительных характеристик
     features = await db.get_product_extra_features(prod_id)
     text = "*Дополнительные характеристики*\n\n"
     keyboard = []
@@ -1306,7 +1451,7 @@ async def product_extra_edit_entry(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("◀ Отмена", callback_data=f"prod_extra_cancel_{prod_id}")],
     ]
     await query.edit_message_text("Что хотите отредактировать?", reply_markup=InlineKeyboardMarkup(keyboard))
-    return PROD_EXTRA_FEATURES  # остаёмся в том же состоянии, но обрабатываем под-колбэки
+    return PROD_EXTRA_FEATURES
 
 async def product_extra_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1325,7 +1470,6 @@ async def product_extra_update_name(update: Update, context: ContextTypes.DEFAUL
     feat_id = context.user_data["edit_extra_id"]
     await db.update_product_extra_feature(feat_id, name=new_name)
     await update.message.reply_text("✅ Название обновлено.")
-    # вернуться в меню дополнительных характеристик
     prod_id = context.user_data["edit_extra_prod_id"]
     features = await db.get_product_extra_features(prod_id)
     text = "*Дополнительные характеристики*\n\n"
@@ -1368,7 +1512,6 @@ async def product_extra_delete(update: Update, context: ContextTypes.DEFAULT_TYP
     feat_id = int(parts[3])
     prod_id = int(parts[4])
     await db.delete_product_extra_feature(feat_id)
-    # обновить меню
     features = await db.get_product_extra_features(prod_id)
     text = "*Дополнительные характеристики*\n\n"
     keyboard = []
@@ -1390,7 +1533,7 @@ async def product_extra_cancel(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
-# ------------------------- Управление фото (сокращённо, без изменений логики) -------------------------
+# ------------------------- Управление фото товаров -------------------------
 async def show_photo_management(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -1439,6 +1582,9 @@ async def photo_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["temp_photo_type"] = photo_type
     if photo_type == "main":
         context.user_data["main_photos_buffer"] = []
+        # Сохраняем ID сообщения и chat_id для последующего удаления
+        context.user_data["photo_main_chat_id"] = update.effective_chat.id
+        context.user_data["photo_main_message_id"] = query.message.message_id
         await query.edit_message_text(
             "📸 *Добавление основных фото*\n\nОтправьте *одно или несколько фото* (можно альбомом).\n"
             "Когда закончите, *нажмите кнопку «Отправить фото»* для сохранения.",
@@ -1473,48 +1619,90 @@ async def photo_add_wait(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def photo_add_main_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Обработка как фото, так и callback'ов
     if update.callback_query:
         query = update.callback_query
         await query.answer()
         data = query.data
         if data == "send_main_photos":
+            # Удаляем исходное сообщение с кнопками
+            chat_id = context.user_data.get("photo_main_chat_id")
+            msg_id = context.user_data.get("photo_main_message_id")
+            if chat_id and msg_id:
+                try:
+                    await context.bot.delete_message(chat_id, msg_id)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение: {e}")
             buffer = context.user_data.get("main_photos_buffer", [])
             if not buffer:
-                await query.edit_message_text("❌ Нет фото для сохранения. Отправьте хотя бы одно фото.")
-                return PHOTO_ADD_MAIN_COLLECT
+                await context.bot.send_message(chat_id=chat_id, text="❌ Нет фото для сохранения. Отправьте хотя бы одно фото.")
+                await show_product_edit(update, context, context.user_data["photo_prod_id"])
+                return ConversationHandler.END
             prod_code = context.user_data["photo_prod_code"]
             saved = 0
             for file_obj, _ in buffer:
                 if await save_photo_from_telegram(file_obj, prod_code, "main"):
                     saved += 1
             context.user_data.pop("main_photos_buffer", None)
-            await query.edit_message_text(f"✅ Сохранено основных фото: {saved}.")
+            context.user_data.pop("photo_main_chat_id", None)
+            context.user_data.pop("photo_main_message_id", None)
+            await context.bot.send_message(chat_id=chat_id, text=f"✅ Сохранено основных фото: {saved}.")
+            # Возврат в меню редактирования товара
             await show_product_edit(update, context, context.user_data["photo_prod_id"])
             return ConversationHandler.END
         elif data == "cancel_main_photos":
+            chat_id = context.user_data.get("photo_main_chat_id")
+            msg_id = context.user_data.get("photo_main_message_id")
+            if chat_id and msg_id:
+                try:
+                    await context.bot.delete_message(chat_id, msg_id)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение: {e}")
             context.user_data.pop("main_photos_buffer", None)
-            await query.edit_message_text("❌ Добавление фото отменено.")
+            context.user_data.pop("photo_main_chat_id", None)
+            context.user_data.pop("photo_main_message_id", None)
+            await context.bot.send_message(chat_id=chat_id, text="❌ Добавление фото отменено.")
             await show_photo_management(update, context, context.user_data["photo_prod_id"])
             return PHOTO_MANAGE
         else:
             await query.edit_message_text("Неизвестная команда.")
             return PHOTO_ADD_MAIN_COLLECT
+    # Обработка отправленных фото
     if not update.message.photo:
-        await update.message.reply_text("❌ Пожалуйста, отправьте фото. Или нажмите кнопку «Отправить фото» для завершения.",
-                                        reply_markup=InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("✅ Отправить фото", callback_data="send_main_photos")],
-                                            [InlineKeyboardButton("❌ Отменить", callback_data="cancel_main_photos")]
-                                        ]))
+        # Если пришло не фото – напоминаем
+        chat_id = update.effective_chat.id
+        msg_id = context.user_data.get("photo_main_message_id")
+        if msg_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id, message_id=msg_id,
+                    text="📸 *Добавление основных фото*\n\nОтправьте фото или нажмите кнопку «Отправить фото».",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✅ Отправить фото", callback_data="send_main_photos")],
+                        [InlineKeyboardButton("❌ Отменить", callback_data="cancel_main_photos")]
+                    ])
+                )
+            except Exception:
+                pass
+        else:
+            await update.message.reply_text("❌ Отправьте фото или используйте кнопки.",
+                                            reply_markup=InlineKeyboardMarkup([
+                                                [InlineKeyboardButton("✅ Отправить фото", callback_data="send_main_photos")],
+                                                [InlineKeyboardButton("❌ Отменить", callback_data="cancel_main_photos")]
+                                            ]))
         return PHOTO_ADD_MAIN_COLLECT
     try:
         photo_file = await download_photo_with_retry(update.message.photo[-1])
         context.user_data.setdefault("main_photos_buffer", []).append((photo_file, update.message))
         current_count = len(context.user_data["main_photos_buffer"])
+        # Обновляем сообщение с кнопками
+        chat_id = update.effective_chat.id
         msg_id = context.user_data.get("photo_main_message_id")
         if msg_id:
             try:
                 await context.bot.edit_message_text(
-                    chat_id=update.effective_chat.id, message_id=msg_id,
+                    chat_id=chat_id, message_id=msg_id,
                     text=f"📸 *Добавление основных фото*\n\n📷 Фото добавлено. Всего в буфере: {current_count}.\n\n"
                          "Отправьте ещё фото или нажмите кнопку «Отправить фото» для сохранения.",
                     parse_mode="Markdown",
@@ -1608,7 +1796,7 @@ async def details_photos_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("❌ Товар не найден.")
     await show_product_details(update, context, prod_id)
 
-# ------------------------- Добавление товара, удаление, редактирование полей (без изменений логики) -------------------------
+# ------------------------- Добавление товара, удаление, редактирование полей -------------------------
 async def add_product_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("Введите *название* товара:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
@@ -1964,6 +2152,219 @@ async def product_edit_callback(update: Update, context: ContextTypes.DEFAULT_TY
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
 
+async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
+    product = await db.get_product_by_id(prod_id)
+    if not product:
+        await send_or_edit_message(update, context, "❌ Товар не найден.",
+                                   InlineKeyboardMarkup([[InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")]]),
+                                   new_message=True)
+        return
+    prod_type = await db.get_product_type_by_id(product["products_type_id"])
+    type_name = prod_type["name"] if prod_type else "Неизвестно"
+    flags = await db.get_product_flags(prod_id)
+    flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
+    costs = await db.get_costs_for_product(prod_id)
+    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽" for c in costs) if costs else "нет"
+    main_feats = await db.get_product_main_features(prod_id)
+    main_feats_text = "\n".join(f"• {f['feature_name']}: {f['value']}" for f in main_feats if f['value']) if main_feats else "нет"
+    extra_feats = await db.get_product_extra_features(prod_id)
+    extra_feats_text = "\n".join(f"• {f['name']}: {f['value']}" for f in extra_feats) if extra_feats else "нет"
+
+    text = (
+        f"*Подробнее о товаре ID {prod_id}*\n\n"
+        f"📛 *Название:* {product['name']}\n"
+        f"🔢 *Код:* {product['code']}\n"
+        f"📂 *Тип:* {type_name}\n"
+        f"🏷️ *Флаги:* {flags_text}\n"
+        f"💰 *Стоимости:*\n{costs_text}\n"
+        f"📋 *Основные характеристики:*\n{main_feats_text}\n"
+        f"➕ *Дополнительные характеристики:*\n{extra_feats_text}"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🖼️ Посмотреть фото", callback_data=f"details_photos_{prod_id}")],
+        [InlineKeyboardButton("◀ К списку товаров", callback_data="menu_products")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
+
+async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
+    product = await db.get_product_by_id(prod_id)
+    if not product:
+        await send_or_edit_message(update, context, "❌ Товар не найден.",
+                                   InlineKeyboardMarkup([[InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")]]),
+                                   new_message=True)
+        return
+    prod_type = await db.get_product_type_by_id(product["products_type_id"])
+    type_name = prod_type["name"] if prod_type else "Неизвестно"
+    flags = await db.get_product_flags(prod_id)
+    flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
+    costs = await db.get_costs_for_product(prod_id)
+    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽ (id {c['id']})" for c in costs) if costs else "нет"
+    text = (
+        f"*Редактирование товара ID {prod_id}*\n\n"
+        f"📛 *Название:* {product['name']}\n"
+        f"🔢 *Код:* {product['code']}\n"
+        f"📂 *Тип:* {type_name} (id {product['products_type_id']})\n"
+        f"🏷️ *Флаги:* {flags_text}\n"
+        f"💰 *Стоимости:*\n{costs_text}"
+    )
+    keyboard = [
+        [InlineKeyboardButton("✏️ Название", callback_data=f"prod_edit_name_{prod_id}"),
+         InlineKeyboardButton("✏️ Код", callback_data=f"prod_edit_code_{prod_id}")],
+        [InlineKeyboardButton("✏️ Тип товара", callback_data=f"prod_edit_type_{prod_id}"),
+         InlineKeyboardButton("🏷️ Флаги", callback_data=f"prod_edit_flags_{prod_id}")],
+        [InlineKeyboardButton("💰 Управление стоимостью", callback_data=f"prod_edit_costs_{prod_id}"),
+         InlineKeyboardButton("📸 Управление фото", callback_data=f"prod_manage_photos_{prod_id}")],
+        [InlineKeyboardButton("📋 Основные характеристики", callback_data=f"prod_main_features_{prod_id}"),
+         InlineKeyboardButton("➕ Доп. характеристики", callback_data=f"prod_extra_features_{prod_id}")],
+        [InlineKeyboardButton("🗑️ Удалить товар", callback_data=f"prod_delete_confirm_{prod_id}")],
+        [InlineKeyboardButton("◀ К списку товаров", callback_data="menu_products"),
+         InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
+
+# ------------------------- Расширенный поиск -------------------------
+async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("🔍 Поиск по ключевому слову", callback_data="search_keyword")],
+        [InlineKeyboardButton("🏷️ Поиск по типу и флагам", callback_data="search_advanced")],
+        [InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text("Выберите способ поиска:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def search_keyword_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("🔍 Введите ключевое слово для поиска (по названию или коду):",
+                                                  reply_markup=CANCEL_KEYBOARD)
+    return SEARCH_KEYWORD
+
+async def search_keyword_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyword = update.message.text
+    await show_products(update, context, search=keyword, page=0)
+    return ConversationHandler.END
+
+async def search_advanced_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["search_type_id"] = None
+    context.user_data["search_flag_ids"] = set()
+    await show_type_selection(update, context)
+    return SEARCH_TYPE_SELECT
+
+async def show_type_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    limit = 8
+    offset = page * limit
+    types, total = await db.get_product_types(offset, limit)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if page >= total_pages:
+        page = total_pages - 1
+        offset = page * limit
+        types, total = await db.get_product_types(offset, limit)
+    selected_id = context.user_data.get("search_type_id")
+    text = "*Выберите тип товара (один)*\n\n"
+    if selected_id:
+        sel_type = await db.get_product_type_by_id(selected_id)
+        text += f"✅ Выбран: {sel_type['name'] if sel_type else 'ID '+str(selected_id)}\n\n"
+    else:
+        text += "❌ Тип не выбран (поиск по всем типам)\n\n"
+    keyboard = []
+    for t in types:
+        mark = "✅ " if selected_id == t['id'] else "❌ "
+        keyboard.append([InlineKeyboardButton(f"{mark}{t['name']}", callback_data=f"search_type_toggle_{t['id']}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"search_type_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"search_type_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("🚫 Пропустить (выбрать все типы)", callback_data="search_type_skip")])
+    keyboard.append([InlineKeyboardButton("▶ Далее → выбор флагов", callback_data="search_type_next")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
+    context.user_data["search_type_page"] = page
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+async def search_type_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    type_id = int(query.data.split("_")[-1])
+    current = context.user_data.get("search_type_id")
+    context.user_data["search_type_id"] = None if current == type_id else type_id
+    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
+
+async def search_type_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["search_type_id"] = None
+    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
+
+async def search_type_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_flag_selection(update, context)
+    return SEARCH_FLAGS_SELECT
+
+async def show_flag_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    limit = 8
+    offset = page * limit
+    flags, total = await db.get_flags(offset, limit)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if page >= total_pages:
+        page = total_pages - 1
+        offset = page * limit
+        flags, total = await db.get_flags(offset, limit)
+    selected_ids = context.user_data.get("search_flag_ids", set())
+    text = "*Выберите флаги (можно несколько)*\n\n"
+    if selected_ids:
+        text += f"✅ Выбрано флагов: {len(selected_ids)}\n\n"
+    else:
+        text += "❌ Флаги не выбраны (поиск без фильтра по флагам)\n\n"
+    keyboard = []
+    for f in flags:
+        mark = "✅ " if f['id'] in selected_ids else "❌ "
+        keyboard.append([InlineKeyboardButton(f"{mark}{f['name']}", callback_data=f"search_flag_toggle_{f['id']}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"search_flag_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"search_flag_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("🚫 Сбросить все флаги", callback_data="search_flag_reset")])
+    keyboard.append([InlineKeyboardButton("🔍 Поиск", callback_data="search_flag_finish")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к выбору типа", callback_data="search_back_to_type")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="main_menu")])
+    context.user_data["search_flag_page"] = page
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+async def search_flag_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    flag_id = int(query.data.split("_")[-1])
+    selected = context.user_data.get("search_flag_ids", set())
+    if flag_id in selected:
+        selected.remove(flag_id)
+    else:
+        selected.add(flag_id)
+    context.user_data["search_flag_ids"] = selected
+    await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
+
+async def search_flag_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["search_flag_ids"] = set()
+    await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
+
+async def search_flag_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    type_id = context.user_data.get("search_type_id")
+    flag_ids = list(context.user_data.get("search_flag_ids", set()))
+    await show_products(update, context, search=None, type_id=type_id, flag_ids=flag_ids, page=0)
+    context.user_data.pop("search_type_id", None)
+    context.user_data.pop("search_flag_ids", None)
+    return ConversationHandler.END
+
+async def search_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
+    return SEARCH_TYPE_SELECT
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.edit_message_text("Операция отменена.")
@@ -2002,6 +2403,10 @@ async def menu_mat_types_callback(update: Update, context: ContextTypes.DEFAULT_
     await show_mat_types(update, context, 0)
 
 @admin_only
+async def menu_materials_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_materials(update, context, 0)
+
+@admin_only
 async def menu_main_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_features(update, context, 0)
 
@@ -2019,6 +2424,7 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(menu_flags_callback, pattern="^menu_flags$"))
     app.add_handler(CallbackQueryHandler(menu_prod_types_callback, pattern="^menu_prod_types$"))
     app.add_handler(CallbackQueryHandler(menu_mat_types_callback, pattern="^menu_mat_types$"))
+    app.add_handler(CallbackQueryHandler(menu_materials_callback, pattern="^menu_materials$"))
     app.add_handler(CallbackQueryHandler(menu_main_features_callback, pattern="^menu_main_features$"))
     app.add_handler(CallbackQueryHandler(menu_search_callback, pattern="^menu_search$"))
 
@@ -2251,7 +2657,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(product_extra_edit_entry, pattern="^prod_extra_edit_\\d+_\\d+$"),
                 CallbackQueryHandler(product_extra_delete, pattern="^prod_extra_del_\\d+_\\d+$"),
                 CallbackQueryHandler(product_extra_cancel, pattern="^prod_extra_cancel_\\d+$"),
-                CallbackQueryHandler(product_extra_edit_name, pattern="^extra_edit_name$"),   # переход из edit_entry
+                CallbackQueryHandler(product_extra_edit_name, pattern="^extra_edit_name$"),
                 CallbackQueryHandler(product_extra_edit_value, pattern="^extra_edit_value$"),
             ],
             PROD_EXTRA_FEATURE_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_extra_add_value)],
@@ -2295,6 +2701,45 @@ def register_handlers(app: Application):
     )
     app.add_handler(search_advanced_conv)
 
+    # Управление материалами
+    app.add_handler(CallbackQueryHandler(materials_page_callback, pattern="^materials_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(material_details, pattern="^mat_details_\\d+_\\d+$"))
+    app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+$"))
+
+    add_material_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(add_material_entry, pattern="^mat_add$")],
+        states={
+            ADD_MAT_TYPE_SELECT: [CallbackQueryHandler(add_material_type_selected, pattern="^mat_add_type_\\d+$")],
+            ADD_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_material_code)],
+            ADD_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_material_name)],
+            ADD_MAT_PHOTO: [MessageHandler(filters.PHOTO, add_material_photo)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        per_message=False,
+    )
+    app.add_handler(add_material_conv)
+
+    edit_material_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(material_edit_entry, pattern="^mat_edit_\\d+_\\d+$")],
+        states={
+            EDIT_MAT_SELECT: [
+                CallbackQueryHandler(material_edit_name, pattern="^mat_edit_name$"),
+                CallbackQueryHandler(material_edit_code, pattern="^mat_edit_code$"),
+                CallbackQueryHandler(material_edit_type, pattern="^mat_edit_type$"),
+                CallbackQueryHandler(material_edit_photo, pattern="^mat_edit_photo$"),
+                CallbackQueryHandler(material_edit_delete, pattern="^mat_edit_delete$"),
+            ],
+            EDIT_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_name)],
+            EDIT_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_code)],
+            EDIT_MAT_TYPE: [CallbackQueryHandler(material_update_type, pattern="^mat_upd_type_\\d+$")],
+            EDIT_MAT_PHOTO: [MessageHandler(filters.PHOTO, material_update_photo)],
+            DELETE_MAT_CONFIRM: [CallbackQueryHandler(material_delete_execute, pattern="^mat_del_yes$")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        per_message=False,
+    )
+    app.add_handler(edit_material_conv)
+
 # ------------------------- Запуск бота -------------------------
 async def main():
     global db_pool, db
@@ -2320,7 +2765,7 @@ async def main():
 
     await app.initialize()
     await app.start()
-    logging.info("Бот запущен с полной поддержкой основных и дополнительных характеристик товаров.")
+    logging.info("Бот запущен с поддержкой материалов.")
     await app.updater.start_polling()
     await asyncio.Event().wait()
 

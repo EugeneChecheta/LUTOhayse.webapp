@@ -1,6 +1,6 @@
 -- #########################################################################
 -- # LUTO SHOP DATABASE
--- # PostgreSQL Production Structure (расширенная)
+-- # PostgreSQL Production Structure (с материалами)
 -- #########################################################################
 
 DROP TABLE IF EXISTS flags_for_products CASCADE;
@@ -61,7 +61,7 @@ CREATE TABLE materials_type (
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
--- ==================== materials ====================
+-- ==================== materials (НОВАЯ ТАБЛИЦА) ====================
 CREATE TABLE materials (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code VARCHAR(100) NOT NULL UNIQUE,
@@ -90,14 +90,12 @@ CREATE TABLE materials_for_products (
     CONSTRAINT uq_product_material_type UNIQUE(products_id, materials_type_id)
 );
 
--- ==================== НОВЫЕ ТАБЛИЦЫ ====================
--- Типы основных характеристик (справочник)
+-- ==================== Основные характеристики ====================
 CREATE TABLE main_features_types (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
--- Значения основных характеристик для товаров
 CREATE TABLE product_main_features (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     products_id INTEGER NOT NULL,
@@ -114,7 +112,6 @@ CREATE TABLE product_main_features (
     CONSTRAINT uq_product_feature UNIQUE(products_id, feature_id)
 );
 
--- Дополнительные характеристики (пары "название" -> "значение")
 CREATE TABLE product_extra_features (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     products_id INTEGER NOT NULL,
@@ -134,8 +131,6 @@ CREATE INDEX idx_flags_name ON flags(name);
 CREATE INDEX idx_materials_type_name ON materials_type(name);
 CREATE INDEX idx_mfp_product ON materials_for_products(products_id);
 CREATE INDEX idx_ffp_product ON flags_for_products(products_id);
-
--- Новые индексы
 CREATE INDEX idx_main_features_types_name ON main_features_types(name);
 CREATE INDEX idx_pmf_product ON product_main_features(products_id);
 CREATE INDEX idx_pef_product ON product_extra_features(products_id);
