@@ -7,10 +7,14 @@ from pathlib import Path
 import uuid
 from datetime import datetime
 import secrets
+import threading
+import json
+import urllib.request
+import urllib.error
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = secrets.token_hex(24)
-CORS(app, supports_credentials=True)  # Разрешаем куки для сессий
+CORS(app, supports_credentials=True)
 
 
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
@@ -36,6 +40,71 @@ def get_db_connection():
         user=DB_CONFIG['user'],
         password=DB_CONFIG['password']
     )
+
+
+# ----- Загрузка конфигурации бота для уведомлений о заказах -----
+ORDER_BOT_TOKEN = None
+ORDER_ADMIN_IDS = None
+
+def load_order_bot_config():
+    global ORDER_BOT_TOKEN, ORDER_ADMIN_IDS
+    token_path = Path(__file__).parent / 'telegram_order_panel' / 'token.txt'
+    admin_path = Path(__file__).parent / 'telegram_order_panel' / 'admin_ids.txt'
+    try:
+        with open(token_path, 'r', encoding='utf-8') as f:
+            ORDER_BOT_TOKEN = f.read().strip()
+    except Exception as e:
+        app.logger.error(f"Не удалось прочитать token.txt для бота заказов: {e}")
+    try:
+        with open(admin_path, 'r', encoding='utf-8') as f:
+            ORDER_ADMIN_IDS = [int(line.strip()) for line in f if line.strip().isdigit()]
+    except Exception as e:
+        app.logger.error(f"Не удалось прочитать admin_ids.txt для бота заказов: {e}")
+
+load_order_bot_config()
+
+
+def send_order_notification(order_id, user_name, phone, total_sum):
+    """Отправляет уведомление о новом заказе всем администраторам через Telegram бота (urllib)."""
+    if not ORDER_BOT_TOKEN or not ORDER_ADMIN_IDS:
+        app.logger.warning("Не настроен бот для уведомлений о заказах – сообщение не отправлено")
+        return
+
+    text = (
+        f"🆕 *Новый заказ!*\n"
+        f"Номер: #{order_id}\n"
+        f"Клиент: {user_name}\n"
+        f"Телефон: {phone}\n"
+        f"Сумма: {total_sum} ₽"
+    )
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "📋 Посмотреть заказ", "callback_data": f"order_details_{order_id}_0"}
+        ]]
+    }
+    reply_markup = json.dumps(keyboard)
+
+    def send_to_admin(admin_id):
+        url = f"https://api.telegram.org/bot{ORDER_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": admin_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "reply_markup": reply_markup
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        try:
+            urllib.request.urlopen(req, timeout=5)
+        except Exception as e:
+            app.logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+
+    for admin_id in ORDER_ADMIN_IDS:
+        threading.Thread(target=send_to_admin, args=(admin_id,)).start()
 
 
 # ----- Вспомогательная функция для создания таблиц, если их нет -----
@@ -314,7 +383,6 @@ def add_to_cart():
         return jsonify({'error': 'Missing fields'}), 400
 
     cart = get_cart_session()
-    # Проверяем, нет ли уже такого же товара с таким же материалом
     for item in cart:
         if item['product_code'] == data['product_code'] and item['material_id'] == data['material_id']:
             item['quantity'] = item.get('quantity', 1) + 1
@@ -322,7 +390,7 @@ def add_to_cart():
             return jsonify({'success': True, 'cart': cart})
 
     new_item = {
-        'id': str(uuid.uuid4()),  # уникальный идентификатор для удаления
+        'id': str(uuid.uuid4()),
         'product_code': data['product_code'],
         'product_name': data['product_name'],
         'material_id': data['material_id'],
@@ -362,7 +430,6 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
-    # Генерируем или получаем session_id (можно из cookies)
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -380,7 +447,10 @@ def create_order():
               'Ожидает подтверждения'))
         order_id = cur.fetchone()[0]
 
+        total_sum = 0
         for item in cart:
+            item_total = item['cost'] * item.get('quantity', 1)
+            total_sum += item_total
             cur.execute("""
                 INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -388,7 +458,7 @@ def create_order():
                   item['cost'], item.get('quantity', 1)))
 
         conn.commit()
-        # Очищаем корзину после успешного заказа
+        send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
         save_cart_session([])
         return jsonify({'success': True, 'order_id': order_id})
     except Exception as e:
@@ -400,10 +470,15 @@ def create_order():
         conn.close()
 
 
-# ----- Статические файлы (добавлен cart.html) -----
+# ========= СТАТИЧЕСКИЕ МАРШРУТЫ =========
 @app.route('/')
 def index():
-    return send_from_directory('webpages', 'catalog.html')
+    return send_from_directory('.', 'index.html')
+
+
+@app.route('/index.css')
+def index_css():
+    return send_from_directory('.', 'index.css')
 
 
 @app.route('/product/<code>')
@@ -414,6 +489,11 @@ def product_page(code):
 @app.route('/cart')
 def cart_page():
     return send_from_directory('webpages', 'cart.html')
+
+
+@app.route('/catalog')
+def catalog_page():
+    return send_from_directory('webpages', 'catalog.html')
 
 
 @app.route('/catalog.css')
@@ -447,5 +527,6 @@ if __name__ == '__main__':
     Path('media/products').mkdir(parents=True, exist_ok=True)
     Path('media/materials').mkdir(parents=True, exist_ok=True)
     Path('media/interface').mkdir(parents=True, exist_ok=True)
+    Path('media/index').mkdir(parents=True, exist_ok=True)
     init_db()
     app.run(host='0.0.0.0', port=5000, debug=True)
