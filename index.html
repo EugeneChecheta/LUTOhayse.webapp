@@ -10,6 +10,14 @@
 </head>
 <body>
 
+<!-- Фиксированная корзина в правом верхнем углу -->
+<div class="cart-icon-wrapper">
+    <a href="/cart" class="cart-fixed-link">
+        <img src="/media/interface/cart_icon.svg" alt="Корзина">
+        <span id="cart-count" class="cart-count-badge">0</span>
+    </a>
+</div>
+
 <header>
     <section class="main__header">
         <div class="header__container">
@@ -25,11 +33,6 @@
                 </nav>
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
-                        <li class="menu__item">
-                            <a href="/cart" class="menu__link cart-link">
-                                🛒 <span id="cart-count">0</span>
-                            </a>
-                        </li>
                         <li class="menu__item">
                             <a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a>
                         </li>
@@ -133,14 +136,6 @@
             <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
             <div class="phone-label">Звонок по России бесплатный</div>
             <div class="phone-number">8 (999) 700-05-50</div>
-            <div class="social-icons">
-                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank" rel="noopener">
-                    <img src="/media/interface/vk.svg" alt="VK" class="vk-svg">
-                </a>
-                <a href="https://t.me/lutohayse" class="tg" target="_blank" rel="noopener">
-                    <img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg">
-                </a>
-            </div>
         </div>
         <nav class="footer-nav">
             <div class="footer-column">
@@ -217,7 +212,8 @@
         try {
             const data = await fetchJSON('/api/cart');
             const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-            document.getElementById('cart-count').textContent = totalItems;
+            const cartCountSpan = document.getElementById('cart-count');
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
         } catch(e) { console.error('Cart count error', e); }
     }
     updateCartCount();

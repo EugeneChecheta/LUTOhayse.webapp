@@ -19,6 +19,77 @@ body {
     color: var(--main-color);
 }
 
+/* ========== ФИКСИРОВАННАЯ КОРЗИНА ========== */
+.cart-icon-wrapper {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1001;
+    background: var(--accent-color);
+    border-radius: 50%;
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    transition: transform 0.2s, background 0.2s;
+    cursor: pointer;
+}
+.cart-icon-wrapper:hover {
+    transform: scale(1.05);
+    background: #4a6b27;
+}
+.cart-fixed-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    text-decoration: none;
+}
+.cart-icon-wrapper img {
+    width: 32px;
+    height: 32px;
+    filter: brightness(0) invert(1);
+}
+.cart-count-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #e3342f;
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    font-family: 'Montserrat', sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+@media (max-width: 768px) {
+    .cart-icon-wrapper {
+        width: 48px;
+        height: 48px;
+        top: 12px;
+        right: 12px;
+    }
+    .cart-icon-wrapper img {
+        width: 26px;
+        height: 26px;
+    }
+    .cart-count-badge {
+        width: 20px;
+        height: 20px;
+        font-size: 10px;
+        top: -4px;
+        right: -4px;
+    }
+}
+
 /* Контейнеры */
 [class*="__container"] {
     max-width: 1920px;
@@ -217,7 +288,6 @@ body {
 
 /* ===== АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ ===== */
 @media (max-width: 768px) {
-    /* Уплотнение блока фильтров */
     .filters {
         padding: 12px 16px;
         gap: 16px;
@@ -248,7 +318,6 @@ body {
         margin-bottom: 5px;
     }
 
-    /* Корректировка сетки каталога */
     .slider-containers {
         grid-template-columns: repeat(3, 1fr);
         gap: 12px;
@@ -267,7 +336,6 @@ body {
 }
 
 @media (max-width: 600px) {
-    /* Ещё более компактные фильтры */
     .filters {
         padding: 10px 12px;
         gap: 12px;
@@ -293,7 +361,6 @@ body {
         margin-bottom: 4px;
     }
 
-    /* Сетка товаров — 2 колонки */
     .slider-containers {
         grid-template-columns: repeat(2, 1fr) !important;
         gap: 10px;
@@ -325,7 +392,6 @@ body {
         font-size: 22px;
         margin-bottom: 15px;
     }
-    /* Модальное окно */
     .modal-content {
         width: 90%;
         margin: 30% auto;
@@ -333,7 +399,7 @@ body {
     }
 }
 
-/* Футер и модалка (без изменений) */
+/* Футер и модалка */
 footer {
     width: 100%;
     background: #fff;

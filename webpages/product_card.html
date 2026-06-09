@@ -9,6 +9,14 @@
 </head>
 <body>
 
+<!-- Фиксированная корзина в правом верхнем углу -->
+<div class="cart-icon-wrapper">
+    <a href="/cart" class="cart-fixed-link">
+        <img src="/media/interface/cart_icon.svg" alt="Корзина">
+        <span id="cart-count" class="cart-count-badge">0</span>
+    </a>
+</div>
+
 <header>
     <section class="main__header">
         <div class="header__container">
@@ -24,11 +32,6 @@
                 </nav>
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
-                        <li class="menu__item">
-                            <a href="/cart" class="menu__link cart-link">
-                                🛒 <span id="cart-count">0</span>
-                            </a>
-                        </li>
                         <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
                     </ul>
                 </nav>
@@ -38,32 +41,28 @@
 </header>
 
 <main class="page-container two-col-layout" id="productRoot">
-    <!-- Левый блок -->
+    <!-- Левая колонка: параметры и схема (30%) -->
     <div class="left-info">
         <aside class="product-panel">
             <h1 class="product-title" id="productTitle">Загрузка...</h1>
-
             <div class="price-block">
                 <div class="price-current" id="priceCurrent">--- <sup>₽</sup></div>
             </div>
-
             <div class="selected-material" id="selectedMaterialBlock">
                 <span id="selectedMaterialText">Материал не выбран</span>
                 <button id="chooseMaterialBtn" class="choose-material-btn">Выбрать материал</button>
             </div>
-
-            <!-- Кнопка добавления в корзину -->
             <div class="btn-cart-container" id="addToCartContainer" style="display: none;">
                 <button id="btnAddToCart" class="btn-cart">Добавить в корзину</button>
             </div>
         </aside>
-
         <div class="size-schema-block">
             <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
             <div id="featuresContainer"></div>
         </div>
     </div>
 
+    <!-- Правая колонка: галерея (70%) -->
     <section class="right-gallery desktop-gallery" id="gallerySection">
         <div class="gallery-wrapper" id="slider"></div>
         <div class="slider-dots" id="sliderDots"></div>
@@ -86,14 +85,6 @@
             <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
             <div class="phone-label">Звонок по России бесплатный</div>
             <div class="phone-number">8 (999) 700-05-50</div>
-            <div class="social-icons">
-                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank">
-                    <img src="/media/interface/vk.svg" alt="VK" class="vk-svg">
-                </a>
-                <a href="https://t.me/lutohayse" class="tg" target="_blank">
-                    <img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg">
-                </a>
-            </div>
         </div>
         <nav class="footer-nav">
             <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
@@ -117,7 +108,7 @@
             const resp = await fetch('/api/cart');
             const data = await resp.json();
             const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-            cartCountSpan.textContent = totalItems;
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
         } catch(e) { console.error(e); }
     }
 
@@ -174,26 +165,26 @@
 
         appendStaticFeatures(featuresContainer);
 
+        // Построение слайдера
         const slider = document.getElementById('slider');
         slider.innerHTML = '';
+        let allImages = [];
         if (photos.main.length === 0 && !photos.preview) {
-            slider.innerHTML = '<div class="slide"><img src="/media/interface/placeholder.png" alt="Нет фото"></div>';
+            allImages = ['/media/interface/placeholder.png'];
         } else {
-            const allMainPhotos = [...photos.main];
-            if (photos.preview && !allMainPhotos.includes(photos.preview)) {
-                allMainPhotos.unshift(photos.preview);
-            }
-            allMainPhotos.forEach(src => {
-                const slideDiv = document.createElement('div');
-                slideDiv.className = 'slide';
-                const img = document.createElement('img');
-                img.src = src;
-                img.alt = 'Фото товара';
-                slideDiv.appendChild(img);
-                slider.appendChild(slideDiv);
-            });
+            if (photos.preview) allImages.push(photos.preview);
+            allImages.push(...photos.main);
         }
-        initSlider();
+        allImages.forEach(src => {
+            const slideDiv = document.createElement('div');
+            slideDiv.className = 'slide';
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = 'Фото товара';
+            slideDiv.appendChild(img);
+            slider.appendChild(slideDiv);
+        });
+        initSlider(allImages.length);
 
         window.productCosts = costs;
     }
@@ -250,62 +241,84 @@
         container.appendChild(staticTable);
     }
 
-    function initSlider() {
-        const slider = document.getElementById('slider');
-        if (!slider) return;
-        const slides = Array.from(slider.querySelectorAll('.slide'));
-        if (slides.length <= 1) return;
-        let current = 0;
+    let currentSlide = 0;
+    let totalSlides = 0;
+    let sliderElement = null;
+    let isDragging = false;
+
+    function initSlider(slidesCount) {
+        totalSlides = slidesCount;
+        if (totalSlides <= 1) return;
+        sliderElement = document.getElementById('slider');
+        if (!sliderElement) return;
+        sliderElement.style.display = 'flex';
+        sliderElement.style.transition = 'transform 0.3s ease';
+        updateSliderTransform();
+
         const dotsContainer = document.getElementById('sliderDots');
         dotsContainer.innerHTML = '';
-        slides.forEach((_, i) => {
+        for (let i = 0; i < totalSlides; i++) {
             const dot = document.createElement('div');
             dot.className = 'dot' + (i === 0 ? ' active' : '');
-            dot.addEventListener('click', () => goToSlide(i));
+            dot.addEventListener('click', (function(idx) {
+                return function() { goToSlide(idx); };
+            })(i));
             dotsContainer.appendChild(dot);
-        });
-        function updateSlides() {
-            const shift = -current * 100;
-            slider.style.transform = `translateX(${shift}%)`;
-            document.querySelectorAll('.dot').forEach((d, i) => {
-                d.classList.toggle('active', i === current);
-            });
         }
-        function goToSlide(index) {
-            current = Math.max(0, Math.min(index, slides.length - 1));
-            updateSlides();
-        }
-        function next() { goToSlide(current + 1); }
-        function prev() { goToSlide(current - 1); }
-        let leftArrow = document.querySelector('.slider-arrow-left');
-        let rightArrow = document.querySelector('.slider-arrow-right');
-        if (!leftArrow) {
-            const gallery = document.querySelector('.right-gallery');
-            leftArrow = document.createElement('button');
-            rightArrow = document.createElement('button');
-            leftArrow.className = 'slider-arrow slider-arrow-left';
-            rightArrow.className = 'slider-arrow slider-arrow-right';
-            leftArrow.innerHTML = '←';
-            rightArrow.innerHTML = '→';
-            gallery.appendChild(leftArrow);
-            gallery.appendChild(rightArrow);
-        }
-        leftArrow.onclick = () => { prev(); };
-        rightArrow.onclick = () => { next(); };
-        let startX = 0;
-        slider.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; });
-        slider.addEventListener('touchend', (e) => {
-            const dx = e.changedTouches[0].clientX - startX;
-            if (Math.abs(dx) > 50) {
-                if (dx < 0) next(); else prev();
+
+        const gallery = document.getElementById('gallerySection');
+        gallery.addEventListener('mousemove', (e) => {
+            const rect = gallery.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const percent = Math.min(1, Math.max(0, mouseX / rect.width));
+            const newIndex = Math.floor(percent * totalSlides);
+            if (newIndex !== currentSlide) {
+                goToSlide(newIndex);
             }
         });
-        slider.style.display = 'flex';
-        slider.style.transition = 'transform 0.3s ease';
-        updateSlides();
+
+        let touchStartX = 0;
+        gallery.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            isDragging = true;
+        });
+        gallery.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const dx = e.touches[0].clientX - touchStartX;
+            if (Math.abs(dx) > 30) {
+                if (dx > 0 && currentSlide > 0) goToSlide(currentSlide - 1);
+                else if (dx < 0 && currentSlide < totalSlides - 1) goToSlide(currentSlide + 1);
+                isDragging = false;
+            }
+        });
+        gallery.addEventListener('touchend', () => {
+            isDragging = false;
+        });
     }
 
-    // Модалка выбора материала
+    function goToSlide(index) {
+        if (index < 0) index = 0;
+        if (index >= totalSlides) index = totalSlides - 1;
+        if (index === currentSlide) return;
+        currentSlide = index;
+        updateSliderTransform();
+        updateDots();
+    }
+
+    function updateSliderTransform() {
+        if (!sliderElement) return;
+        const shift = -currentSlide * 100;
+        sliderElement.style.transform = `translateX(${shift}%)`;
+    }
+
+    function updateDots() {
+        const dots = document.querySelectorAll('.dot');
+        dots.forEach((dot, i) => {
+            if (i === currentSlide) dot.classList.add('active');
+            else dot.classList.remove('active');
+        });
+    }
+
     const modal = document.getElementById('materialModal');
     const chooseBtn = document.getElementById('chooseMaterialBtn');
     const closeModalSpan = document.querySelector('.close-modal');
@@ -420,7 +433,6 @@
         if (e.target === modal) modal.style.display = 'none';
     });
 
-    // Добавление в корзину
     const addToCartBtn = document.getElementById('btnAddToCart');
     addToCartBtn.addEventListener('click', async () => {
         if (!selectedMaterial || !productData) {
@@ -433,13 +445,27 @@
             alert('Для выбранного материала не указана стоимость. Обратитесь к администратору.');
             return;
         }
+
+        // Запрос количества
+        let quantity = 1;
+        const inputQuantity = prompt('Введите количество:', '1');
+        if (inputQuantity === null) return; // отмена
+        const parsed = parseInt(inputQuantity, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+            quantity = parsed;
+        } else {
+            alert('Введите корректное целое число больше 0');
+            return;
+        }
+
         const payload = {
             product_code: product.code,
             product_name: product.name,
             material_id: selectedMaterial.id,
             material_code: selectedMaterial.code,
             material_name: selectedMaterial.name,
-            cost: costEntry.cost
+            cost: costEntry.cost,
+            quantity: quantity
         };
         try {
             const resp = await fetch('/api/cart/add', {
@@ -460,7 +486,6 @@
         }
     });
 
-    // Модалка "О нас"
     const aboutModal = document.getElementById('aboutModal');
     const aboutLink = document.getElementById('aboutLink');
     const closeAboutSpan = aboutModal.querySelector('.close');

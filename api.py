@@ -382,10 +382,14 @@ def add_to_cart():
     if not all(k in data for k in required):
         return jsonify({'error': 'Missing fields'}), 400
 
+    quantity = data.get('quantity', 1)
+    if not isinstance(quantity, int) or quantity < 1:
+        quantity = 1
+
     cart = get_cart_session()
     for item in cart:
         if item['product_code'] == data['product_code'] and item['material_id'] == data['material_id']:
-            item['quantity'] = item.get('quantity', 1) + 1
+            item['quantity'] = item.get('quantity', 1) + quantity
             save_cart_session(cart)
             return jsonify({'success': True, 'cart': cart})
 
@@ -397,11 +401,34 @@ def add_to_cart():
         'material_code': data['material_code'],
         'material_name': data['material_name'],
         'cost': data['cost'],
-        'quantity': 1
+        'quantity': quantity
     }
     cart.append(new_item)
     save_cart_session(cart)
     return jsonify({'success': True, 'cart': cart})
+
+
+@app.route('/api/cart/update/<item_id>', methods=['PUT'])
+def update_cart_item(item_id):
+    data = request.get_json()
+    if 'quantity' not in data:
+        return jsonify({'error': 'Missing quantity'}), 400
+    try:
+        new_quantity = int(data['quantity'])
+    except ValueError:
+        return jsonify({'error': 'Invalid quantity'}), 400
+
+    cart = get_cart_session()
+    for idx, item in enumerate(cart):
+        if item.get('id') == item_id:
+            if new_quantity <= 0:
+                # удаляем позицию
+                cart.pop(idx)
+            else:
+                item['quantity'] = new_quantity
+            save_cart_session(cart)
+            return jsonify({'success': True, 'cart': cart})
+    return jsonify({'error': 'Item not found'}), 404
 
 
 @app.route('/api/cart/remove/<item_id>', methods=['DELETE'])
