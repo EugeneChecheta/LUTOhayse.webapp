@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Корзина | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/cart.css">
+</head>
+<body>
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+                <nav class="menu__body menu__body-user">
+                    <ul class="menu__list">
+                        <li class="menu__item">
+                            <a href="/cart" class="menu__link cart-link">
+                                🛒 <span id="cart-count">0</span>
+                            </a>
+                        </li>
+                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="cart-container">
+    <h1>Корзина</h1>
+    <div id="cart-items"></div>
+    <div id="cart-total" class="cart-total"></div>
+    <div id="order-form" class="order-form" style="display: none;">
+        <h2>Оформление заказа</h2>
+        <form id="order-form-fields">
+            <div class="form-group">
+                <label>ФИО *</label>
+                <input type="text" id="user_name" required>
+            </div>
+            <div class="form-group">
+                <label>Телефон *</label>
+                <input type="tel" id="phone" required>
+            </div>
+            <div class="form-group">
+                <label>Электронная почта</label>
+                <input type="email" id="email">
+            </div>
+            <div class="form-group">
+                <label>Адрес доставки</label>
+                <textarea id="address" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Комментарий к заказу</label>
+                <textarea id="comment" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Удобное время для связи</label>
+                <input type="text" id="contact_time" placeholder="например: с 10 до 18">
+            </div>
+            <button type="submit" class="submit-order">Оформить заказ</button>
+        </form>
+    </div>
+</main>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div class="social-icons">
+                <a href="https://vk.com/im/convo/-237299700" class="vk" target="_blank"><img src="/media/interface/vk.svg" alt="VK" class="vk-svg"></a>
+                <a href="https://t.me/lutohayse" class="tg" target="_blank"><img src="/media/interface/tg.svg" alt="Telegram" class="tg-svg"></a>
+            </div>
+        </div>
+        <nav class="footer-nav">
+            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
+            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
+            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
+        </nav>
+    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+</footer>
+
+<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
+
+<script>
+    const cartCountSpan = document.getElementById('cart-count');
+    const cartItemsDiv = document.getElementById('cart-items');
+    const cartTotalDiv = document.getElementById('cart-total');
+    const orderFormDiv = document.getElementById('order-form');
+
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            cartCountSpan.textContent = totalItems;
+            return data;
+        } catch(e) { console.error(e); return { items: [], total: 0 }; }
+    }
+
+    async function renderCart() {
+        const data = await updateCartCount();
+        const items = data.items;
+        const total = data.total;
+        if (!items.length) {
+            cartItemsDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/">каталог</a>.</p>';
+            cartTotalDiv.innerHTML = '';
+            orderFormDiv.style.display = 'none';
+            return;
+        }
+        let html = '<div class="cart-items-list">';
+        items.forEach(item => {
+            html += `
+                <div class="cart-item" data-id="${item.id}">
+                    <div class="item-info">
+                        <strong>${escapeHtml(item.product_name)}</strong><br>
+                        Код товара: ${escapeHtml(item.product_code)}<br>
+                        Материал: ${escapeHtml(item.material_name)} (${escapeHtml(item.material_code)})<br>
+                        Цена: ${item.cost} ₽<br>
+                        Количество: ${item.quantity || 1}
+                    </div>
+                    <button class="remove-item" data-id="${item.id}">Удалить</button>
+                </div>
+            `;
+        });
+        html += '</div>';
+        cartItemsDiv.innerHTML = html;
+        cartTotalDiv.innerHTML = `<strong>Итого: ${total} ₽</strong>`;
+        orderFormDiv.style.display = 'block';
+        document.querySelectorAll('.remove-item').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const id = btn.dataset.id;
+                await fetch(`/api/cart/remove/${id}`, { method: 'DELETE' });
+                renderCart();
+            });
+        });
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    document.getElementById('order-form-fields').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = {
+            user_name: document.getElementById('user_name').value.trim(),
+            phone: document.getElementById('phone').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            address: document.getElementById('address').value.trim(),
+            comment: document.getElementById('comment').value.trim(),
+            contact_time: document.getElementById('contact_time').value.trim()
+        };
+        if (!formData.user_name || !formData.phone) {
+            alert('Пожалуйста, заполните ФИО и номер телефона');
+            return;
+        }
+        try {
+            const resp = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+            const result = await resp.json();
+            if (result.success) {
+                alert('Заказ успешно оформлен! Номер заказа: ' + result.order_id);
+                window.location.href = '/';
+            } else {
+                alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Не удалось оформить заказ');
+        }
+    });
+
+    // Модалка "О нас"
+    const aboutModal = document.getElementById('aboutModal');
+    const aboutLink = document.getElementById('aboutLink');
+    const closeSpan = document.querySelector('.close');
+    aboutLink.onclick = (e) => { e.preventDefault(); aboutModal.style.display = 'block'; };
+    closeSpan.onclick = () => aboutModal.style.display = 'none';
+    window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
+
+    renderCart();
+    setInterval(renderCart, 5000);
+</script>
+</body>
+</html>

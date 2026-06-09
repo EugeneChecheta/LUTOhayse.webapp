@@ -23,6 +23,11 @@
                 </nav>
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
+                        <li class="menu__item">
+                            <a href="/cart" class="menu__link cart-link">
+                                🛒 <span id="cart-count">0</span>
+                            </a>
+                        </li>
                         <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
                     </ul>
                 </nav>
@@ -80,8 +85,19 @@
     const errorBlock = document.getElementById('catalog-error');
     const typeSelect = document.getElementById('type-select');
     const flagsContainer = document.getElementById('flags-checkboxes');
+    const cartCountSpan = document.getElementById('cart-count');
 
     let currentTimeout = null;
+
+    // Функция обновления счётчика корзины
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            cartCountSpan.textContent = totalItems;
+        } catch(e) { console.error(e); }
+    }
 
     function escapeHtml(str) {
         return str.replace(/[&<>]/g, function(m) {
@@ -191,6 +207,8 @@
     window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 
     loadFilters();
+    updateCartCount();
+    setInterval(updateCartCount, 5000); // обновляем каждые 5 секунд
 </script>
 </body>
 </html>

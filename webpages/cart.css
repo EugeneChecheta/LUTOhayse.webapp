@@ -1,0 +1,213 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+:root {
+    --main-color: #000;
+    --accent-color: #628b35;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    background-color: #fff;
+    color: var(--main-color);
+}
+
+.main__header {
+    padding: 10px 0;
+    box-shadow: inset 0px -1px 0px rgba(0,0,0,0.1);
+    background-color: #f9f9f9;
+}
+.header__container {
+    max-width: 1920px;
+    margin: 0 auto;
+    padding: 0 55px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.menu__body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.menu__list {
+    display: flex;
+    align-items: center;
+    column-gap: 40px;
+    list-style: none;
+}
+.menu__link {
+    text-decoration: none;
+    color: var(--main-color);
+    font-weight: 500;
+    transition: color 0.3s;
+}
+.menu__link:hover { color: var(--accent-color); }
+.logo {
+    font-size: 35px;
+    font-weight: 700;
+}
+.logo-link {
+    display: inline-flex;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--main-color);
+}
+.logo-sub {
+    font-size: 24px;
+    font-weight: 400;
+    margin-left: 2px;
+}
+.cart-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+@media (max-width: 768px) {
+    .header__container { justify-content: center; gap: 15px; }
+    .menu__list { column-gap: 20px; }
+    .logo-sub { font-size: 18px; }
+    .header__container { padding: 0 20px; }
+}
+
+.cart-container {
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 20px;
+}
+.cart-container h1 {
+    margin-bottom: 30px;
+    font-size: 32px;
+}
+.cart-items-list {
+    background: #f9f9f9;
+    border-radius: 16px;
+    padding: 20px;
+}
+.cart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+    padding: 15px 0;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+.cart-item:last-child {
+    border-bottom: none;
+}
+.item-info {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.5;
+}
+.remove-item {
+    background: #e3342f;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.remove-item:hover {
+    background: #cc1f1a;
+}
+.cart-total {
+    text-align: right;
+    font-size: 24px;
+    margin: 20px 0;
+}
+.order-form {
+    background: #f9f9f9;
+    border-radius: 16px;
+    padding: 25px;
+    margin-top: 30px;
+}
+.order-form h2 {
+    margin-bottom: 20px;
+}
+.form-group {
+    margin-bottom: 20px;
+}
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+.form-group input, .form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 16px;
+}
+.submit-order {
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.submit-order:hover {
+    background: #4a6b27;
+}
+
+footer {
+    margin-top: 60px;
+    background: #fff;
+    border-top: 1px solid #ddd;
+    padding: 40px 20px 20px;
+}
+.footer-top {
+    max-width: 1200px;
+    margin: 0 auto 30px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+.footer-left .logo { font-size: 28px; }
+.social-icons { display: flex; gap: 15px; }
+.vk-svg, .tg-svg { width: 38px; }
+.footer-nav { display: flex; gap: 40px; flex-wrap: wrap; }
+.footer-column ul { list-style: none; }
+.footer-column a { text-decoration: none; color: #777; }
+.footer-bottom {
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+    border-top: 1px solid #ddd;
+    padding-top: 15px;
+}
+.modal {
+    display: none;
+    position: fixed;
+    left:0; top:0;
+    width:100%; height:100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    margin: 20% auto;
+    padding: 20px;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 12px;
+}
+.close {
+    float: right;
+    font-size: 28px;
+    cursor: pointer;
+}

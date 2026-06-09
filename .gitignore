@@ -1,3 +1,7 @@
 code.txt
 telegram_admin_panel/config_db.txt
 telegram_admin_panel/token.txt
+telegram_admin_panel/admin_ids.txt
+telegram_order_panel/config_db.txt
+telegram_order_panel/token.txt
+telegram_order_panel/admin_ids.txt

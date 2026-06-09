@@ -1,8 +1,11 @@
+===== Файл: telegram_admin_panel/SQL-запрос для создания бд.txt =====
 -- #########################################################################
 -- # LUTO SHOP DATABASE
--- # PostgreSQL Production Structure (с материалами)
+-- # PostgreSQL Production Structure (с материалами и заказами)
 -- #########################################################################
 
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS flags_for_products CASCADE;
 DROP TABLE IF EXISTS materials_for_products CASCADE;
 DROP TABLE IF EXISTS product_main_features CASCADE;
@@ -61,7 +64,7 @@ CREATE TABLE materials_type (
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
--- ==================== materials (НОВАЯ ТАБЛИЦА) ====================
+-- ==================== materials ====================
 CREATE TABLE materials (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code VARCHAR(100) NOT NULL UNIQUE,
@@ -123,6 +126,31 @@ CREATE TABLE product_extra_features (
         ON DELETE CASCADE
 );
 
+-- ==================== ЗАКАЗЫ ====================
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL,
+    user_name VARCHAR(200) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(200),
+    address TEXT,
+    comment TEXT,
+    contact_time VARCHAR(100),
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'Ожидает подтверждения'
+);
+
+CREATE TABLE order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+    product_code VARCHAR(100) NOT NULL,
+    product_name VARCHAR(200) NOT NULL,
+    material_code VARCHAR(100) NOT NULL,
+    material_name VARCHAR(200) NOT NULL,
+    cost INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1
+);
+
 -- ==================== ИНДЕКСЫ ====================
 CREATE INDEX idx_products_code ON products(code);
 CREATE INDEX idx_products_type ON products(products_type_id);
@@ -134,3 +162,5 @@ CREATE INDEX idx_ffp_product ON flags_for_products(products_id);
 CREATE INDEX idx_main_features_types_name ON main_features_types(name);
 CREATE INDEX idx_pmf_product ON product_main_features(products_id);
 CREATE INDEX idx_pef_product ON product_extra_features(products_id);
+CREATE INDEX idx_orders_session ON orders(session_id);
+CREATE INDEX idx_orders_date ON orders(order_date);

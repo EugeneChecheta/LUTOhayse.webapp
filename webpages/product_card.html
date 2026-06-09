@@ -24,6 +24,11 @@
                 </nav>
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
+                        <li class="menu__item">
+                            <a href="/cart" class="menu__link cart-link">
+                                🛒 <span id="cart-count">0</span>
+                            </a>
+                        </li>
                         <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
                     </ul>
                 </nav>
@@ -42,31 +47,23 @@
                 <div class="price-current" id="priceCurrent">--- <sup>₽</sup></div>
             </div>
 
-            <!-- Блок выбранного материала -->
             <div class="selected-material" id="selectedMaterialBlock">
                 <span id="selectedMaterialText">Материал не выбран</span>
                 <button id="chooseMaterialBtn" class="choose-material-btn">Выбрать материал</button>
             </div>
 
-            <!-- Кнопка заказа (активируется после выбора материала) -->
-            <div class="btn-cart-container" id="orderBtnContainer" style="display: none;">
-                <a href="#" class="btn-cart" id="btnAddToCart">Заказать</a>
-                <ul class="dropdown">
-                    <li><a href="#" id="vkOrderLink" class="dropdown-item" target="_blank">Через чат-бот ВКонтакте<img src="/media/svg/vkontakte.svg" alt="VK"></a></li>
-                    <li><a href="#" id="waOrderLink" class="dropdown-item" target="_blank">Через Whatsapp <img src="/media/svg/whatsapp.svg" alt="WhatsApp"></a></li>
-                    <li><a href="tel:+79997000550" class="dropdown-item">Позвоните нам (+7 999 700 05 50)<img src="/media/svg/phone.svg" alt="Phone"></a></li>
-                </ul>
+            <!-- Кнопка добавления в корзину -->
+            <div class="btn-cart-container" id="addToCartContainer" style="display: none;">
+                <button id="btnAddToCart" class="btn-cart">Добавить в корзину</button>
             </div>
         </aside>
 
-        <!-- Схема (size фото) и характеристики -->
         <div class="size-schema-block">
             <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
             <div id="featuresContainer"></div>
         </div>
     </div>
 
-    <!-- Правая колонка – основные фото (галерея) -->
     <section class="right-gallery desktop-gallery" id="gallerySection">
         <div class="gallery-wrapper" id="slider"></div>
         <div class="slider-dots" id="sliderDots"></div>
@@ -110,20 +107,20 @@
 <div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
 <script>
-    // ---------- Глобальные переменные ----------
-    let productData = null;        // полные данные товара (из API)
-    let selectedMaterial = null;   // выбранный материал { id, code, name, type_id, type_name, photo_url }
+    let productData = null;
+    let selectedMaterial = null;
+    const productCode = window.location.pathname.split('/').pop();
+    const cartCountSpan = document.getElementById('cart-count');
 
-    // Получаем код товара из URL
-    const pathParts = window.location.pathname.split('/');
-    const productCode = pathParts[pathParts.length - 1];
-    if (!productCode) {
-        document.getElementById('productTitle').innerText = 'Ошибка: товар не указан';
-    } else {
-        loadProduct(productCode);
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            cartCountSpan.textContent = totalItems;
+        } catch(e) { console.error(e); }
     }
 
-    // ---------- Загрузка данных товара ----------
     async function loadProduct(code) {
         try {
             const resp = await fetch(`/api/product/${code}`);
@@ -136,7 +133,6 @@
         }
     }
 
-    // ---------- Отрисовка товара ----------
     function renderProduct(data) {
         const product = data.product;
         const costs = data.costs || [];
@@ -145,20 +141,16 @@
         const photos = data.photos || { preview: null, size: null, main: [] };
 
         document.getElementById('productTitle').innerText = product.name;
-        // Цена пока не выбрана
         document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
 
-        // Схема (size фото)
         const sizeImg = document.getElementById('sizeImage');
         if (photos.size) {
             sizeImg.src = photos.size;
-            sizeImg.alt = 'Габаритный чертёж';
             sizeImg.style.display = 'block';
         } else {
             sizeImg.style.display = 'none';
         }
 
-        // Характеристики
         const featuresContainer = document.getElementById('featuresContainer');
         featuresContainer.innerHTML = '';
 
@@ -182,7 +174,6 @@
 
         appendStaticFeatures(featuresContainer);
 
-        // Галерея основных фото
         const slider = document.getElementById('slider');
         slider.innerHTML = '';
         if (photos.main.length === 0 && !photos.preview) {
@@ -204,8 +195,7 @@
         }
         initSlider();
 
-        // Сохраняем costs в глобальной переменной для доступа при выборе материала
-        window.productCosts = costs; // массив {id, name, cost} где id - materials_type_id
+        window.productCosts = costs;
     }
 
     function createFeatureTable(features, isExtra = false) {
@@ -242,12 +232,10 @@
             { name: "Наполнение", value: "ППУ" },
             { name: "Особенности", value: "Ортопедические свойства; на ножках" }
         ];
-
         const staticTitle = document.createElement('h3');
         staticTitle.textContent = 'Общие характеристики';
         staticTitle.className = 'features-title';
         container.appendChild(staticTitle);
-
         const staticTable = document.createElement('table');
         staticTable.className = 'spec-table';
         const tbody = document.createElement('tbody');
@@ -262,13 +250,11 @@
         container.appendChild(staticTable);
     }
 
-    // ---------- Слайдер ----------
     function initSlider() {
         const slider = document.getElementById('slider');
         if (!slider) return;
         const slides = Array.from(slider.querySelectorAll('.slide'));
         if (slides.length <= 1) return;
-
         let current = 0;
         const dotsContainer = document.getElementById('sliderDots');
         dotsContainer.innerHTML = '';
@@ -278,7 +264,6 @@
             dot.addEventListener('click', () => goToSlide(i));
             dotsContainer.appendChild(dot);
         });
-
         function updateSlides() {
             const shift = -current * 100;
             slider.style.transform = `translateX(${shift}%)`;
@@ -286,15 +271,12 @@
                 d.classList.toggle('active', i === current);
             });
         }
-
         function goToSlide(index) {
             current = Math.max(0, Math.min(index, slides.length - 1));
             updateSlides();
         }
-
         function next() { goToSlide(current + 1); }
         function prev() { goToSlide(current - 1); }
-
         let leftArrow = document.querySelector('.slider-arrow-left');
         let rightArrow = document.querySelector('.slider-arrow-right');
         if (!leftArrow) {
@@ -310,7 +292,6 @@
         }
         leftArrow.onclick = () => { prev(); };
         rightArrow.onclick = () => { next(); };
-
         let startX = 0;
         slider.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; });
         slider.addEventListener('touchend', (e) => {
@@ -319,19 +300,17 @@
                 if (dx < 0) next(); else prev();
             }
         });
-
         slider.style.display = 'flex';
         slider.style.transition = 'transform 0.3s ease';
         updateSlides();
     }
 
-    // ---------- Работа с модальным окном выбора материалов ----------
+    // Модалка выбора материала
     const modal = document.getElementById('materialModal');
     const chooseBtn = document.getElementById('chooseMaterialBtn');
     const closeModalSpan = document.querySelector('.close-modal');
-
-    // Загружаем все материалы из API
     let allMaterials = [];
+
     async function loadMaterials() {
         try {
             const resp = await fetch('/api/materials');
@@ -343,7 +322,6 @@
         }
     }
 
-    // Открытие модалки с отрисовкой табов и карточек
     async function openMaterialModal() {
         if (allMaterials.length === 0) {
             await loadMaterials();
@@ -353,7 +331,6 @@
     }
 
     function renderMaterialTabsAndGrid() {
-        // Группируем материалы по типам
         const groups = {};
         allMaterials.forEach(mat => {
             if (!groups[mat.materials_type_id]) {
@@ -366,8 +343,6 @@
             groups[mat.materials_type_id].items.push(mat);
         });
         const typeIds = Object.keys(groups).map(Number);
-
-        // Создаём табы
         const tabsContainer = document.getElementById('materialTabs');
         tabsContainer.innerHTML = '';
         typeIds.forEach((typeId, idx) => {
@@ -382,8 +357,6 @@
             });
             tabsContainer.appendChild(tab);
         });
-
-        // Показываем первую группу
         if (typeIds.length) {
             renderMaterialGrid(groups[typeIds[0]].items);
         } else {
@@ -403,24 +376,19 @@
             card.dataset.typeId = mat.materials_type_id;
             card.dataset.typeName = mat.type_name;
             card.dataset.photo = mat.photo_url || '/media/interface/placeholder.png';
-
             const img = document.createElement('img');
             img.src = card.dataset.photo;
             img.alt = mat.name;
             img.onerror = () => { img.src = '/media/interface/placeholder.png'; };
-
             const nameSpan = document.createElement('div');
             nameSpan.className = 'material-name';
             nameSpan.textContent = mat.name;
-
             const codeSpan = document.createElement('div');
             codeSpan.className = 'material-code';
             codeSpan.textContent = `Код: ${mat.code}`;
-
             card.appendChild(img);
             card.appendChild(nameSpan);
             card.appendChild(codeSpan);
-
             card.addEventListener('click', () => selectMaterial(mat));
             container.appendChild(card);
         });
@@ -428,11 +396,8 @@
 
     function selectMaterial(mat) {
         selectedMaterial = mat;
-        // Обновляем отображение в основном блоке
         const selectedText = document.getElementById('selectedMaterialText');
         selectedText.innerHTML = `Выбран материал: <strong>${mat.name}</strong> (${mat.code})`;
-
-        // Обновляем цену: ищем в productData.costs запись с materials_type_id == mat.materials_type_id
         if (window.productCosts && window.productCosts.length) {
             const costEntry = window.productCosts.find(c => c.id === mat.materials_type_id);
             if (costEntry) {
@@ -443,59 +408,69 @@
         } else {
             document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
         }
-
-        // Показываем кнопку заказа
-        document.getElementById('orderBtnContainer').style.display = 'block';
-
-        // Закрываем модалку
+        document.getElementById('addToCartContainer').style.display = 'block';
         modal.style.display = 'none';
     }
 
     chooseBtn.addEventListener('click', openMaterialModal);
     if (closeModalSpan) {
-        closeModalSpan.addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
+        closeModalSpan.addEventListener('click', () => { modal.style.display = 'none'; });
     }
     window.addEventListener('click', (e) => {
         if (e.target === modal) modal.style.display = 'none';
     });
 
-    // ---------- Кнопка заказа (выпадающее меню с параметрами) ----------
-    const orderContainer = document.getElementById('orderBtnContainer');
-    const btnCart = document.getElementById('btnAddToCart');
-    const vkLink = document.getElementById('vkOrderLink');
-    const waLink = document.getElementById('waOrderLink');
-
-    function updateOrderLinks() {
-        if (!selectedMaterial || !productData) return;
+    // Добавление в корзину
+    const addToCartBtn = document.getElementById('btnAddToCart');
+    addToCartBtn.addEventListener('click', async () => {
+        if (!selectedMaterial || !productData) {
+            alert('Сначала выберите материал');
+            return;
+        }
         const product = productData.product;
-        const message = `Здравствуйте! Хочу заказать товар:\nКод товара: ${product.code}\nНазвание: ${product.name}\nВыбранный материал: ${selectedMaterial.name} (${selectedMaterial.code})`;
-        const encodedMsg = encodeURIComponent(message);
-        vkLink.href = `https://vk.com/im/convo/-237299700?text=${encodedMsg}`;
-        waLink.href = `https://wa.me/79997000550?text=${encodedMsg}`;
-    }
-
-    btnCart.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (selectedMaterial) {
-            orderContainer.classList.toggle('open');
-            updateOrderLinks();
-        } else {
-            alert('Сначала выберите материал!');
+        const costEntry = window.productCosts.find(c => c.id === selectedMaterial.materials_type_id);
+        if (!costEntry) {
+            alert('Для выбранного материала не указана стоимость. Обратитесь к администратору.');
+            return;
+        }
+        const payload = {
+            product_code: product.code,
+            product_name: product.name,
+            material_id: selectedMaterial.id,
+            material_code: selectedMaterial.code,
+            material_name: selectedMaterial.name,
+            cost: costEntry.cost
+        };
+        try {
+            const resp = await fetch('/api/cart/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (data.success) {
+                alert('Товар добавлен в корзину');
+                updateCartCount();
+            } else {
+                alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Не удалось добавить товар в корзину');
         }
     });
-    document.addEventListener('click', (e) => {
-        if (!orderContainer.contains(e.target)) orderContainer.classList.remove('open');
-    });
 
-    // ---------- Модалка "О нас" ----------
+    // Модалка "О нас"
     const aboutModal = document.getElementById('aboutModal');
     const aboutLink = document.getElementById('aboutLink');
     const closeAboutSpan = aboutModal.querySelector('.close');
     aboutLink.onclick = (e) => { e.preventDefault(); aboutModal.style.display = 'block'; };
     closeAboutSpan.onclick = () => aboutModal.style.display = 'none';
     window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
+
+    loadProduct(productCode);
+    updateCartCount();
+    setInterval(updateCartCount, 5000);
 </script>
 </body>
 </html>
