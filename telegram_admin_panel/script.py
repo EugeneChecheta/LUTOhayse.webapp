@@ -2,6 +2,7 @@
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL).
 Добавлена поддержка материалов: CRUD, фотографии (одно фото на материал).
+Исправлена стабильность: обработка выхода из разговоров, предотвращение зависаний.
 """
 
 import asyncio
@@ -688,6 +689,25 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new
     ]
     await send_or_edit_message(update, context, "🔧 *Главное меню*",
                                InlineKeyboardMarkup(keyboard), new_message)
+
+# Функции для безопасного выхода из разговоров
+async def cancel_to_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Завершает текущий разговор и показывает редактирование товара."""
+    query = update.callback_query
+    await query.answer()
+    prod_id = int(query.data.split("_")[-1])
+    await show_product_edit(update, context, prod_id)
+    return ConversationHandler.END
+
+async def exit_to_materials_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выход из разговора в список материалов."""
+    await materials_page_callback(update, context)
+    return ConversationHandler.END
+
+async def exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выход из разговора в главное меню."""
+    await main_menu_callback(update, context)
+    return ConversationHandler.END
 
 # ------------------------- Управление флагами -------------------------
 async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
@@ -2442,7 +2462,17 @@ def register_handlers(app: Application):
             ADD_PROD_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_code)],
             ADD_PROD_TYPE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_type_id)],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+            CallbackQueryHandler(cancel, pattern="^menu_flags$"),
+            CallbackQueryHandler(cancel, pattern="^menu_prod_types$"),
+            CallbackQueryHandler(cancel, pattern="^menu_mat_types$"),
+            CallbackQueryHandler(cancel, pattern="^menu_materials$"),
+            CallbackQueryHandler(cancel, pattern="^menu_main_features$"),
+            CallbackQueryHandler(cancel, pattern="^menu_search$"),
+        ],
         per_message=False,
     )
     app.add_handler(add_prod_conv)
@@ -2451,7 +2481,11 @@ def register_handlers(app: Application):
     edit_name_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_name_entry, pattern="^prod_edit_name_\\d+$")],
         states={EDIT_PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)]},
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(edit_name_conv)
@@ -2459,7 +2493,11 @@ def register_handlers(app: Application):
     edit_code_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_code_entry, pattern="^prod_edit_code_\\d+$")],
         states={EDIT_PROD_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_code)]},
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(edit_code_conv)
@@ -2467,7 +2505,11 @@ def register_handlers(app: Application):
     edit_type_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_type_entry, pattern="^prod_edit_type_\\d+$")],
         states={EDIT_PROD_TYPE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_type_id)]},
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(edit_type_conv)
@@ -2475,11 +2517,19 @@ def register_handlers(app: Application):
     # Редактирование флагов
     edit_flags_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_flags_start, pattern="^prod_edit_flags_\\d+$")],
-        states={EDIT_PROD_FLAGS: [
-            CallbackQueryHandler(edit_product_toggle_flag, pattern="^prod_toggle_flag_\\d+_\\d+$"),
-            CallbackQueryHandler(edit_product_save_flags, pattern="^prod_save_flags_\\d+$"),
-        ]},
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        states={
+            EDIT_PROD_FLAGS: [
+                CallbackQueryHandler(edit_product_toggle_flag, pattern="^prod_toggle_flag_\\d+_\\d+$"),
+                CallbackQueryHandler(edit_product_save_flags, pattern="^prod_save_flags_\\d+$"),
+                # Обработка кнопки "Отмена"
+                CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(edit_flags_conv)
@@ -2502,7 +2552,11 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(edit_product_cost_cancel, pattern="^prod_cost_cancel_\\d+$"),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(edit_cost_conv)
@@ -2525,9 +2579,14 @@ def register_handlers(app: Application):
             PHOTO_DELETE_SELECT: [
                 CallbackQueryHandler(photo_delete_execute, pattern="^photo_del_"),
                 CallbackQueryHandler(photo_cancel, pattern="^photo_cancel$"),
+                CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_products$"),
+        ],
         per_message=False,
     )
     app.add_handler(photo_conv)
@@ -2640,7 +2699,10 @@ def register_handlers(app: Application):
     prod_main_feat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(product_main_features_menu, pattern="^prod_main_features_\\d+$")],
         states={
-            PROD_MAIN_FEATURES: [CallbackQueryHandler(product_main_feature_edit, pattern="^prod_mainfeat_edit_\\d+_\\d+$")],
+            PROD_MAIN_FEATURES: [
+                CallbackQueryHandler(product_main_feature_edit, pattern="^prod_mainfeat_edit_\\d+_\\d+$"),
+                CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
+            ],
             PROD_MAIN_FEATURE_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_main_feature_save)],
         },
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
@@ -2659,6 +2721,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(product_extra_cancel, pattern="^prod_extra_cancel_\\d+$"),
                 CallbackQueryHandler(product_extra_edit_name, pattern="^extra_edit_name$"),
                 CallbackQueryHandler(product_extra_edit_value, pattern="^extra_edit_value$"),
+                CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
             ],
             PROD_EXTRA_FEATURE_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_extra_add_value)],
             PROD_EXTRA_FEATURE_ADD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_extra_save_new)],
@@ -2687,6 +2750,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(search_type_skip, pattern="^search_type_skip$"),
                 CallbackQueryHandler(search_type_next, pattern="^search_type_next$"),
                 CallbackQueryHandler(show_type_selection, pattern="^search_type_page_\\d+$"),
+                CallbackQueryHandler(cancel, pattern="^main_menu$"),
             ],
             SEARCH_FLAGS_SELECT: [
                 CallbackQueryHandler(search_flag_toggle, pattern="^search_flag_toggle_\\d+$"),
@@ -2694,6 +2758,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(search_flag_finish, pattern="^search_flag_finish$"),
                 CallbackQueryHandler(search_back_to_type, pattern="^search_back_to_type$"),
                 CallbackQueryHandler(show_flag_selection, pattern="^search_flag_page_\\d+$"),
+                CallbackQueryHandler(cancel, pattern="^main_menu$"),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
@@ -2728,6 +2793,9 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(material_edit_type, pattern="^mat_edit_type$"),
                 CallbackQueryHandler(material_edit_photo, pattern="^mat_edit_photo$"),
                 CallbackQueryHandler(material_edit_delete, pattern="^mat_edit_delete$"),
+                # Выход в список материалов и главное меню
+                CallbackQueryHandler(exit_to_materials_page, pattern="^materials_page_\\d+$"),
+                CallbackQueryHandler(exit_to_main_menu, pattern="^main_menu$"),
             ],
             EDIT_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_name)],
             EDIT_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_code)],
@@ -2760,13 +2828,13 @@ async def main():
         write_timeout=30.0,
         pool_timeout=30.0
     )
-    app = Application.builder().token(TOKEN).request(request).build()
-    register_handlers(app)
+    application = Application.builder().token(TOKEN).request(request).build()
+    register_handlers(application)
 
-    await app.initialize()
-    await app.start()
+    await application.initialize()
+    await application.start()
     logging.info("Бот запущен с поддержкой материалов.")
-    await app.updater.start_polling()
+    await application.updater.start_polling()
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
