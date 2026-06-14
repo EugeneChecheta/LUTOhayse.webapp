@@ -10,7 +10,6 @@
 </head>
 <body>
 
-<!-- Фиксированная корзина в правом верхнем углу -->
 <div class="cart-icon-wrapper">
     <a href="/cart" class="cart-fixed-link">
         <img src="/media/interface/cart_icon.svg" alt="Корзина">
@@ -36,6 +35,9 @@
                         <li class="menu__item">
                             <a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a>
                         </li>
+                        <li class="menu__item">
+                            <a href="/login" class="menu__link" id="authLink">Войти</a>
+                        </li>
                     </ul>
                 </nav>
             </div>
@@ -43,7 +45,6 @@
     </section>
 </header>
 
-<!-- Карусель -->
 <section class="carousel" id="mainCarousel">
     <div class="carousel-inner"></div>
     <button class="carousel-control prev" id="prevSlide">❮</button>
@@ -51,7 +52,6 @@
     <div class="carousel-dots" id="carouselDots"></div>
 </section>
 
-<!-- Блок кнопок: Каталог, Корзина, Заказы (вместо категорий) -->
 <div class="slider-container" id="actionButtonsContainer">
     <a href="/catalog" class="slider-item">
         <img src="/media/index/catalog_icon.svg" alt="Каталог" onerror="this.src='/media/interface/placeholder.png'">
@@ -67,7 +67,6 @@
     </div>
 </div>
 
-<!-- Популярные товары / Хиты -->
 <section class="featured-products">
     <div class="section-header">
         <h2>Популярные товары</h2>
@@ -78,7 +77,6 @@
     </div>
 </section>
 
-<!-- О компании (кратко) -->
 <section class="about-short">
     <div class="about-container">
         <h2>LUTOhayse — мебель, созданная для вас</h2>
@@ -86,7 +84,6 @@
     </div>
 </section>
 
-<!-- Преимущества и FAQ -->
 <section class="custom-section">
     <div class="container custom-grid">
         <div class="advantages">
@@ -166,7 +163,6 @@
     </div>
 </footer>
 
-<!-- Модальные окна -->
 <div id="aboutModal" class="modal">
     <div class="modal-content">
         <span class="close">&times;</span>
@@ -190,13 +186,11 @@
 </div>
 
 <script>
-    // ------------------------- HELPER -------------------------
     async function fetchJSON(url) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
     }
-
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
@@ -207,7 +201,23 @@
         });
     }
 
-    // ------------------------- КОРЗИНА -------------------------
+    // Обновление ссылки на профиль
+    async function updateAuthLink() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            const authLink = document.getElementById('authLink');
+            if (data.authenticated) {
+                authLink.textContent = 'Личный кабинет';
+                authLink.href = '/profile';
+            } else {
+                authLink.textContent = 'Войти';
+                authLink.href = '/login';
+            }
+        } catch(e) { console.error(e); }
+    }
+    updateAuthLink();
+
     async function updateCartCount() {
         try {
             const data = await fetchJSON('/api/cart');
@@ -219,7 +229,6 @@
     updateCartCount();
     setInterval(updateCartCount, 5000);
 
-    // ------------------------- КАРУСЕЛЬ -------------------------
     const carouselImages = [
         '/media/index/carousel_1.webp',
         '/media/index/carousel_2.webp',
@@ -278,7 +287,6 @@
         autoInterval = setInterval(() => nextSlide(), 4000);
     }
 
-    // ------------------------- ПОПУЛЯРНЫЕ ТОВАРЫ -------------------------
     async function loadFeaturedProducts() {
         const container = document.getElementById('featuredProducts');
         try {
@@ -310,7 +318,6 @@
         }
     }
 
-    // ------------------------- МОДАЛЬНЫЕ ОКНА -------------------------
     function initModals() {
         const aboutModal = document.getElementById('aboutModal');
         const contactsModal = document.getElementById('contactsModal');
@@ -319,7 +326,6 @@
         const contactsBtn = document.getElementById('contactsBtn');
         const ordersBtn = document.getElementById('ordersButton');
         const closeBtns = document.querySelectorAll('.modal .close');
-
         aboutBtn.onclick = () => aboutModal.style.display = 'block';
         contactsBtn.onclick = () => contactsModal.style.display = 'block';
         ordersBtn.onclick = () => ordersModal.style.display = 'block';
@@ -337,13 +343,11 @@
         };
     }
 
-    // ------------------------- ИНИЦИАЛИЗАЦИЯ -------------------------
     document.addEventListener('DOMContentLoaded', () => {
         buildCarousel();
         document.getElementById('prevSlide').addEventListener('click', prevSlide);
         document.getElementById('nextSlide').addEventListener('click', nextSlide);
         resetAutoSlide();
-
         loadFeaturedProducts();
         initModals();
     });

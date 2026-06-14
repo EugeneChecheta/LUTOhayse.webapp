@@ -11,6 +11,7 @@ import threading
 import json
 import urllib.request
 import urllib.error
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = secrets.token_hex(24)
@@ -111,10 +112,27 @@ def send_order_notification(order_id, user_name, phone, total_sum):
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
+
+    # Таблицы для пользователей
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            phone VARCHAR(50) UNIQUE NOT NULL,
+            password_hash VARCHAR(256) NOT NULL,
+            full_name VARCHAR(200),
+            email VARCHAR(200),
+            address TEXT,
+            contact_time VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # Заказы с привязкой к пользователю (user_id может быть NULL для гостей)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id SERIAL PRIMARY KEY,
-            session_id VARCHAR(100) NOT NULL,
+            session_id VARCHAR(100),
+            user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
             user_name VARCHAR(200) NOT NULL,
             phone VARCHAR(50) NOT NULL,
             email VARCHAR(200),
@@ -135,6 +153,7 @@ def init_db():
             quantity INTEGER DEFAULT 1
         );
     """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -355,6 +374,188 @@ def get_materials():
         return jsonify({'error': 'Internal server error'}), 500
 
 
+# ========= АВТЕНТИФИКАЦИЯ И ПРОФИЛЬ =========
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    phone = data.get('phone', '').strip()
+    password = data.get('password', '').strip()
+    full_name = data.get('full_name', '').strip()
+    if not phone or not password:
+        return jsonify({'error': 'Телефон и пароль обязательны'}), 400
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE phone = %s", (phone,))
+        if cur.fetchone():
+            return jsonify({'error': 'Пользователь с таким телефоном уже существует'}), 409
+        password_hash = generate_password_hash(password)
+        cur.execute(
+            "INSERT INTO users (phone, password_hash, full_name) VALUES (%s, %s, %s) RETURNING id",
+            (phone, password_hash, full_name)
+        )
+        user_id = cur.fetchone()[0]
+        conn.commit()
+        session['user_id'] = user_id
+        return jsonify({'success': True, 'user_id': user_id})
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Register error: {e}")
+        return jsonify({'error': 'Ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    phone = data.get('phone', '').strip()
+    password = data.get('password', '').strip()
+    if not phone or not password:
+        return jsonify({'error': 'Телефон и пароль обязательны'}), 400
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, password_hash, full_name, email, address, contact_time FROM users WHERE phone = %s", (phone,))
+        user = cur.fetchone()
+        if not user or not check_password_hash(user[1], password):
+            return jsonify({'error': 'Неверный телефон или пароль'}), 401
+        session['user_id'] = user[0]
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user[0],
+                'phone': phone,
+                'full_name': user[2],
+                'email': user[3],
+                'address': user[4],
+                'contact_time': user[5]
+            }
+        })
+    except Exception as e:
+        app.logger.error(f"Login error: {e}")
+        return jsonify({'error': 'Ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    session.pop('user_id', None)
+    return jsonify({'success': True})
+
+
+@app.route('/api/auth/me')
+def get_current_user():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'authenticated': False}), 200
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, phone, full_name, email, address, contact_time FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            session.pop('user_id', None)
+            return jsonify({'authenticated': False}), 200
+        return jsonify({
+            'authenticated': True,
+            'user': {
+                'id': user[0],
+                'phone': user[1],
+                'full_name': user[2],
+                'email': user[3],
+                'address': user[4],
+                'contact_time': user[5]
+            }
+        })
+    except Exception as e:
+        app.logger.error(f"Get user error: {e}")
+        return jsonify({'error': 'Server error'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/api/auth/profile', methods=['PUT'])
+def update_profile():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Не авторизован'}), 401
+    data = request.get_json()
+    full_name = data.get('full_name', '').strip()
+    email = data.get('email', '').strip()
+    address = data.get('address', '').strip()
+    contact_time = data.get('contact_time', '').strip()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE users
+            SET full_name = %s, email = %s, address = %s, contact_time = %s
+            WHERE id = %s
+        """, (full_name, email, address, contact_time, user_id))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Update profile error: {e}")
+        return jsonify({'error': 'Ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ========= ИСТОРИЯ ЗАКАЗОВ =========
+@app.route('/api/orders/history')
+def order_history():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Не авторизован'}), 401
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status
+            FROM orders
+            WHERE user_id = %s
+            ORDER BY order_date DESC
+        """, (user_id,))
+        orders = []
+        for row in cur.fetchall():
+            orders.append({
+                'id': row[0],
+                'user_name': row[1],
+                'phone': row[2],
+                'email': row[3],
+                'address': row[4],
+                'comment': row[5],
+                'contact_time': row[6],
+                'order_date': row[7].isoformat(),
+                'status': row[8]
+            })
+        # Для каждого заказа получим позиции
+        for order in orders:
+            cur.execute("""
+                SELECT product_name, material_name, cost, quantity
+                FROM order_items
+                WHERE order_id = %s
+            """, (order['id'],))
+            items = [{'product_name': r[0], 'material_name': r[1], 'cost': r[2], 'quantity': r[3]} for r in cur.fetchall()]
+            order['items'] = items
+            order['total'] = sum(it['cost'] * it['quantity'] for it in items)
+        return jsonify(orders)
+    except Exception as e:
+        app.logger.error(f"Order history error: {e}")
+        return jsonify({'error': 'Server error'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 # ========= КОРЗИНА (сессия) =========
 def get_cart_session():
     """Возвращает список товаров в корзине из сессии"""
@@ -422,7 +623,6 @@ def update_cart_item(item_id):
     for idx, item in enumerate(cart):
         if item.get('id') == item_id:
             if new_quantity <= 0:
-                # удаляем позицию
                 cart.pop(idx)
             else:
                 item['quantity'] = new_quantity
@@ -445,7 +645,7 @@ def clear_cart():
     return jsonify({'success': True})
 
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА (с привязкой к пользователю, если авторизован) =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
@@ -457,8 +657,9 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
+    user_id = session.get('user_id')
     session_id = session.get('session_id')
-    if not session_id:
+    if not session_id and not user_id:
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
 
@@ -466,10 +667,10 @@ def create_order():
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO orders (session_id, user_name, phone, email, address, comment, contact_time, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO orders (session_id, user_id, user_name, phone, email, address, comment, contact_time, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (session_id, data['user_name'], data['phone'], data.get('email', ''),
+        """, (session_id, user_id, data['user_name'], data['phone'], data.get('email', ''),
               data.get('address', ''), data.get('comment', ''), data.get('contact_time', ''),
               'Ожидает подтверждения'))
         order_id = cur.fetchone()[0]
@@ -536,6 +737,21 @@ def product_card_css():
 @app.route('/cart.css')
 def cart_css():
     return send_from_directory('webpages', 'cart.css')
+
+
+@app.route('/login')
+def login_page():
+    return send_from_directory('webpages', 'login.html')
+
+
+@app.route('/register')
+def register_page():
+    return send_from_directory('webpages', 'register.html')
+
+
+@app.route('/profile')
+def profile_page():
+    return send_from_directory('webpages', 'profile.html')
 
 
 @app.route('/media/<path:filename>')

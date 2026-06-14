@@ -9,7 +9,6 @@
 </head>
 <body>
 
-<!-- Фиксированная корзина в правом верхнем углу -->
 <div class="cart-icon-wrapper">
     <a href="/cart" class="cart-fixed-link">
         <img src="/media/interface/cart_icon.svg" alt="Корзина">
@@ -33,6 +32,7 @@
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
                         <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                        <li class="menu__item"><a href="/login" class="menu__link" id="authLink">Войти</a></li>
                     </ul>
                 </nav>
             </div>
@@ -46,6 +46,12 @@
     <div id="cart-total" class="cart-total"></div>
     <div id="order-form" class="order-form" style="display: none;">
         <h2>Оформление заказа</h2>
+        <div id="profileCheckboxDiv" style="margin-bottom: 20px;">
+            <label style="cursor: pointer;">
+                <input type="checkbox" id="useProfileCheckbox"> Заполнить из профиля
+            </label>
+            <span id="profileStatus" style="margin-left: 15px; font-size: 14px;"></span>
+        </div>
         <form id="order-form-fields">
             <div class="form-group">
                 <label>ФИО *</label>
@@ -99,6 +105,53 @@
     const cartItemsDiv = document.getElementById('cart-items');
     const cartTotalDiv = document.getElementById('cart-total');
     const orderFormDiv = document.getElementById('order-form');
+    const useProfileCheckbox = document.getElementById('useProfileCheckbox');
+    const profileStatusSpan = document.getElementById('profileStatus');
+    const authLink = document.getElementById('authLink');
+
+    let currentUser = null;
+
+    async function fetchCurrentUser() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            if (data.authenticated) {
+                currentUser = data.user;
+                authLink.textContent = 'Личный кабинет';
+                authLink.href = '/profile';
+                profileStatusSpan.innerHTML = `Вы вошли как ${currentUser.phone} <a href="/profile">(профиль)</a>`;
+                if (useProfileCheckbox.checked) fillFromProfile();
+            } else {
+                currentUser = null;
+                authLink.textContent = 'Войти';
+                authLink.href = '/login';
+                profileStatusSpan.innerHTML = 'Не авторизованы. <a href="/login">Войдите</a> чтобы использовать профиль.';
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    function fillFromProfile() {
+        if (!currentUser) {
+            alert('Вы не авторизованы. Войдите в аккаунт.');
+            useProfileCheckbox.checked = false;
+            return;
+        }
+        document.getElementById('user_name').value = currentUser.full_name || '';
+        document.getElementById('phone').value = currentUser.phone || '';
+        document.getElementById('email').value = currentUser.email || '';
+        document.getElementById('address').value = currentUser.address || '';
+        document.getElementById('contact_time').value = currentUser.contact_time || '';
+    }
+
+    useProfileCheckbox.addEventListener('change', () => {
+        if (useProfileCheckbox.checked) {
+            if (currentUser) fillFromProfile();
+            else {
+                alert('Сначала войдите в аккаунт');
+                useProfileCheckbox.checked = false;
+            }
+        }
+    });
 
     async function updateCartCount() {
         try {
@@ -130,7 +183,7 @@
         const items = data.items;
         const total = data.total;
         if (!items.length) {
-            cartItemsDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/">каталог</a>.</p>';
+            cartItemsDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/catalog">каталог</a>.</p>';
             cartTotalDiv.innerHTML = '';
             orderFormDiv.style.display = 'none';
             return;
@@ -160,15 +213,12 @@
         cartTotalDiv.innerHTML = `<strong>Итого: ${total} ₽</strong>`;
         orderFormDiv.style.display = 'block';
 
-        // Обработчики изменения количества
         document.querySelectorAll('.qty-minus').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const id = btn.dataset.id;
                 const input = document.querySelector(`.qty-input[data-id="${id}"]`);
                 let val = parseInt(input.value, 10) || 1;
-                if (val > 1) {
-                    await updateItemQuantity(id, val - 1);
-                }
+                if (val > 1) await updateItemQuantity(id, val - 1);
             });
         });
         document.querySelectorAll('.qty-plus').forEach(btn => {
@@ -238,7 +288,6 @@
         }
     });
 
-    // Модалка "О нас"
     const aboutModal = document.getElementById('aboutModal');
     const aboutLink = document.getElementById('aboutLink');
     const closeSpan = document.querySelector('.close');
@@ -246,8 +295,9 @@
     closeSpan.onclick = () => aboutModal.style.display = 'none';
     window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
 
+    fetchCurrentUser();
     renderCart();
-    setInterval(renderCart, 5000);
+    setInterval(() => { fetchCurrentUser(); renderCart(); }, 5000);
 </script>
 </body>
 </html>

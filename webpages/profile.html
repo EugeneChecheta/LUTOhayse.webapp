@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/index.css">
+    <style>
+        .cabinet-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .cabinet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .logout-btn {
+            background: #e3342f;
+            padding: 8px 20px;
+            border-radius: 30px;
+            color: white;
+            text-decoration: none;
+        }
+        .profile-form, .orders-block {
+            background: #f9f9f9;
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 40px;
+        }
+        .profile-form h2, .orders-block h2 {
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+        }
+        button {
+            background: #628b35;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+        }
+        .order-card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .order-header {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .order-items {
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .order-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px dashed #eee;
+        }
+        .order-total {
+            text-align: right;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .loader, .empty {
+            text-align: center;
+            padding: 30px;
+        }
+    </style>
+</head>
+<body>
+<div class="cart-icon-wrapper">
+    <a href="/cart" class="cart-fixed-link">
+        <img src="/media/interface/cart_icon.svg" alt="Корзина">
+        <span id="cart-count" class="cart-count-badge">0</span>
+    </a>
+</div>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+                <nav class="menu__body menu__body-user">
+                    <ul class="menu__list">
+                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<div class="cabinet-container">
+    <div class="cabinet-header">
+        <h1>Личный кабинет</h1>
+        <a href="#" id="logoutBtn" class="logout-btn">Выйти</a>
+    </div>
+
+    <div class="profile-form">
+        <h2>Мои данные</h2>
+        <form id="profileForm">
+            <div class="form-group">
+                <label>Телефон (логин)</label>
+                <input type="tel" id="phone" disabled>
+            </div>
+            <div class="form-group">
+                <label>ФИО</label>
+                <input type="text" id="full_name">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email">
+            </div>
+            <div class="form-group">
+                <label>Адрес доставки</label>
+                <textarea id="address" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Удобное время для связи</label>
+                <input type="text" id="contact_time" placeholder="например: с 10 до 18">
+            </div>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+
+    <div class="orders-block">
+        <h2>История заказов</h2>
+        <div id="ordersList" class="loader">Загрузка...</div>
+    </div>
+</div>
+
+<script>
+    let currentUser = null;
+
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            const cartCountSpan = document.getElementById('cart-count');
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
+        } catch(e) { console.error(e); }
+    }
+    updateCartCount();
+
+    async function loadUserAndProfile() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            if (!data.authenticated) {
+                window.location.href = '/login';
+                return;
+            }
+            currentUser = data.user;
+            document.getElementById('phone').value = currentUser.phone;
+            document.getElementById('full_name').value = currentUser.full_name || '';
+            document.getElementById('email').value = currentUser.email || '';
+            document.getElementById('address').value = currentUser.address || '';
+            document.getElementById('contact_time').value = currentUser.contact_time || '';
+        } catch (err) {
+            console.error(err);
+            window.location.href = '/login';
+        }
+    }
+
+    async function loadOrders() {
+        const container = document.getElementById('ordersList');
+        try {
+            const resp = await fetch('/api/orders/history');
+            if (!resp.ok) throw new Error('Unauthorized');
+            const orders = await resp.json();
+            if (orders.length === 0) {
+                container.innerHTML = '<div class="empty">У вас пока нет заказов.</div>';
+                return;
+            }
+            let html = '';
+            for (const order of orders) {
+                html += `
+                        <div class="order-card">
+                            <div class="order-header">
+                                <strong>Заказ №${order.id}</strong>
+                                <span>${new Date(order.order_date).toLocaleDateString()}</span>
+                                <span>Статус: ${order.status}</span>
+                            </div>
+                            <div class="order-items">
+                    `;
+                for (const item of order.items) {
+                    html += `
+                            <div class="order-item">
+                                <span>${item.product_name} (${item.material_name})</span>
+                                <span>${item.quantity} шт. × ${item.cost}₽ = ${item.quantity * item.cost}₽</span>
+                            </div>
+                        `;
+                }
+                html += `
+                            </div>
+                            <div class="order-total">Итого: ${order.total} ₽</div>
+                        </div>
+                    `;
+            }
+            container.innerHTML = html;
+        } catch (err) {
+            console.error(err);
+            container.innerHTML = '<div class="empty">Не удалось загрузить заказы</div>';
+        }
+    }
+
+    document.getElementById('profileForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            full_name: document.getElementById('full_name').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            address: document.getElementById('address').value.trim(),
+            contact_time: document.getElementById('contact_time').value.trim()
+        };
+        try {
+            const resp = await fetch('/api/auth/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (data.success) {
+                alert('Данные обновлены');
+            } else {
+                alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+            }
+        } catch (err) {
+            alert('Ошибка соединения');
+        }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await fetch('/api/auth/logout', { method: 'POST' });
+        window.location.href = '/';
+    });
+
+    loadUserAndProfile();
+    loadOrders();
+    setInterval(updateCartCount, 5000);
+</script>
+</body>
+</html>
