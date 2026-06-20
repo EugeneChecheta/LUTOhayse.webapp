@@ -131,7 +131,7 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id SERIAL PRIMARY KEY,
-            session_id VARCHAR(100),
+            session_id VARCHAR(100) NOT NULL,
             user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
             user_name VARCHAR(200) NOT NULL,
             phone VARCHAR(50) NOT NULL,
@@ -153,6 +153,18 @@ def init_db():
             quantity INTEGER DEFAULT 1
         );
     """)
+
+    # Проверяем, есть ли колонка user_id в таблице orders (если таблица уже существовала)
+    # Добавляем её, если отсутствует
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM information_schema.columns 
+        WHERE table_name='orders' AND column_name='user_id'
+    """)
+    if cur.fetchone()[0] == 0:
+        cur.execute("""
+            ALTER TABLE orders ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        """)
 
     conn.commit()
     cur.close()
@@ -657,11 +669,13 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
-    user_id = session.get('user_id')
+    # --- ИСПРАВЛЕНИЕ: session_id всегда генерируется, если отсутствует ---
     session_id = session.get('session_id')
-    if not session_id and not user_id:
+    if not session_id:
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
+
+    user_id = session.get('user_id')
 
     conn = get_db_connection()
     cur = conn.cursor()
