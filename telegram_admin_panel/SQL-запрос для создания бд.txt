@@ -1,7 +1,6 @@
-===== Файл: telegram_admin_panel/SQL-запрос для создания бд.txt =====
 -- #########################################################################
 -- # LUTO SHOP DATABASE
--- # PostgreSQL Production Structure (с материалами и заказами)
+-- # PostgreSQL Production Structure (с материалами, заказами и user_id)
 -- #########################################################################
 
 DROP TABLE IF EXISTS order_items CASCADE;
@@ -18,6 +17,19 @@ DROP TABLE IF EXISTS main_features_types CASCADE;
 
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS products_type CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- ==================== users ====================
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    phone VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(256) NOT NULL,
+    full_name VARCHAR(200),
+    email VARCHAR(200),
+    address TEXT,
+    contact_time VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ==================== products_type ====================
 CREATE TABLE products_type (
@@ -130,6 +142,7 @@ CREATE TABLE product_extra_features (
 CREATE TABLE orders (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(100) NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     user_name VARCHAR(200) NOT NULL,
     phone VARCHAR(50) NOT NULL,
     email VARCHAR(200),
@@ -164,3 +177,4 @@ CREATE INDEX idx_pmf_product ON product_main_features(products_id);
 CREATE INDEX idx_pef_product ON product_extra_features(products_id);
 CREATE INDEX idx_orders_session ON orders(session_id);
 CREATE INDEX idx_orders_date ON orders(order_date);
+CREATE INDEX idx_orders_user ON orders(user_id);

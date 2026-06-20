@@ -1,3 +1,4 @@
+.secret_key
 code.txt
 telegram_admin_panel/config_db.txt
 telegram_admin_panel/token.txt

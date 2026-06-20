@@ -5,7 +5,7 @@ from flask_cors import CORS
 import glob
 from pathlib import Path
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import secrets
 import threading
 import json
@@ -14,7 +14,18 @@ import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, static_folder=None)
-app.secret_key = secrets.token_hex(24)
+
+# ----- Постоянный секретный ключ (хранится в файле) -----
+SECRET_FILE = Path(__file__).parent / '.secret_key'
+if SECRET_FILE.exists():
+    with open(SECRET_FILE, 'r') as f:
+        app.secret_key = f.read().strip()
+else:
+    app.secret_key = secrets.token_hex(32)
+    with open(SECRET_FILE, 'w') as f:
+        f.write(app.secret_key)
+
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 CORS(app, supports_credentials=True)
 
 
@@ -409,6 +420,7 @@ def register():
         )
         user_id = cur.fetchone()[0]
         conn.commit()
+        session.permanent = True
         session['user_id'] = user_id
         return jsonify({'success': True, 'user_id': user_id})
     except Exception as e:
@@ -434,6 +446,7 @@ def login():
         user = cur.fetchone()
         if not user or not check_password_hash(user[1], password):
             return jsonify({'error': 'Неверный телефон или пароль'}), 401
+        session.permanent = True
         session['user_id'] = user[0]
         return jsonify({
             'success': True,
@@ -669,7 +682,6 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
-    # --- ИСПРАВЛЕНИЕ: session_id всегда генерируется, если отсутствует ---
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
