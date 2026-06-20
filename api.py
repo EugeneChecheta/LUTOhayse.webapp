@@ -5,7 +5,7 @@ from flask_cors import CORS
 import glob
 from pathlib import Path
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 import secrets
 import threading
 import json
@@ -14,18 +14,7 @@ import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, static_folder=None)
-
-# ----- Постоянный секретный ключ (хранится в файле) -----
-SECRET_FILE = Path(__file__).parent / '.secret_key'
-if SECRET_FILE.exists():
-    with open(SECRET_FILE, 'r') as f:
-        app.secret_key = f.read().strip()
-else:
-    app.secret_key = secrets.token_hex(32)
-    with open(SECRET_FILE, 'w') as f:
-        f.write(app.secret_key)
-
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.secret_key = secrets.token_hex(24)
 CORS(app, supports_credentials=True)
 
 
@@ -166,7 +155,6 @@ def init_db():
     """)
 
     # Проверяем, есть ли колонка user_id в таблице orders (если таблица уже существовала)
-    # Добавляем её, если отсутствует
     cur.execute("""
         SELECT COUNT(*) 
         FROM information_schema.columns 
@@ -420,7 +408,6 @@ def register():
         )
         user_id = cur.fetchone()[0]
         conn.commit()
-        session.permanent = True
         session['user_id'] = user_id
         return jsonify({'success': True, 'user_id': user_id})
     except Exception as e:
@@ -446,7 +433,6 @@ def login():
         user = cur.fetchone()
         if not user or not check_password_hash(user[1], password):
             return jsonify({'error': 'Неверный телефон или пароль'}), 401
-        session.permanent = True
         session['user_id'] = user[0]
         return jsonify({
             'success': True,
@@ -682,6 +668,7 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
+    # --- ИСПРАВЛЕНИЕ: session_id всегда генерируется, если отсутствует ---
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -712,8 +699,21 @@ def create_order():
                   item['cost'], item.get('quantity', 1)))
 
         conn.commit()
+
+        # Отправка уведомления
         send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
-        save_cart_session([])
+
+        # ========== ИСПРАВЛЕНИЕ: гарантированная очистка корзины ==========
+        # Явно удаляем ключ 'cart' из сессии и помечаем сессию как изменённую
+        if 'cart' in session:
+            del session['cart']
+        session.modified = True
+        # Дополнительная защита: если по какой-то причине ключ остался, принудительно устанавливаем пустой список
+        # (это избыточно, но для надёжности)
+        session['cart'] = []
+        session.modified = True
+        # ------------------------------------------------------------------
+
         return jsonify({'success': True, 'order_id': order_id})
     except Exception as e:
         conn.rollback()
