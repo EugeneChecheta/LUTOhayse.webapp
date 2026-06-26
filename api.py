@@ -14,7 +14,7 @@ import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, static_folder=None)
-app.secret_key = secrets.token_hex(24)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(24))
 CORS(app, supports_credentials=True)
 
 
@@ -668,7 +668,7 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
-    # --- ИСПРАВЛЕНИЕ: session_id всегда генерируется, если отсутствует ---
+    # session_id всегда генерируется, если отсутствует
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -703,16 +703,10 @@ def create_order():
         # Отправка уведомления
         send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
 
-        # ========== ИСПРАВЛЕНИЕ: гарантированная очистка корзины ==========
-        # Явно удаляем ключ 'cart' из сессии и помечаем сессию как изменённую
-        if 'cart' in session:
-            del session['cart']
+        # *** ИСПРАВЛЕНИЕ: гарантированная очистка корзины ***
+        # Используем pop для полного удаления ключа, чтобы исключить случайное сохранение старых данных
+        session.pop('cart', None)
         session.modified = True
-        # Дополнительная защита: если по какой-то причине ключ остался, принудительно устанавливаем пустой список
-        # (это избыточно, но для надёжности)
-        session['cart'] = []
-        session.modified = True
-        # ------------------------------------------------------------------
 
         return jsonify({'success': True, 'order_id': order_id})
     except Exception as e:

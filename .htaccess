@@ -1,0 +1,16 @@
+<IfModule mod_rewrite.c>
+    Options +FollowSymLinks
+    RewriteEngine On
+    RewriteBase /
+
+    # Если запрос существует как файл или папка – не перенаправлять
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Исключаем путь /api/ из редиректа
+    RewriteCond %{REQUEST_URI} !^/api/
+
+    # Все остальное перенаправляем на index.php
+    RewriteRule ^(.*)$ /index.php [L]
+</IfModule>

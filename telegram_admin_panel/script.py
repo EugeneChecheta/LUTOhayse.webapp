@@ -3,12 +3,14 @@
 Telegram‑бот для управления интернет‑магазином (PostgreSQL).
 Добавлена поддержка материалов: CRUD, фотографии (одно фото на материал).
 Исправлена стабильность: обработка выхода из разговоров, предотвращение зависаний.
+Пути к файлам конфигурации теперь абсолютные относительно папки скрипта.
 """
 
 import asyncio
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import io
@@ -27,35 +29,77 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# ------------------------- Конфигурация -------------------------
+# ------------------------- Пути к файлам -------------------------
+BASE_DIR = Path(__file__).parent
+TOKEN_FILE = BASE_DIR / "token.txt"
+CONFIG_DB_FILE = BASE_DIR / "config_db.txt"
+ADMIN_FILE = BASE_DIR / "admin_ids.txt"
+
+# ------------------------- Чтение конфигураций -------------------------
 def read_token():
-    with open("token.txt", "r") as f:
-        return f.read().strip()
+    """Читает токен бота из файла token.txt в папке скрипта."""
+    if not TOKEN_FILE.exists():
+        logger.error(f"Файл с токеном не найден: {TOKEN_FILE}")
+        sys.exit(1)
+    try:
+        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            token = f.read().strip()
+            if not token:
+                logger.error("Токен пустой")
+                sys.exit(1)
+            return token
+    except Exception as e:
+        logger.error(f"Ошибка чтения token.txt: {e}")
+        sys.exit(1)
 
 def read_db_config():
+    """Читает параметры подключения к БД из config_db.txt."""
+    if not CONFIG_DB_FILE.exists():
+        logger.error(f"Файл конфигурации БД не найден: {CONFIG_DB_FILE}")
+        sys.exit(1)
     config = {}
-    with open("config_db.txt", "r") as f:
-        for line in f:
-            if "=" in line:
-                k, v = line.strip().split("=", 1)
-                config[k] = v
-    return config
+    try:
+        with open(CONFIG_DB_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    config[k] = v
+        required = ["host", "port", "database", "user", "password"]
+        for key in required:
+            if key not in config:
+                logger.error(f"В config_db.txt отсутствует параметр {key}")
+                sys.exit(1)
+        return config
+    except Exception as e:
+        logger.error(f"Ошибка чтения config_db.txt: {e}")
+        sys.exit(1)
 
+def read_admin_ids():
+    """Читает список ID администраторов из admin_ids.txt (по одному на строку)."""
+    if not ADMIN_FILE.exists():
+        logger.warning(f"Файл admin_ids.txt не найден: {ADMIN_FILE}")
+        return []   # если файла нет – возвращаем пустой список
+    try:
+        with open(ADMIN_FILE, "r", encoding="utf-8") as f:
+            ids = []
+            for line in f:
+                line = line.strip()
+                if line and line.isdigit():
+                    ids.append(int(line))
+            return ids
+    except Exception as e:
+        logger.error(f"Ошибка чтения admin_ids.txt: {e}")
+        return []
+
+# ------------------------- Инициализация конфигураций -------------------------
 TOKEN = read_token()
 DB_CONFIG = read_db_config()
+ADMIN_IDS = read_admin_ids()
 
-def load_admin_ids():
-    try:
-        with open("admin_ids.txt", "r") as f:
-            return {int(line.strip()) for line in f if line.strip().isdigit()}
-    except FileNotFoundError:
-        logging.warning("admin_ids.txt не найден – бот доступен всем (небезопасно!)")
-        return None
-
-ADMIN_IDS = load_admin_ids()
-
+# Настройка логгирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -97,7 +141,6 @@ logger = logging.getLogger(__name__)
     PROD_EXTRA_FEATURE_ADD_VALUE,
     PROD_EXTRA_FEATURE_EDIT_NAME,
     PROD_EXTRA_FEATURE_EDIT_VALUE,
-    # Новые состояния для управления материалами
     ADD_MAT_TYPE_SELECT,
     ADD_MAT_CODE,
     ADD_MAT_NAME,
@@ -110,8 +153,8 @@ logger = logging.getLogger(__name__)
     DELETE_MAT_CONFIRM,
 ) = range(46)
 
-# Путь к папке media
-MEDIA_BASE = Path(__file__).parent.parent / "media"
+# Путь к папке media (относительно корня проекта, но используем BASE_DIR)
+MEDIA_BASE = BASE_DIR.parent / "media" if (BASE_DIR.parent / "media").exists() else BASE_DIR / "media"
 PRODUCTS_MEDIA = MEDIA_BASE / "products"
 MATERIALS_MEDIA = MEDIA_BASE / "materials"
 PRODUCTS_MEDIA.mkdir(parents=True, exist_ok=True)

@@ -29,34 +29,59 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 # ------------------------- Конфигурация -------------------------
-def read_token():
-    with open("token.txt", "r") as f:
-        return f.read().strip()
+# Базовая директория скрипта
+BASE_DIR = Path(__file__).resolve().parent
 
-def read_db_config():
+def read_token() -> str:
+    """Читает токен бота из файла token.txt в директории скрипта."""
+    token_path = BASE_DIR / "token.txt"
+    try:
+        with open(token_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        logging.error(f"Файл {token_path} не найден. Создайте его с токеном бота.")
+        raise
+
+def read_db_config() -> Dict[str, str]:
+    """Читает параметры подключения к БД из config_db.txt."""
+    config_path = BASE_DIR / "config_db.txt"
     config = {}
-    with open("config_db.txt", "r") as f:
-        for line in f:
-            if "=" in line:
-                k, v = line.strip().split("=", 1)
-                config[k] = v
-    return config
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    config[k] = v
+        # Проверяем обязательные поля
+        required = ["database", "user", "password"]
+        for key in required:
+            if key not in config:
+                raise ValueError(f"В {config_path} отсутствует обязательное поле {key}")
+        # Необязательные поля со значениями по умолчанию
+        config.setdefault("host", "localhost")
+        config.setdefault("port", "5432")
+        return config
+    except FileNotFoundError:
+        logging.error(f"Файл {config_path} не найден. Создайте его с параметрами БД.")
+        raise
+
+def load_admin_ids() -> Optional[set]:
+    """Загружает множество ID администраторов из admin_ids.txt."""
+    admins_path = BASE_DIR / "admin_ids.txt"
+    try:
+        with open(admins_path, "r", encoding="utf-8") as f:
+            return {int(line.strip()) for line in f if line.strip().isdigit()}
+    except FileNotFoundError:
+        logging.warning(f"Файл {admins_path} не найден – бот доступен всем (небезопасно!)")
+        return None
 
 TOKEN = read_token()
 DB_CONFIG = read_db_config()
-
-def load_admin_ids():
-    try:
-        with open("admin_ids.txt", "r") as f:
-            return {int(line.strip()) for line in f if line.strip().isdigit()}
-    except FileNotFoundError:
-        logging.warning("admin_ids.txt не найден – бот доступен всем (небезопасно!)")
-        return None
-
 ADMIN_IDS = load_admin_ids()
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -71,9 +96,6 @@ STATUSES = [
     "в пути",
     "доставлен"
 ]
-
-# Путь к папке для временных данных (необязательно)
-BASE_DIR = Path(__file__).parent
 
 # ------------------------- Декоратор проверки администратора -------------------------
 def admin_only(func):
@@ -155,7 +177,6 @@ class Database:
                 "WHERE order_date > $1 ORDER BY order_date ASC", since
             )
             return [dict(r) for r in rows]
-
 
 db_pool = None
 db = None
@@ -352,7 +373,6 @@ async def check_new_orders_manual(update: Update, context: ContextTypes.DEFAULT_
 async def notify_new_order(bot, order: dict):
     """Отправить уведомление о новом заказе всем администраторам."""
     if ADMIN_IDS is None:
-        # Если нет списка админов, уведомляем только владельца? Но лучше не отправлять никому.
         logger.warning("Нет списка администраторов, уведомление не отправлено.")
         return
     text = (
