@@ -306,15 +306,22 @@
             const items = products.slice(0, 8);
             let html = '';
             for (let prod of items) {
-                const previewUrl = `/media/products/${encodeURIComponent(prod.code)}/preview.webp`;
+                const codeEnc = encodeURIComponent(prod.code);
+                const img1 = `/media/products/${codeEnc}/1.webp`;
+                const img2 = `/media/products/${codeEnc}/preview.webp`;
+                const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined) 
+                    ? `<div class="product-price">от ${prod.min_cost} ₽</div>` 
+                    : '';
                 html += `
-                    <a href="/product/${encodeURIComponent(prod.code)}" class="product-card">
+                    <a href="/product/${codeEnc}" class="product-card">
                         <div class="product-img">
-                            <img src="${previewUrl}" alt="${escapeHtml(prod.name)}" loading="lazy" onerror="this.src='/media/interface/placeholder.png'">
+                            <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
+                                 onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
                         </div>
                         <div class="product-info">
                             <div class="product-name">${escapeHtml(prod.name)}</div>
                             <div class="product-code">${escapeHtml(prod.code)}</div>
+                            ${priceHtml}
                         </div>
                     </a>
                 `;

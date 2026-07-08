@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL).
-Добавлена поддержка материалов: CRUD, фотографии (одно фото на материал).
-Исправлена стабильность: обработка выхода из разговоров, предотвращение зависаний.
-Пути к файлам конфигурации теперь абсолютные относительно папки скрипта.
-Добавлена команда /reboot для перезапуска процесса через pm2 (только для админов).
-
-Изменения:
-- Убран тип фото «Preview» при добавлении, оставлены только Size и основные фото.
-- Исправлено редактирование материалов – добавлены fallback-обработчики для выхода.
-- При добавлении товара выбор типа теперь происходит через кнопки (callback), а не ввод ID.
-- При удалении фото товара бот сначала отправляет все имеющиеся фото, затем предлагает выбрать удаляемое.
 """
 
 import asyncio
@@ -212,6 +202,46 @@ class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
+    # ---------- Вспомогательные методы для обновления min_cost ----------
+    async def update_min_cost(self, prod_id: int):
+        """Обновляет поле min_cost для одного товара на основе его стоимостей."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE products
+                SET min_cost = (
+                    SELECT MIN(mfp.cost)
+                    FROM materials_for_products mfp
+                    WHERE mfp.products_id = $1
+                )
+                WHERE id = $1
+            """, prod_id)
+
+    async def refresh_min_costs(self, product_ids: Optional[List[int]] = None):
+        """
+        Пересчитывает min_cost для всех товаров или для указанных.
+        Если указан product_ids, обновляются только эти товары.
+        """
+        async with self.pool.acquire() as conn:
+            if product_ids:
+                await conn.execute("""
+                    UPDATE products p
+                    SET min_cost = (
+                        SELECT MIN(mfp.cost)
+                        FROM materials_for_products mfp
+                        WHERE mfp.products_id = p.id
+                    )
+                    WHERE p.id = ANY($1::int[])
+                """, product_ids)
+            else:
+                await conn.execute("""
+                    UPDATE products p
+                    SET min_cost = (
+                        SELECT MIN(mfp.cost)
+                        FROM materials_for_products mfp
+                        WHERE mfp.products_id = p.id
+                    )
+                """)
+
     # ---------- Типы товаров ----------
     async def get_product_types(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
@@ -299,8 +329,23 @@ class Database:
     async def delete_material_type_cascade(self, mt_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                # Собираем все товары, у которых есть стоимости этого типа
+                affected_products = await conn.fetch(
+                    "SELECT DISTINCT products_id FROM materials_for_products WHERE materials_type_id = $1",
+                    mt_id
+                )
+                product_ids = [r["products_id"] for r in affected_products]
+
+                # Удаляем все стоимости с этим типом
                 await conn.execute("DELETE FROM materials_for_products WHERE materials_type_id = $1", mt_id)
+
+                # Удаляем сам тип
                 result = await conn.execute("DELETE FROM materials_type WHERE id = $1", mt_id)
+
+                # Обновляем min_cost для затронутых товаров
+                if product_ids:
+                    await self.refresh_min_costs(product_ids)
+
                 return result != "DELETE 0"
 
     # ---------- Основные характеристики (справочник) ----------
@@ -439,12 +484,12 @@ class Database:
 
     async def get_product_by_id(self, prod_id: int):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, products_type_id FROM products WHERE id = $1", prod_id)
+            row = await conn.fetchrow("SELECT id, code, name, products_type_id, min_cost FROM products WHERE id = $1", prod_id)
             return dict(row) if row else None
 
     async def get_product_by_code(self, code: str):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, products_type_id FROM products WHERE code = $1", code)
+            row = await conn.fetchrow("SELECT id, code, name, products_type_id, min_cost FROM products WHERE code = $1", code)
             return dict(row) if row else None
 
     async def create_product(self, code: str, name: str, type_id: int) -> int:
@@ -504,10 +549,19 @@ class Database:
                 "ON CONFLICT (products_id, materials_type_id) DO UPDATE SET cost = $3",
                 prod_id, material_type_id, cost
             )
+        # После добавления/обновления стоимости пересчитываем min_cost
+        await self.update_min_cost(prod_id)
 
     async def delete_cost(self, cost_id: int):
+        # Сначала узнаем product_id для этой записи
         async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT products_id FROM materials_for_products WHERE id = $1", cost_id)
+            if not row:
+                return
+            prod_id = row["products_id"]
             await conn.execute("DELETE FROM materials_for_products WHERE id = $1", cost_id)
+        # После удаления пересчитываем min_cost
+        await self.update_min_cost(prod_id)
 
     async def is_code_unique(self, code: str, exclude_product_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
@@ -2127,7 +2181,7 @@ async def edit_product_cost_value(update: Update, context: ContextTypes.DEFAULT_
         return EDIT_PROD_COST_VALUE
     prod_id = context.user_data["edit_prod_id"]
     mt_id = context.user_data["cost_add_mt_id"]
-    await db.set_cost(prod_id, mt_id, cost)
+    await db.set_cost(prod_id, mt_id, cost)  # внутри вызывается update_min_cost
     await update.message.reply_text("✅ Стоимость сохранена.")
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
@@ -2152,7 +2206,7 @@ async def edit_product_cost_delete_execute(update: Update, context: ContextTypes
     parts = query.data.split("_")
     cost_id = int(parts[2])
     prod_id = int(parts[3])
-    await db.delete_cost(cost_id)
+    await db.delete_cost(cost_id)  # внутри вызывается update_min_cost
     await query.edit_message_text("✅ Стоимость удалена.")
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
@@ -2163,6 +2217,16 @@ async def edit_product_cost_cancel(update: Update, context: ContextTypes.DEFAULT
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
+
+# ------------------------- Обработчик обновления минимальной цены -------------------------
+async def refresh_min_cost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    prod_id = int(query.data.split("_")[-1])
+    await db.update_min_cost(prod_id)
+    await query.edit_message_text("🔄 Минимальная цена пересчитана.")
+    # Показываем обновлённую карточку редактирования
+    await show_product_edit(update, context, prod_id)
 
 # ------------------------- Отображение товаров с пагинацией -------------------------
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -2234,6 +2298,7 @@ async def product_edit_callback(update: Update, context: ContextTypes.DEFAULT_TY
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
 
+# ------------------------- Карточка товара (подробно) -------------------------
 async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -2252,11 +2317,16 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
     extra_feats = await db.get_product_extra_features(prod_id)
     extra_feats_text = "\n".join(f"• {f['name']}: {f['value']}" for f in extra_feats) if extra_feats else "нет"
 
+    # --- Добавляем вывод минимальной цены ---
+    min_cost = product.get("min_cost")
+    min_cost_text = f"{min_cost}₽" if min_cost is not None else "не определена"
+
     text = (
         f"*Подробнее о товаре ID {prod_id}*\n\n"
         f"📛 *Название:* {product['name']}\n"
         f"🔢 *Код:* {product['code']}\n"
         f"📂 *Тип:* {type_name}\n"
+        f"💰 *Минимальная цена:* {min_cost_text}\n"   # <-- добавлено
         f"🏷️ *Флаги:* {flags_text}\n"
         f"💰 *Стоимости:*\n{costs_text}\n"
         f"📋 *Основные характеристики:*\n{main_feats_text}\n"
@@ -2269,6 +2339,7 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
 
+# ------------------------- Редактирование товара -------------------------
 async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -2282,13 +2353,16 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
     costs = await db.get_costs_for_product(prod_id)
     costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽ (id {c['id']})" for c in costs) if costs else "нет"
+    min_cost = product.get("min_cost")
+    min_cost_text = f"{min_cost}₽" if min_cost is not None else "не определена"
     text = (
         f"*Редактирование товара ID {prod_id}*\n\n"
         f"📛 *Название:* {product['name']}\n"
         f"🔢 *Код:* {product['code']}\n"
         f"📂 *Тип:* {type_name} (id {product['products_type_id']})\n"
         f"🏷️ *Флаги:* {flags_text}\n"
-        f"💰 *Стоимости:*\n{costs_text}"
+        f"💰 *Стоимости:*\n{costs_text}\n"
+        f"🔽 *Минимальная стоимость:* {min_cost_text}"
     )
     keyboard = [
         [InlineKeyboardButton("✏️ Название", callback_data=f"prod_edit_name_{prod_id}"),
@@ -2299,6 +2373,8 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
          InlineKeyboardButton("📸 Управление фото", callback_data=f"prod_manage_photos_{prod_id}")],
         [InlineKeyboardButton("📋 Основные характеристики", callback_data=f"prod_main_features_{prod_id}"),
          InlineKeyboardButton("➕ Доп. характеристики", callback_data=f"prod_extra_features_{prod_id}")],
+        # --- Добавляем кнопку обновления минимальной цены ---
+        [InlineKeyboardButton("🔄 Обновить минимальную цену", callback_data=f"prod_refresh_mincost_{prod_id}")],
         [InlineKeyboardButton("🗑️ Удалить товар", callback_data=f"prod_delete_confirm_{prod_id}")],
         [InlineKeyboardButton("◀ К списку товаров", callback_data="menu_products"),
          InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
@@ -2516,6 +2592,9 @@ def register_handlers(app: Application):
     # Просмотр и редактирование товаров
     app.add_handler(CallbackQueryHandler(product_details_callback, pattern="^prod_details_\\d+$"))
     app.add_handler(CallbackQueryHandler(product_edit_callback, pattern="^prod_edit_\\d+$"))
+
+    # --- Обработчик обновления минимальной цены ---
+    app.add_handler(CallbackQueryHandler(refresh_min_cost_callback, pattern="^prod_refresh_mincost_\\d+$"))
 
     # Добавление товара
     add_prod_conv = ConversationHandler(

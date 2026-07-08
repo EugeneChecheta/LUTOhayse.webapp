@@ -392,6 +392,12 @@ body {
     font-size: 12px;
     color: #777;
 }
+.product-price {
+    font-weight: 600;
+    color: var(--accent-color);
+    margin-top: 4px;
+    font-size: 14px;
+}
 @media (max-width: 768px) {
     .featured-products { padding: 0 20px; }
     .product-card { flex: 0 0 180px; }
@@ -400,6 +406,7 @@ body {
 @media (max-width: 480px) {
     .product-card { flex: 0 0 160px; }
     .product-name { font-size: 13px; }
+    .product-price { font-size: 12px; }
 }
 
 /* ========== О КОМПАНИИ (коротко) ========== */

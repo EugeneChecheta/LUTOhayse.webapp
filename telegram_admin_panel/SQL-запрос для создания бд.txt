@@ -1,6 +1,7 @@
 -- #########################################################################
 -- # LUTO SHOP DATABASE
 -- # PostgreSQL Production Structure (с материалами, заказами и user_id)
+-- # Добавлено поле min_cost в таблицу products (NULL разрешён)
 -- #########################################################################
 
 DROP TABLE IF EXISTS order_items CASCADE;
@@ -43,6 +44,7 @@ CREATE TABLE products (
     code VARCHAR(100) NOT NULL UNIQUE,
     name VARCHAR(200) NOT NULL,
     products_type_id INTEGER NOT NULL,
+    min_cost INTEGER NULL,  -- добавлено новое поле, может быть NULL
     CONSTRAINT fk_products_type
         FOREIGN KEY (products_type_id)
         REFERENCES products_type(id)

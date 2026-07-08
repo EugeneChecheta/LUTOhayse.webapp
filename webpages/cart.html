@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Корзина | LUTOhayse</title>
     <link rel="icon" type="image/png" href="/media/interface/favicon.png">
-    <link rel="stylesheet" href="/cart.css">
+    <title>Каталог | LUTOhayse</title>
+    <link rel="stylesheet" href="/catalog.css">
 </head>
 <body>
 
@@ -16,7 +16,7 @@
     </a>
 </div>
 
-<!-- Значок корзины -->
+<!-- Фиксированная корзина в правом верхнем углу -->
 <div class="cart-icon-wrapper">
     <a href="/cart" class="cart-fixed-link">
         <img src="/media/interface/cart_icon.svg" alt="Корзина">
@@ -40,7 +40,6 @@
                 <nav class="menu__body menu__body-user">
                     <ul class="menu__list">
                         <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
-                        <li class="menu__item"><a href="/login" class="menu__link" id="authLink">Войти</a></li>
                     </ul>
                 </nav>
             </div>
@@ -48,46 +47,25 @@
     </section>
 </header>
 
-<main class="cart-container">
-    <h1>Корзина</h1>
-    <div id="cart-items"></div>
-    <div id="cart-total" class="cart-total"></div>
-    <div id="order-form" class="order-form" style="display: none;">
-        <h2>Оформление заказа</h2>
-        <div id="profileCheckboxDiv" style="margin-bottom: 20px;">
-            <label style="cursor: pointer;">
-                <input type="checkbox" id="useProfileCheckbox"> Заполнить из профиля
-            </label>
-            <span id="profileStatus" style="margin-left: 15px; font-size: 14px;"></span>
+<main class="goods">
+    <h1 class="header">Каталог мебели</h1>
+
+    <div class="filters">
+        <div class="filter-group">
+            <label for="type-select">Тип товара:</label>
+            <select id="type-select">
+                <option value="">Все типы</option>
+            </select>
         </div>
-        <form id="order-form-fields">
-            <div class="form-group">
-                <label>ФИО *</label>
-                <input type="text" id="user_name" required>
-            </div>
-            <div class="form-group">
-                <label>Телефон *</label>
-                <input type="tel" id="phone" required>
-            </div>
-            <div class="form-group">
-                <label>Электронная почта</label>
-                <input type="email" id="email">
-            </div>
-            <div class="form-group">
-                <label>Адрес доставки</label>
-                <textarea id="address" rows="2"></textarea>
-            </div>
-            <div class="form-group">
-                <label>Комментарий к заказу</label>
-                <textarea id="comment" rows="3"></textarea>
-            </div>
-            <div class="form-group">
-                <label>Удобное время для связи</label>
-                <input type="text" id="contact_time" placeholder="например: с 10 до 18">
-            </div>
-            <button type="submit" class="submit-order">Оформить заказ</button>
-        </form>
+        <div class="filter-group flags-group">
+            <span class="flags-label">Флаги:</span>
+            <div id="flags-checkboxes" class="flags-checkboxes"></div>
+        </div>
     </div>
+
+    <div id="catalog-loader" class="loader">Загрузка товаров...</div>
+    <div id="catalog-grid" class="slider-containers" style="display: none;"></div>
+    <div id="catalog-error" class="error-message" style="display: none;">Не удалось загрузить товары. Попробуйте позже.</div>
 </main>
 
 <footer>
@@ -109,57 +87,14 @@
 <div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
 <script>
+    const gridContainer = document.getElementById('catalog-grid');
+    const loader = document.getElementById('catalog-loader');
+    const errorBlock = document.getElementById('catalog-error');
+    const typeSelect = document.getElementById('type-select');
+    const flagsContainer = document.getElementById('flags-checkboxes');
     const cartCountSpan = document.getElementById('cart-count');
-    const cartItemsDiv = document.getElementById('cart-items');
-    const cartTotalDiv = document.getElementById('cart-total');
-    const orderFormDiv = document.getElementById('order-form');
-    const useProfileCheckbox = document.getElementById('useProfileCheckbox');
-    const profileStatusSpan = document.getElementById('profileStatus');
-    const authLink = document.getElementById('authLink');
 
-    let currentUser = null;
-
-    async function fetchCurrentUser() {
-        try {
-            const resp = await fetch('/api/auth/me');
-            const data = await resp.json();
-            if (data.authenticated) {
-                currentUser = data.user;
-                authLink.textContent = 'Личный кабинет';
-                authLink.href = '/profile';
-                profileStatusSpan.innerHTML = `Вы вошли как ${currentUser.phone} <a href="/profile">(профиль)</a>`;
-                if (useProfileCheckbox.checked) fillFromProfile();
-            } else {
-                currentUser = null;
-                authLink.textContent = 'Войти';
-                authLink.href = '/login';
-                profileStatusSpan.innerHTML = 'Не авторизованы. <a href="/login">Войдите</a> чтобы использовать профиль.';
-            }
-        } catch(e) { console.error(e); }
-    }
-
-    function fillFromProfile() {
-        if (!currentUser) {
-            alert('Вы не авторизованы. Войдите в аккаунт.');
-            useProfileCheckbox.checked = false;
-            return;
-        }
-        document.getElementById('user_name').value = currentUser.full_name || '';
-        document.getElementById('phone').value = currentUser.phone || '';
-        document.getElementById('email').value = currentUser.email || '';
-        document.getElementById('address').value = currentUser.address || '';
-        document.getElementById('contact_time').value = currentUser.contact_time || '';
-    }
-
-    useProfileCheckbox.addEventListener('change', () => {
-        if (useProfileCheckbox.checked) {
-            if (currentUser) fillFromProfile();
-            else {
-                alert('Сначала войдите в аккаунт');
-                useProfileCheckbox.checked = false;
-            }
-        }
-    });
+    let currentTimeout = null;
 
     async function updateCartCount() {
         try {
@@ -167,91 +102,7 @@
             const data = await resp.json();
             const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
             if (cartCountSpan) cartCountSpan.textContent = totalItems;
-            return data;
-        } catch(e) { console.error(e); return { items: [], total: 0 }; }
-    }
-
-    async function updateItemQuantity(itemId, newQuantity) {
-        try {
-            const resp = await fetch(`/api/cart/update/${itemId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ quantity: newQuantity })
-            });
-            if (!resp.ok) throw new Error('Update failed');
-            await renderCart();
-        } catch(e) {
-            console.error(e);
-            alert('Не удалось изменить количество');
-        }
-    }
-
-    async function renderCart() {
-        const data = await updateCartCount();
-        const items = data.items;
-        const total = data.total;
-        if (!items.length) {
-            cartItemsDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/catalog">каталог</a>.</p>';
-            cartTotalDiv.innerHTML = '';
-            orderFormDiv.style.display = 'none';
-            return;
-        }
-        let html = '<div class="cart-items-list">';
-        items.forEach(item => {
-            html += `
-                <div class="cart-item" data-id="${item.id}">
-                    <div class="item-info">
-                        <strong>${escapeHtml(item.product_name)}</strong><br>
-                        Код товара: ${escapeHtml(item.product_code)}<br>
-                        Материал: ${escapeHtml(item.material_name)} (${escapeHtml(item.material_code)})<br>
-                        Цена: ${item.cost} ₽<br>
-                        Количество:
-                        <div class="quantity-controls">
-                            <button class="qty-minus" data-id="${item.id}">-</button>
-                            <input type="number" class="qty-input" data-id="${item.id}" value="${item.quantity || 1}" min="1" style="width: 60px; text-align: center;">
-                            <button class="qty-plus" data-id="${item.id}">+</button>
-                        </div>
-                    </div>
-                    <button class="remove-item" data-id="${item.id}">Удалить</button>
-                </div>
-            `;
-        });
-        html += '</div>';
-        cartItemsDiv.innerHTML = html;
-        cartTotalDiv.innerHTML = `<strong>Итого: ${total} ₽</strong>`;
-        orderFormDiv.style.display = 'block';
-
-        document.querySelectorAll('.qty-minus').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const id = btn.dataset.id;
-                const input = document.querySelector(`.qty-input[data-id="${id}"]`);
-                let val = parseInt(input.value, 10) || 1;
-                if (val > 1) await updateItemQuantity(id, val - 1);
-            });
-        });
-        document.querySelectorAll('.qty-plus').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const id = btn.dataset.id;
-                const input = document.querySelector(`.qty-input[data-id="${id}"]`);
-                let val = parseInt(input.value, 10) || 1;
-                await updateItemQuantity(id, val + 1);
-            });
-        });
-        document.querySelectorAll('.qty-input').forEach(input => {
-            input.addEventListener('change', async (e) => {
-                const id = input.dataset.id;
-                let val = parseInt(input.value, 10);
-                if (isNaN(val) || val < 1) val = 1;
-                await updateItemQuantity(id, val);
-            });
-        });
-        document.querySelectorAll('.remove-item').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const id = btn.dataset.id;
-                await fetch(`/api/cart/remove/${id}`, { method: 'DELETE' });
-                renderCart();
-            });
-        });
+        } catch(e) { console.error(e); }
     }
 
     function escapeHtml(str) {
@@ -263,49 +114,114 @@
         });
     }
 
-    document.getElementById('order-form-fields').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const formData = {
-            user_name: document.getElementById('user_name').value.trim(),
-            phone: document.getElementById('phone').value.trim(),
-            email: document.getElementById('email').value.trim(),
-            address: document.getElementById('address').value.trim(),
-            comment: document.getElementById('comment').value.trim(),
-            contact_time: document.getElementById('contact_time').value.trim()
-        };
-        if (!formData.user_name || !formData.phone) {
-            alert('Пожалуйста, заполните ФИО и номер телефона');
+    function renderProducts(products) {
+        if (!products.length) {
+            gridContainer.innerHTML = '<p class="empty">Товаров не найдено</p>';
+            gridContainer.style.display = 'grid';
             return;
         }
+        let html = '';
+        for (const prod of products) {
+            const codeEnc = encodeURIComponent(prod.code);
+            const img1 = `/media/products/${codeEnc}/1.webp`;
+            const img2 = `/media/products/${codeEnc}/preview.webp`;
+            const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined) 
+                ? `<div class="product-price">от ${prod.min_cost} ₽</div>` 
+                : '';
+            html += `
+                <a href="/product/${codeEnc}" class="slider-items">
+                    <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
+                         onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
+                    <div class="product-name">${escapeHtml(prod.name)}</div>
+                    <div class="code-name">Код: ${escapeHtml(prod.code)}</div>
+                    ${priceHtml}
+                </a>
+            `;
+        }
+        gridContainer.innerHTML = html;
+        gridContainer.style.display = 'grid';
+    }
+
+    async function loadProducts() {
+        const typeId = typeSelect.value;
+        const selectedFlags = Array.from(document.querySelectorAll('.flag-checkbox:checked')).map(cb => cb.value);
+        let url = '/api/products?';
+        const params = new URLSearchParams();
+        if (typeId) params.append('type_id', typeId);
+        selectedFlags.forEach(fid => params.append('flag_ids', fid));
+        url += params.toString();
         try {
-            const resp = await fetch('/api/orders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
-            });
-            const result = await resp.json();
-            if (result.success) {
-                alert('Заказ успешно оформлен! Номер заказа: ' + result.order_id);
-                window.location.href = '/';
-            } else {
-                alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
-            }
+            loader.style.display = 'block';
+            gridContainer.style.display = 'none';
+            errorBlock.style.display = 'none';
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const products = await response.json();
+            renderProducts(products);
         } catch (err) {
             console.error(err);
-            alert('Не удалось оформить заказ');
+            loader.style.display = 'none';
+            errorBlock.style.display = 'block';
+        } finally {
+            loader.style.display = 'none';
         }
+    }
+
+    async function loadFilters() {
+        try {
+            const typesResp = await fetch('/api/types');
+            if (typesResp.ok) {
+                const types = await typesResp.json();
+                typeSelect.innerHTML = '<option value="">Все типы</option>';
+                types.forEach(t => {
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = t.name;
+                    typeSelect.appendChild(option);
+                });
+            }
+            const flagsResp = await fetch('/api/flags');
+            if (flagsResp.ok) {
+                const flags = await flagsResp.json();
+                flagsContainer.innerHTML = '';
+                flags.forEach(f => {
+                    const label = document.createElement('label');
+                    label.className = 'flag-checkbox-label';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = f.id;
+                    cb.className = 'flag-checkbox';
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(` ${f.name}`));
+                    flagsContainer.appendChild(label);
+                });
+            }
+            await loadProducts();
+        } catch (err) {
+            console.error('Ошибка загрузки фильтров:', err);
+        }
+    }
+
+    function onChangeFilter() {
+        if (currentTimeout) clearTimeout(currentTimeout);
+        currentTimeout = setTimeout(() => loadProducts(), 300);
+    }
+
+    typeSelect.addEventListener('change', onChangeFilter);
+    flagsContainer.addEventListener('change', (e) => {
+        if (e.target.classList.contains('flag-checkbox')) onChangeFilter();
     });
 
-    const aboutModal = document.getElementById('aboutModal');
+    const modal = document.getElementById('aboutModal');
     const aboutLink = document.getElementById('aboutLink');
     const closeSpan = document.querySelector('.close');
-    aboutLink.onclick = (e) => { e.preventDefault(); aboutModal.style.display = 'block'; };
-    closeSpan.onclick = () => aboutModal.style.display = 'none';
-    window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
+    aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
+    closeSpan.onclick = () => modal.style.display = 'none';
+    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 
-    fetchCurrentUser();
-    renderCart();
-    setInterval(() => { fetchCurrentUser(); renderCart(); }, 5000);
+    loadFilters();
+    updateCartCount();
+    setInterval(updateCartCount, 5000);
 </script>
 </body>
 </html>

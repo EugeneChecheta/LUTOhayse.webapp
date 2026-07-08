@@ -107,6 +107,7 @@
 <script>
     let productData = null;
     let selectedMaterial = null;
+    let minCost = null; // минимальная цена
     const productCode = window.location.pathname.split('/').pop();
     const cartCountSpan = document.getElementById('cart-count');
 
@@ -134,12 +135,19 @@
     function renderProduct(data) {
         const product = data.product;
         const costs = data.costs || [];
+        const minCostFromApi = data.min_cost;
         const mainFeatures = data.main_features || [];
         const extraFeatures = data.extra_features || [];
         const photos = data.photos || { preview: null, size: null, main: [] };
 
         document.getElementById('productTitle').innerText = product.name;
-        document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
+        // Устанавливаем минимальную цену
+        minCost = minCostFromApi;
+        if (minCost !== null && minCost !== undefined) {
+            document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
+        } else {
+            document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+        }
 
         const sizeImg = document.getElementById('sizeImage');
         if (photos.size) {
@@ -423,10 +431,19 @@
             if (costEntry) {
                 document.getElementById('priceCurrent').innerHTML = `${costEntry.cost} <sup>₽</sup>`;
             } else {
-                document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
+                // если не нашли цену для типа материала, показываем минимальную
+                if (minCost !== null && minCost !== undefined) {
+                    document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
+                } else {
+                    document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+                }
             }
         } else {
-            document.getElementById('priceCurrent').innerHTML = `--- <sup>₽</sup>`;
+            if (minCost !== null && minCost !== undefined) {
+                document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
+            } else {
+                document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+            }
         }
         document.getElementById('addToCartContainer').style.display = 'block';
         modal.style.display = 'none';
