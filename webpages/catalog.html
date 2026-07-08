@@ -125,10 +125,10 @@
             const codeEnc = encodeURIComponent(prod.code);
             const img1 = `/media/products/${codeEnc}/1.webp`;
             const img2 = `/media/products/${codeEnc}/preview.webp`;
-            const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined) 
-                ? `<div class="product-price">от ${prod.min_cost} ₽</div>` 
-                : '';
-
+            // Отображаем цену: если min_cost есть, показываем "от X ₽", иначе "Цена по запросу"
+            const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined)
+                ? `<div class="product-price">от ${prod.min_cost} ₽</div>`
+                : `<div class="product-price">Цена по запросу</div>`;
             html += `
                 <a href="/product/${codeEnc}" class="slider-items">
                     <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
