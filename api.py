@@ -173,7 +173,7 @@ def init_db():
 init_db()  # Вызов при старте
 
 
-# ----- API: список типов товаров -----
+# ----- API: список типов товаров (без изменений) -----
 @app.route('/api/types')
 def product_types():
     try:
@@ -205,7 +205,7 @@ def flags():
         return jsonify({'error': 'Internal server error'}), 500
 
 
-# ----- API: список товаров с фильтрацией и минимальной ценой (из поля min_cost) -----
+# ----- API: список товаров с фильтрацией (ИСПРАВЛЕНО: добавлен min_cost) -----
 @app.route('/api/products')
 def products():
     try:
@@ -246,37 +246,29 @@ def products():
             cur.execute(query, params)
         else:
             query = f"""
-                SELECT p.code, p.name, p.min_cost
+                SELECT code, name, min_cost
                 FROM products p
                 WHERE 1=1
                 AND {hidden_flag_condition}
             """
             params = []
             if type_id is not None:
-                query += " AND p.products_type_id = %s"
+                query += " AND products_type_id = %s"
                 params.append(type_id)
-            query += " ORDER BY p.id"
+            query += " ORDER BY id"
             cur.execute(query, params)
 
         rows = cur.fetchall()
         cur.close()
         conn.close()
-
-        result = []
-        for r in rows:
-            item = {
-                'code': r[0],
-                'name': r[1],
-                'min_cost': r[2] if r[2] is not None else None
-            }
-            result.append(item)
-        return jsonify(result)
+        # ИСПРАВЛЕНО: возвращаем min_cost
+        return jsonify([{'code': r[0], 'name': r[1], 'min_cost': r[2]} for r in rows])
     except Exception as e:
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 
-# ----- API: детальная информация о товаре по коду (min_cost из products) -----
+# ----- API: детальная информация о товаре по коду (ИСПРАВЛЕНО: добавлен min_cost) -----
 @app.route('/api/product/<code>')
 def product_details(code):
     try:
@@ -284,7 +276,7 @@ def product_details(code):
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT p.id, p.code, p.name, p.products_type_id, pt.name as type_name, p.min_cost
+            SELECT p.id, p.code, p.name, p.min_cost, p.products_type_id, pt.name as type_name
             FROM products p
             JOIN products_type pt ON p.products_type_id = pt.id
             WHERE p.code = %s
@@ -296,17 +288,15 @@ def product_details(code):
             return jsonify({'error': 'Product not found'}), 404
 
         prod_id = product_row[0]
-        min_cost = product_row[5]  # поле min_cost из products
-
         product_data = {
             'id': prod_id,
             'code': product_row[1],
             'name': product_row[2],
-            'products_type_id': product_row[3],
-            'type_name': product_row[4]
+            'min_cost': product_row[3],          # ИСПРАВЛЕНО
+            'products_type_id': product_row[4],
+            'type_name': product_row[5]
         }
 
-        # Получаем стоимости по типам материалов
         cur.execute("""
             SELECT mt.id, mt.name, mfp.cost
             FROM materials_for_products mfp
@@ -316,7 +306,6 @@ def product_details(code):
         """, (prod_id,))
         costs = [{'id': r[0], 'name': r[1], 'cost': r[2]} for r in cur.fetchall()]
 
-        # Основные характеристики
         cur.execute("""
             SELECT mft.id, mft.name, COALESCE(pmf.value, '') as value
             FROM main_features_types mft
@@ -326,7 +315,6 @@ def product_details(code):
         """, (prod_id,))
         main_features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
 
-        # Дополнительные характеристики
         cur.execute("""
             SELECT id, name, value
             FROM product_extra_features
@@ -338,7 +326,6 @@ def product_details(code):
         cur.close()
         conn.close()
 
-        # Медиа-файлы
         media_dir = Path(__file__).parent / 'media' / 'products' / code
         photos = {'preview': None, 'size': None, 'main': []}
         if media_dir.is_dir():
@@ -354,10 +341,10 @@ def product_details(code):
         result = {
             'product': product_data,
             'costs': costs,
-            'min_cost': min_cost,
             'main_features': main_features,
             'extra_features': extra_features,
-            'photos': photos
+            'photos': photos,
+            'min_cost': product_data['min_cost']   # ИСПРАВЛЕНО: для обратной совместимости на фронтенде
         }
         return jsonify(result)
     except Exception as e:
@@ -672,7 +659,7 @@ def clear_cart():
     return jsonify({'success': True})
 
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА (с привязкой к пользователю, если авторизован) =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
@@ -684,6 +671,7 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
+    # session_id всегда генерируется, если отсутствует
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -715,8 +703,10 @@ def create_order():
 
         conn.commit()
 
+        # Отправка уведомления
         send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
 
+        # Очистка корзины
         session.pop('cart', None)
         session.modified = True
 

@@ -209,6 +209,29 @@
         });
     }
 
+    // ===== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КАРТОЧКИ ТОВАРА =====
+    function createProductCardHTML(prod) {
+        const codeEnc = encodeURIComponent(prod.code);
+        const img1 = `/media/products/${codeEnc}/1.webp`;
+        const img2 = `/media/products/${codeEnc}/preview.webp`;
+        const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined)
+            ? `<div class="product-price">от ${prod.min_cost} ₽</div>`
+            : `<div class="product-price">Цена по запросу</div>`;
+        return `
+            <a href="/product/${codeEnc}" class="product-card">
+                <div class="product-img">
+                    <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
+                         onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
+                </div>
+                <div class="product-info">
+                    <div class="product-name">${escapeHtml(prod.name)}</div>
+                    <div class="product-code">${escapeHtml(prod.code)}</div>
+                    ${priceHtml}
+                </div>
+            </a>
+        `;
+    }
+
     // Обновление ссылки на профиль
     async function updateAuthLink() {
         try {
@@ -306,26 +329,7 @@
             const items = products.slice(0, 8);
             let html = '';
             for (let prod of items) {
-                const codeEnc = encodeURIComponent(prod.code);
-                const img1 = `/media/products/${codeEnc}/1.webp`;
-                const img2 = `/media/products/${codeEnc}/preview.webp`;
-                // Отображаем цену: если min_cost есть, показываем "от X ₽", иначе "Цена по запросу"
-                const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined)
-                    ? `<div class="product-price">от ${prod.min_cost} ₽</div>`
-                    : `<div class="product-price">Цена по запросу</div>`;
-                html += `
-                    <a href="/product/${codeEnc}" class="product-card">
-                        <div class="product-img">
-                            <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
-                                 onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
-                        </div>
-                        <div class="product-info">
-                            <div class="product-name">${escapeHtml(prod.name)}</div>
-                            <div class="product-code">${escapeHtml(prod.code)}</div>
-                            ${priceHtml}
-                        </div>
-                    </a>
-                `;
+                html += createProductCardHTML(prod);
             }
             container.innerHTML = html;
         } catch (err) {

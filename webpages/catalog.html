@@ -96,13 +96,23 @@
 
     let currentTimeout = null;
 
-    async function updateCartCount() {
-        try {
-            const resp = await fetch('/api/cart');
-            const data = await resp.json();
-            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-            if (cartCountSpan) cartCountSpan.textContent = totalItems;
-        } catch(e) { console.error(e); }
+    // ===== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КАРТОЧКИ ТОВАРА =====
+    function createProductCardHTML(prod) {
+        const codeEnc = encodeURIComponent(prod.code);
+        const img1 = `/media/products/${codeEnc}/1.webp`;
+        const img2 = `/media/products/${codeEnc}/preview.webp`;
+        const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined)
+            ? `<div class="product-price">от ${prod.min_cost} ₽</div>`
+            : `<div class="product-price">Цена по запросу</div>`;
+        return `
+            <a href="/product/${codeEnc}" class="slider-items">
+                <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
+                     onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
+                <div class="product-name">${escapeHtml(prod.name)}</div>
+                <div class="code-name">Код: ${escapeHtml(prod.code)}</div>
+                ${priceHtml}
+            </a>
+        `;
     }
 
     function escapeHtml(str) {
@@ -114,6 +124,15 @@
         });
     }
 
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
+        } catch(e) { console.error(e); }
+    }
+
     function renderProducts(products) {
         if (!products.length) {
             gridContainer.innerHTML = '<p class="empty">Товаров не найдено</p>';
@@ -122,22 +141,7 @@
         }
         let html = '';
         for (const prod of products) {
-            const codeEnc = encodeURIComponent(prod.code);
-            const img1 = `/media/products/${codeEnc}/1.webp`;
-            const img2 = `/media/products/${codeEnc}/preview.webp`;
-            // Отображаем цену: если min_cost есть, показываем "от X ₽", иначе "Цена по запросу"
-            const priceHtml = (prod.min_cost !== null && prod.min_cost !== undefined)
-                ? `<div class="product-price">от ${prod.min_cost} ₽</div>`
-                : `<div class="product-price">Цена по запросу</div>`;
-            html += `
-                <a href="/product/${codeEnc}" class="slider-items">
-                    <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
-                         onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
-                    <div class="product-name">${escapeHtml(prod.name)}</div>
-                    <div class="code-name">Код: ${escapeHtml(prod.code)}</div>
-                    ${priceHtml}
-                </a>
-            `;
+            html += createProductCardHTML(prod);
         }
         gridContainer.innerHTML = html;
         gridContainer.style.display = 'grid';
