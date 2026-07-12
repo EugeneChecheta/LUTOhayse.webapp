@@ -91,6 +91,13 @@
             text-align: center;
             padding: 30px;
         }
+        .order-item a {
+            color: #628b35;
+            text-decoration: none;
+        }
+        .order-item a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -228,9 +235,10 @@
                             <div class="order-items">
                     `;
                 for (const item of order.items) {
+                    const productLink = `/product/${encodeURIComponent(item.product_code)}`;
                     html += `
                             <div class="order-item">
-                                <span>${item.product_name} (${item.material_name})</span>
+                                <span><a href="${productLink}">${escapeHtml(item.product_name)}</a> (${escapeHtml(item.material_name)})</span>
                                 <span>${item.quantity} шт. × ${item.cost}₽ = ${item.quantity * item.cost}₽</span>
                             </div>
                         `;
@@ -246,6 +254,15 @@
             console.error(err);
             container.innerHTML = '<div class="empty">Не удалось загрузить заказы</div>';
         }
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
     }
 
     document.getElementById('profileForm').addEventListener('submit', async (e) => {

@@ -554,11 +554,11 @@ def order_history():
         # Для каждого заказа получим позиции
         for order in orders:
             cur.execute("""
-                SELECT product_name, material_name, cost, quantity
+                SELECT product_code, product_name, material_name, cost, quantity
                 FROM order_items
                 WHERE order_id = %s
             """, (order['id'],))
-            items = [{'product_name': r[0], 'material_name': r[1], 'cost': r[2], 'quantity': r[3]} for r in cur.fetchall()]
+            items = [{'product_code': r[0], 'product_name': r[1], 'material_name': r[2], 'cost': r[3], 'quantity': r[4]} for r in cur.fetchall()]
             order['items'] = items
             order['total'] = sum(it['cost'] * it['quantity'] for it in items)
         return jsonify(orders)

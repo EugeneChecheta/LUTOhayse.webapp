@@ -198,10 +198,11 @@
         }
         let html = '<div class="cart-items-list">';
         items.forEach(item => {
+            const productLink = `/product/${encodeURIComponent(item.product_code)}`;
             html += `
                 <div class="cart-item" data-id="${item.id}">
                     <div class="item-info">
-                        <strong>${escapeHtml(item.product_name)}</strong><br>
+                        <strong><a href="${productLink}" style="color: #628b35; text-decoration: none;">${escapeHtml(item.product_name)}</a></strong><br>
                         Код товара: ${escapeHtml(item.product_code)}<br>
                         Материал: ${escapeHtml(item.material_name)} (${escapeHtml(item.material_code)})<br>
                         Цена: ${item.cost} ₽<br>
