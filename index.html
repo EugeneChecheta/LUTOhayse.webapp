@@ -92,6 +92,17 @@
     </div>
 </section>
 
+<!-- Новая секция: Галерея индивидуальных проектов -->
+<section class="featured-gallery">
+    <div class="section-header">
+        <h2>Галерея индивидуальных проектов</h2>
+        <a href="/gallery" class="view-all">Смотреть все →</a>
+    </div>
+    <div class="gallery-scroll" id="galleryPreview">
+        <div class="loader">Загрузка...</div>
+    </div>
+</section>
+
 <section class="custom-section">
     <div class="container custom-grid">
         <div class="advantages">
@@ -338,6 +349,38 @@
         }
     }
 
+    // ===== ЗАГРУЗКА ПРЕВЬЮ ГАЛЕРЕИ (без заголовков) =====
+    async function loadGalleryPreview() {
+        const container = document.getElementById('galleryPreview');
+        try {
+            const data = await fetchJSON('/api/gallery/projects?page=1&limit=6');
+            if (!data.projects.length) {
+                container.innerHTML = '<p class="empty">Нет проектов в галерее</p>';
+                return;
+            }
+            let html = '';
+            for (const proj of data.projects) {
+                const preview = proj.preview || '/media/interface/placeholder.png';
+                html += `
+                    <div class="gallery-preview-item">
+                        <a href="/gallery" class="gallery-preview-link">
+                            <div class="gallery-preview-img">
+                                <img src="${preview}" alt="${escapeHtml(proj.folder)}" loading="lazy">
+                            </div>
+                            <div class="gallery-preview-info">
+                                <div class="gallery-preview-count">${proj.image_count} фото</div>
+                            </div>
+                        </a>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Gallery preview error', err);
+            container.innerHTML = '<p class="error-message">Не удалось загрузить галерею</p>';
+        }
+    }
+
     function initModals() {
         const aboutModal = document.getElementById('aboutModal');
         const contactsModal = document.getElementById('contactsModal');
@@ -369,6 +412,7 @@
         document.getElementById('nextSlide').addEventListener('click', nextSlide);
         resetAutoSlide();
         loadFeaturedProducts();
+        loadGalleryPreview();
         initModals();
     });
 </script>

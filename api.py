@@ -388,6 +388,78 @@ def get_materials():
         return jsonify({'error': 'Internal server error'}), 500
 
 
+# ========= ГАЛЕРЕЯ =========
+
+GALLERY_DIR = Path(__file__).parent / 'media' / 'gallery'
+
+def get_gallery_projects(page=1, limit=10):
+    """Возвращает список проектов (папок) с пагинацией, отсортированных по дате (новые сверху)."""
+    if not GALLERY_DIR.exists():
+        return [], 0
+    folders = [f for f in GALLERY_DIR.iterdir() if f.is_dir()]
+    # Сортируем по имени (дата) по убыванию
+    folders.sort(key=lambda x: x.name, reverse=True)
+    total = len(folders)
+    start = (page - 1) * limit
+    end = start + limit
+    paginated = folders[start:end]
+    projects = []
+    for folder in paginated:
+        # Читаем описание
+        desc_file = folder / 'description.txt'
+        description = ''
+        if desc_file.exists():
+            with open(desc_file, 'r', encoding='utf-8') as f:
+                description = f.read().strip()
+        # Собираем изображения
+        images = sorted(folder.glob('*.webp'))
+        preview = f'/media/gallery/{folder.name}/{images[0].name}' if images else None
+        projects.append({
+            'folder': folder.name,
+            'preview': preview,
+            'image_count': len(images),
+            'description': description,
+            'date': folder.name  # можно преобразовать в читаемый формат
+        })
+    return projects, total
+
+
+@app.route('/api/gallery/projects')
+def gallery_projects():
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 10, type=int)
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 50:
+        limit = 10
+    projects, total = get_gallery_projects(page, limit)
+    return jsonify({
+        'projects': projects,
+        'total': total,
+        'page': page,
+        'limit': limit
+    })
+
+
+@app.route('/api/gallery/project/<folder>')
+def gallery_project(folder):
+    folder_path = GALLERY_DIR / folder
+    if not folder_path.is_dir():
+        return jsonify({'error': 'Project not found'}), 404
+    images = sorted(folder_path.glob('*.webp'))
+    image_urls = [f'/media/gallery/{folder}/{img.name}' for img in images]
+    desc_file = folder_path / 'description.txt'
+    description = ''
+    if desc_file.exists():
+        with open(desc_file, 'r', encoding='utf-8') as f:
+            description = f.read().strip()
+    return jsonify({
+        'folder': folder,
+        'images': image_urls,
+        'description': description
+    })
+
+
 # ========= АВТЕНТИФИКАЦИЯ И ПРОФИЛЬ =========
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -776,6 +848,16 @@ def profile_page():
     return send_from_directory('webpages', 'profile.html')
 
 
+@app.route('/gallery')
+def gallery_page():
+    return send_from_directory('webpages', 'gallery.html')
+
+
+@app.route('/gallery.css')
+def gallery_css():
+    return send_from_directory('webpages', 'gallery.css')
+
+
 @app.route('/media/<path:filename>')
 def media_files(filename):
     return send_from_directory('media', filename)
@@ -793,5 +875,6 @@ if __name__ == '__main__':
     Path('media/materials').mkdir(parents=True, exist_ok=True)
     Path('media/interface').mkdir(parents=True, exist_ok=True)
     Path('media/index').mkdir(parents=True, exist_ok=True)
+    Path('media/gallery').mkdir(parents=True, exist_ok=True)
     init_db()
     app.run(host='0.0.0.0', port=5000, debug=True)

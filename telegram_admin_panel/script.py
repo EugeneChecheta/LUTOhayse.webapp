@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Telegram‑бот для управления интернет‑магазином (PostgreSQL).
-Версия с полной поддержкой поля min_cost.
+Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
+Версия с полной поддержкой поля min_cost и галереи.
 """
 
 import asyncio
@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import io
+from datetime import datetime
 
 import asyncpg
 from PIL import Image
@@ -98,7 +99,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния разговоров (без изменений)
+# Состояния разговоров (без изменений + новые для галереи)
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
@@ -146,13 +147,24 @@ logger = logging.getLogger(__name__)
     EDIT_MAT_TYPE,
     EDIT_MAT_PHOTO,
     DELETE_MAT_CONFIRM,
-) = range(46)
+    GALLERY_MAIN,
+    GALLERY_CREATE_DESC,
+    GALLERY_CREATE_PHOTOS,
+    GALLERY_VIEW,
+    GALLERY_EDIT,
+    GALLERY_EDIT_DESC,
+    GALLERY_EDIT_ADD_PHOTOS,
+    GALLERY_EDIT_DELETE,
+    GALLERY_EDIT_DELETE_CONFIRM,
+) = range(55)
 
 MEDIA_BASE = BASE_DIR.parent / "media" if (BASE_DIR.parent / "media").exists() else BASE_DIR / "media"
 PRODUCTS_MEDIA = MEDIA_BASE / "products"
 MATERIALS_MEDIA = MEDIA_BASE / "materials"
+GALLERY_BASE = MEDIA_BASE / "gallery"
 PRODUCTS_MEDIA.mkdir(parents=True, exist_ok=True)
 MATERIALS_MEDIA.mkdir(parents=True, exist_ok=True)
+GALLERY_BASE.mkdir(parents=True, exist_ok=True)
 
 # ------------------------- Декоратор проверки администратора -------------------------
 def admin_only(func):
@@ -192,14 +204,12 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Ошибка при выполнении reboot")
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
-# ------------------------- Работа с базой данных -------------------------
+# ------------------------- Работа с базой данных (без изменений) -------------------------
 class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
-    # ========== ПРАВКА: min_cost – обновление отдельного товара ==========
     async def update_min_cost(self, prod_id: int):
-        """Обновляет поле min_cost для одного товара на основе его стоимостей."""
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE products
@@ -211,12 +221,7 @@ class Database:
                 WHERE id = $1
             """, prod_id)
 
-    # ========== ПРАВКА: min_cost – массовое обновление ==========
     async def refresh_min_costs(self, product_ids: Optional[List[int]] = None):
-        """
-        Пересчитывает min_cost для всех товаров или для указанных.
-        Если указан product_ids, обновляются только эти товары.
-        """
         async with self.pool.acquire() as conn:
             if product_ids:
                 await conn.execute("""
@@ -322,7 +327,6 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("UPDATE materials_type SET name = $1 WHERE id = $2", new_name, mt_id)
 
-    # ========== ПРАВКА: min_cost – при удалении типа материала пересчитываем затронутые товары ==========
     async def delete_material_type_cascade(self, mt_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -334,7 +338,7 @@ class Database:
                 await conn.execute("DELETE FROM materials_for_products WHERE materials_type_id = $1", mt_id)
                 result = await conn.execute("DELETE FROM materials_type WHERE id = $1", mt_id)
                 if product_ids:
-                    await self.refresh_min_costs(product_ids)   # <-- пересчёт для затронутых товаров
+                    await self.refresh_min_costs(product_ids)
                 return result != "DELETE 0"
 
     # ---------- Основные характеристики (справочник) ----------
@@ -440,7 +444,26 @@ class Database:
                     ORDER BY p.id OFFSET $""" + str(idx) + f" LIMIT ${idx+1}"
                 params.append(offset)
                 params.append(limit)
-                total = await conn.fetchval(""" ... """)  # упрощённо, оставлено как в исходнике
+                # Получаем total отдельно
+                total_query = """
+                    SELECT COUNT(DISTINCT p.id)
+                    FROM products p
+                    JOIN flags_for_products fp ON p.id = fp.products_id
+                    WHERE 1=1
+                """
+                total_params = []
+                tidx = 1
+                if search:
+                    total_query += f" AND (p.name ILIKE ${tidx} OR p.code ILIKE ${tidx})"
+                    total_params.append(f"%{search}%")
+                    tidx += 1
+                if type_id is not None:
+                    total_query += f" AND p.products_type_id = ${tidx}"
+                    total_params.append(type_id)
+                    tidx += 1
+                total_query += f" AND fp.flags_id = ANY(${tidx}::int[])"
+                total_params.append(flag_ids)
+                total = await conn.fetchval(total_query, *total_params)
             else:
                 query = "SELECT id, code, name, products_type_id FROM products WHERE 1=1"
                 params = []
@@ -476,7 +499,6 @@ class Database:
 
     async def create_product(self, code: str, name: str, type_id: int) -> int:
         async with self.pool.acquire() as conn:
-            # min_cost по умолчанию NULL, заполнится позже при добавлении стоимостей
             return await conn.fetchval(
                 "INSERT INTO products (code, name, products_type_id) VALUES ($1, $2, $3) RETURNING id",
                 code, name, type_id
@@ -525,7 +547,6 @@ class Database:
             )
             return [dict(r) for r in rows]
 
-    # ========== ПРАВКА: min_cost – обновление при добавлении/изменении стоимости ==========
     async def set_cost(self, prod_id: int, material_type_id: int, cost: int):
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -533,10 +554,8 @@ class Database:
                 "ON CONFLICT (products_id, materials_type_id) DO UPDATE SET cost = $3",
                 prod_id, material_type_id, cost
             )
-        # После добавления/обновления стоимости пересчитываем min_cost
-        await self.update_min_cost(prod_id)   # <-- обязательный вызов
+        await self.update_min_cost(prod_id)
 
-    # ========== ПРАВКА: min_cost – обновление при удалении стоимости ==========
     async def delete_cost(self, cost_id: int):
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT products_id FROM materials_for_products WHERE id = $1", cost_id)
@@ -544,8 +563,7 @@ class Database:
                 return
             prod_id = row["products_id"]
             await conn.execute("DELETE FROM materials_for_products WHERE id = $1", cost_id)
-        # После удаления пересчитываем min_cost
-        await self.update_min_cost(prod_id)   # <-- обязательный вызов
+        await self.update_min_cost(prod_id)
 
     async def is_code_unique(self, code: str, exclude_product_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
@@ -618,7 +636,7 @@ class Database:
 db_pool = None
 db = None
 
-# ------------------------- Работа с фото товаров -------------------------
+# ------------------------- Работа с фото товаров (без изменений) -------------------------
 async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
     for attempt in range(max_retries):
         try:
@@ -735,7 +753,7 @@ async def send_product_photos(chat_id: int, product_code: str, context: ContextT
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
 
-# ------------------------- Работа с фото материалов -------------------------
+# ------------------------- Работа с фото материалов (без изменений) -------------------------
 def get_material_photo_path(material_code: str) -> Path:
     return MATERIALS_MEDIA / f"{material_code}.webp"
 
@@ -773,7 +791,7 @@ async def send_material_photo(chat_id: int, material_code: str, context: Context
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У материала нет фото.")
 
-# ------------------------- Вспомогательные функции -------------------------
+# ------------------------- Вспомогательные функции (без изменений) -------------------------
 CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
 
 async def send_or_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -798,6 +816,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new
         [InlineKeyboardButton("🧰 Материалы", callback_data="menu_materials")],
         [InlineKeyboardButton("📊 Основные характеристики", callback_data="menu_main_features")],
         [InlineKeyboardButton("🔍 Поиск товаров", callback_data="menu_search")],
+        [InlineKeyboardButton("🖼️ Галерея проектов", callback_data="menu_gallery")],
     ]
     await send_or_edit_message(update, context, "🔧 *Главное меню*",
                                InlineKeyboardMarkup(keyboard), new_message)
@@ -817,7 +836,7 @@ async def exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu_callback(update, context)
     return ConversationHandler.END
 
-# ------------------------- Управление флагами -------------------------
+# ------------------------- Управление флагами (без изменений) -------------------------
 async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -911,7 +930,7 @@ async def delete_flag_execute(update: Update, context: ContextTypes.DEFAULT_TYPE
     await show_flags(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами товаров -------------------------
+# ------------------------- Управление типами товаров (без изменений) -------------------------
 async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1005,7 +1024,7 @@ async def delete_prodtype_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_prod_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами материалов -------------------------
+# ------------------------- Управление типами материалов (без изменений) -------------------------
 async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1099,7 +1118,7 @@ async def delete_mattype_execute(update: Update, context: ContextTypes.DEFAULT_T
     await show_mat_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление основными характеристиками (справочник) -------------------------
+# ------------------------- Управление основными характеристиками (без изменений) -------------------------
 async def show_main_features(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1193,7 +1212,7 @@ async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_main_features(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление материалами -------------------------
+# ------------------------- Управление материалами (без изменений) -------------------------
 async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1465,7 +1484,7 @@ async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_materials(update, context, context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
-# ------------------------- Основные характеристики товара -------------------------
+# ------------------------- Основные характеристики товара (без изменений) -------------------------
 async def product_main_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1510,7 +1529,7 @@ async def product_main_feature_save(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return PROD_MAIN_FEATURES
 
-# ------------------------- Дополнительные характеристики товара -------------------------
+# ------------------------- Дополнительные характеристики товара (без изменений) -------------------------
 async def product_extra_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1660,7 +1679,7 @@ async def product_extra_cancel(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
-# ------------------------- Управление фото товаров -------------------------
+# ------------------------- Управление фото товаров (без изменений) -------------------------
 async def show_photo_management(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -1917,7 +1936,7 @@ async def details_photos_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("❌ Товар не найден.")
     await show_product_details(update, context, prod_id)
 
-# ------------------------- Добавление товара, удаление, редактирование полей -------------------------
+# ------------------------- Добавление товара, удаление, редактирование полей (без изменений) -------------------------
 async def add_product_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("Введите *название* товара:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
@@ -2160,7 +2179,7 @@ async def edit_product_cost_value(update: Update, context: ContextTypes.DEFAULT_
         return EDIT_PROD_COST_VALUE
     prod_id = context.user_data["edit_prod_id"]
     mt_id = context.user_data["cost_add_mt_id"]
-    await db.set_cost(prod_id, mt_id, cost)   # автоматически обновит min_cost
+    await db.set_cost(prod_id, mt_id, cost)
     await update.message.reply_text("✅ Стоимость сохранена.")
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
@@ -2185,7 +2204,7 @@ async def edit_product_cost_delete_execute(update: Update, context: ContextTypes
     parts = query.data.split("_")
     cost_id = int(parts[2])
     prod_id = int(parts[3])
-    await db.delete_cost(cost_id)   # автоматически обновит min_cost
+    await db.delete_cost(cost_id)
     await query.edit_message_text("✅ Стоимость удалена.")
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
@@ -2197,7 +2216,6 @@ async def edit_product_cost_cancel(update: Update, context: ContextTypes.DEFAULT
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
-# ========== ПРАВКА: min_cost – кнопка принудительного обновления ==========
 async def refresh_min_cost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2206,7 +2224,7 @@ async def refresh_min_cost_callback(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text("🔄 Минимальная цена пересчитана.")
     await show_product_edit(update, context, prod_id)
 
-# ------------------------- Отображение товаров с пагинацией -------------------------
+# ------------------------- Отображение товаров с пагинацией (без изменений) -------------------------
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         search: str = None, type_id: int = None, flag_ids: List[int] = None,
                         page: int = 0):
@@ -2276,7 +2294,6 @@ async def product_edit_callback(update: Update, context: ContextTypes.DEFAULT_TY
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
 
-# ========== ПРАВКА: min_cost – вывод в карточке товара (подробно) ==========
 async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -2294,10 +2311,8 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
     main_feats_text = "\n".join(f"• {f['feature_name']}: {f['value']}" for f in main_feats if f['value']) if main_feats else "нет"
     extra_feats = await db.get_product_extra_features(prod_id)
     extra_feats_text = "\n".join(f"• {f['name']}: {f['value']}" for f in extra_feats) if extra_feats else "нет"
-
     min_cost = product.get("min_cost")
     min_cost_text = f"{min_cost}₽" if min_cost is not None else "не определена"
-
     text = (
         f"*Подробнее о товаре ID {prod_id}*\n\n"
         f"📛 *Название:* {product['name']}\n"
@@ -2316,7 +2331,6 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
 
-# ========== ПРАВКА: min_cost – вывод в карточке редактирования ==========
 async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -2357,7 +2371,7 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
 
-# ------------------------- Расширенный поиск -------------------------
+# ------------------------- Расширенный поиск (без изменений) -------------------------
 async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2508,6 +2522,458 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context, new_message=True)
     return ConversationHandler.END
 
+# ------------------------- НОВЫЙ РАЗДЕЛ: ГАЛЕРЕЯ ПРОЕКТОВ -------------------------
+# Функции работы с файловой системой галереи
+def get_gallery_projects() -> List[str]:
+    """Возвращает список имён папок проектов, отсортированных по убыванию даты (новые сверху)."""
+    if not GALLERY_BASE.exists():
+        return []
+    items = [p.name for p in GALLERY_BASE.iterdir() if p.is_dir()]
+    # Сортировка по имени (YYYY-MM-DD-HH-MM) – по убыванию
+    items.sort(reverse=True)
+    return items
+
+def get_project_path(project_name: str) -> Path:
+    return GALLERY_BASE / project_name
+
+def get_project_description(project_name: str) -> str:
+    path = get_project_path(project_name) / "description.txt"
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except:
+            return ""
+    return ""
+
+def set_project_description(project_name: str, text: str):
+    path = get_project_path(project_name) / "description.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+def get_project_photo_paths(project_name: str) -> List[Path]:
+    """Возвращает список путей к фото проекта, отсортированных по номеру."""
+    project_dir = get_project_path(project_name)
+    if not project_dir.exists():
+        return []
+    files = [p for p in project_dir.glob("*.webp") if p.stem.isdigit()]
+    files.sort(key=lambda x: int(x.stem))
+    return files
+
+def get_project_photo_count(project_name: str) -> int:
+    return len(get_project_photo_paths(project_name))
+
+async def save_gallery_photo(file, project_name: str) -> bool:
+    """Сохраняет фото как следующий номер .webp в папке проекта."""
+    try:
+        photo_bytes = await file.download_as_bytearray()
+        img = Image.open(io.BytesIO(photo_bytes))
+        if img.mode in ('RGBA', 'LA', 'P'):
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+        project_dir = get_project_path(project_name)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        existing = get_project_photo_paths(project_name)
+        if existing:
+            next_num = max(int(p.stem) for p in existing) + 1
+        else:
+            next_num = 1
+        filepath = project_dir / f"{next_num}.webp"
+        img.save(filepath, 'WEBP', quality=85)
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения фото галереи: {e}")
+        return False
+
+async def delete_gallery_photo(project_name: str, index: int) -> bool:
+    """Удаляет фото с указанным номером, перенумеровывает остальные."""
+    project_dir = get_project_path(project_name)
+    filepath = project_dir / f"{index}.webp"
+    if not filepath.exists():
+        return False
+    filepath.unlink()
+    # Перенумерация оставшихся файлов
+    files = get_project_photo_paths(project_name)
+    new_index = 1
+    for p in files:
+        current_num = int(p.stem)
+        if current_num != new_index:
+            new_path = project_dir / f"{new_index}.webp"
+            p.rename(new_path)
+        new_index += 1
+    return True
+
+async def delete_project_folder(project_name: str):
+    path = get_project_path(project_name)
+    if path.exists():
+        shutil.rmtree(path)
+
+# Обработчики галереи
+@admin_only
+async def gallery_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вход в галерею – показываем список проектов."""
+    await show_gallery(update, context, page=0)
+
+async def show_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    """Отображение списка проектов с пагинацией."""
+    projects = get_gallery_projects()
+    PER_PAGE = 8
+    total = len(projects)
+    total_pages = (total + PER_PAGE - 1) // PER_PAGE if total > 0 else 1
+    if page >= total_pages:
+        page = total_pages - 1
+    start = page * PER_PAGE
+    end = min(start + PER_PAGE, total)
+    page_projects = projects[start:end]
+
+    text = "🖼️ *Галерея проектов*\n\n"
+    if not page_projects:
+        text += "Нет проектов."
+    else:
+        for name in page_projects:
+            desc = get_project_description(name)
+            photo_count = get_project_photo_count(name)
+            short_desc = desc[:30] + "…" if len(desc) > 30 else desc
+            text += f"📁 `{name}`\n   📷 {photo_count} фото\n   📝 {short_desc}\n\n"
+    text += f"\nСтраница {page+1} из {max(1, total_pages)}"
+
+    keyboard = []
+    for name in page_projects:
+        keyboard.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"gallery_view_{name}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"gallery_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"gallery_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("➕ Создать проект", callback_data="gallery_create")])
+    keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
+
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+async def gallery_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split("_")[-1])
+    await show_gallery(update, context, page)
+
+@admin_only
+async def gallery_view_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Просмотр конкретного проекта: описание + фото."""
+    query = update.callback_query
+    await query.answer()
+    project_name = query.data.split("_", 2)[2]
+    context.user_data["gallery_project"] = project_name
+    desc = get_project_description(project_name)
+    photos = get_project_photo_paths(project_name)
+    text = f"🖼️ *Проект {project_name}*\n\n📝 *Описание:*\n{desc}\n\n📷 *Фото:* {len(photos)} шт."
+
+    # Отправляем фото медиагруппой
+    if photos:
+        media_group = []
+        for p in photos:
+            with open(p, 'rb') as f:
+                media_group.append(InputMediaPhoto(media=f.read()))
+        if media_group:
+            for i in range(0, len(media_group), 10):
+                await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media_group[i:i+10])
+
+    keyboard = [
+        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"gallery_edit_{project_name}")],
+        [InlineKeyboardButton("◀ Назад к списку", callback_data="gallery_back")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+@admin_only
+async def gallery_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_gallery(update, context, 0)
+
+@admin_only
+async def gallery_create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало создания проекта: запрос описания."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("📝 Введите *описание* для нового проекта (можно оставить пустым, отправьте пробел или '-'):",
+                                  parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    return GALLERY_CREATE_DESC
+
+async def gallery_create_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение описания, создание папки проекта."""
+    desc = update.message.text.strip()
+    if desc == "-" or desc == "":
+        desc = ""
+    # Создаём имя папки по текущей дате-времени
+    now = datetime.now().strftime("%Y-%m-%d-%H-%M")
+    project_name = now
+    # Проверка на случай совпадения (маловероятно, но можно добавить номер)
+    base_name = project_name
+    counter = 1
+    while get_project_path(project_name).exists():
+        project_name = f"{base_name}-{counter}"
+        counter += 1
+    # Создаём папку и записываем описание
+    project_dir = get_project_path(project_name)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    if desc:
+        set_project_description(project_name, desc)
+    context.user_data["gallery_new_project"] = project_name
+
+    await update.message.reply_text(f"✅ Проект создан с именем `{project_name}`.\nТеперь отправьте *фото* для этого проекта. Можно отправить несколько фото (альбомом или по одному).\nКогда закончите, нажмите кнопку «Готово».",
+                                    parse_mode="Markdown",
+                                    reply_markup=InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+                                        [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+                                    ]))
+    return GALLERY_CREATE_PHOTOS
+
+async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Приём фото для проекта (может быть несколько)."""
+    project_name = context.user_data.get("gallery_new_project")
+    if not project_name:
+        await update.message.reply_text("❌ Ошибка: проект не определён.")
+        return ConversationHandler.END
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == "gallery_create_finish":
+            await query.edit_message_text("✅ Проект создан. Фото сохранены.")
+            context.user_data.pop("gallery_new_project", None)
+            await show_gallery(update, context, 0)
+            return ConversationHandler.END
+        elif data == "gallery_create_cancel":
+            # Удаляем созданную папку
+            await delete_project_folder(project_name)
+            await query.edit_message_text("❌ Создание проекта отменено.")
+            context.user_data.pop("gallery_new_project", None)
+            await show_gallery(update, context, 0)
+            return ConversationHandler.END
+        else:
+            await query.edit_message_text("Неизвестная команда.")
+            return GALLERY_CREATE_PHOTOS
+
+    if not update.message.photo:
+        await update.message.reply_text("❌ Пожалуйста, отправьте фото или используйте кнопку «Готово».",
+                                        reply_markup=InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+                                            [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+                                        ]))
+        return GALLERY_CREATE_PHOTOS
+
+    try:
+        photo_file = await download_photo_with_retry(update.message.photo[-1])
+        success = await save_gallery_photo(photo_file, project_name)
+        if success:
+            await update.message.reply_text("📷 Фото сохранено. Отправьте ещё или нажмите «Готово».",
+                                            reply_markup=InlineKeyboardMarkup([
+                                                [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+                                                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+                                            ]))
+        else:
+            await update.message.reply_text("❌ Ошибка сохранения фото. Попробуйте ещё раз.")
+    except Exception as e:
+        logger.error(f"Ошибка загрузки фото галереи: {e}")
+        await update.message.reply_text("❌ Не удалось скачать фото. Попробуйте ещё раз.")
+    return GALLERY_CREATE_PHOTOS
+
+@admin_only
+async def gallery_edit_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню редактирования проекта."""
+    query = update.callback_query
+    await query.answer()
+    project_name = query.data.split("_", 2)[2]
+    context.user_data["gallery_edit_project"] = project_name
+    desc = get_project_description(project_name)
+    photo_count = get_project_photo_count(project_name)
+    text = f"✏️ *Редактирование проекта {project_name}*\n\n📝 Описание:\n{desc}\n\n📷 Фото: {photo_count} шт."
+    keyboard = [
+        [InlineKeyboardButton("✏️ Изменить описание", callback_data="gallery_edit_desc")],
+        [InlineKeyboardButton("➕ Добавить фото", callback_data="gallery_edit_add_photos")],
+        [InlineKeyboardButton("🗑️ Удалить фото", callback_data="gallery_edit_delete_photo")],
+        [InlineKeyboardButton("🗑️ Удалить проект", callback_data="gallery_edit_delete_project")],
+        [InlineKeyboardButton("◀ Назад к проекту", callback_data=f"gallery_view_{project_name}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return GALLERY_EDIT
+
+async def gallery_edit_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новое описание (отправьте '-' чтобы очистить):", reply_markup=CANCEL_KEYBOARD)
+    return GALLERY_EDIT_DESC
+
+async def gallery_edit_description_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_desc = update.message.text.strip()
+    if new_desc == "-":
+        new_desc = ""
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await update.message.reply_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+    set_project_description(project_name, new_desc)
+    await update.message.reply_text("✅ Описание обновлено.")
+    # Возврат в меню редактирования
+    await gallery_edit_project(update, context)
+    return ConversationHandler.END
+
+async def gallery_edit_add_photos_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("📸 Отправьте фото для добавления (можно несколько). Когда закончите, нажмите «Готово».",
+                                  reply_markup=InlineKeyboardMarkup([
+                                      [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
+                                      [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
+                                  ]))
+    return GALLERY_EDIT_ADD_PHOTOS
+
+async def gallery_edit_add_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await update.message.reply_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == "gallery_add_finish":
+            await query.edit_message_text("✅ Добавление фото завершено.")
+            await gallery_edit_project(update, context)
+            return ConversationHandler.END
+        elif data == "gallery_add_cancel":
+            await query.edit_message_text("❌ Добавление фото отменено.")
+            await gallery_edit_project(update, context)
+            return ConversationHandler.END
+        else:
+            await query.edit_message_text("Неизвестная команда.")
+            return GALLERY_EDIT_ADD_PHOTOS
+
+    if not update.message.photo:
+        await update.message.reply_text("❌ Отправьте фото или нажмите кнопку «Готово».",
+                                        reply_markup=InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
+                                            [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
+                                        ]))
+        return GALLERY_EDIT_ADD_PHOTOS
+
+    try:
+        photo_file = await download_photo_with_retry(update.message.photo[-1])
+        success = await save_gallery_photo(photo_file, project_name)
+        if success:
+            await update.message.reply_text("📷 Фото сохранено. Отправьте ещё или нажмите «Готово».",
+                                            reply_markup=InlineKeyboardMarkup([
+                                                [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
+                                                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
+                                            ]))
+        else:
+            await update.message.reply_text("❌ Ошибка сохранения фото.")
+    except Exception as e:
+        logger.error(f"Ошибка загрузки фото при добавлении: {e}")
+        await update.message.reply_text("❌ Не удалось скачать фото.")
+    return GALLERY_EDIT_ADD_PHOTOS
+
+async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await query.edit_message_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+    photos = get_project_photo_paths(project_name)
+    if not photos:
+        await query.edit_message_text("❌ Нет фото для удаления.")
+        await gallery_edit_project(update, context)
+        return ConversationHandler.END
+
+    # Отправим фото медиагруппой для наглядности
+    media_group = []
+    for p in photos:
+        with open(p, 'rb') as f:
+            media_group.append(InputMediaPhoto(media=f.read()))
+    if media_group:
+        for i in range(0, len(media_group), 10):
+            await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media_group[i:i+10])
+
+    # Создаём клавиатуру с номерами для удаления
+    keyboard = []
+    for p in photos:
+        num = int(p.stem)
+        keyboard.append([InlineKeyboardButton(f"🗑️ Удалить фото #{num}", callback_data=f"gallery_del_photo_{num}")])
+    keyboard.append([InlineKeyboardButton("◀ Отмена", callback_data="gallery_del_cancel")])
+    await query.edit_message_text("Выберите номер фото для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return GALLERY_EDIT_DELETE
+
+async def gallery_edit_delete_photo_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "gallery_del_cancel":
+        await query.edit_message_text("❌ Удаление отменено.")
+        await gallery_edit_project(update, context)
+        return ConversationHandler.END
+
+    # Ожидаем формат gallery_del_photo_<номер>
+    parts = data.split("_")
+    if len(parts) != 4 or parts[0] != "gallery" or parts[1] != "del" or parts[2] != "photo":
+        await query.edit_message_text("❌ Неизвестная команда.")
+        return GALLERY_EDIT_DELETE
+    try:
+        num = int(parts[3])
+    except ValueError:
+        await query.edit_message_text("❌ Неверный номер.")
+        return GALLERY_EDIT_DELETE
+
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await query.edit_message_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+
+    success = await delete_gallery_photo(project_name, num)
+    if success:
+        await query.edit_message_text(f"✅ Фото #{num} удалено, остальные перенумерованы.")
+    else:
+        await query.edit_message_text(f"❌ Фото #{num} не найдено.")
+    await gallery_edit_project(update, context)
+    return ConversationHandler.END
+
+async def gallery_edit_delete_project_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await query.edit_message_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+    keyboard = [
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="gallery_del_project_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data="gallery_del_project_no")],
+    ]
+    await query.edit_message_text(f"⚠️ Удалить проект `{project_name}` и все его фото навсегда?",
+                                  reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return GALLERY_EDIT_DELETE_CONFIRM
+
+async def gallery_edit_delete_project_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "gallery_del_project_yes":
+        project_name = context.user_data.get("gallery_edit_project")
+        if project_name:
+            await delete_project_folder(project_name)
+            await query.edit_message_text("✅ Проект удалён.")
+            context.user_data.pop("gallery_edit_project", None)
+            await show_gallery(update, context, 0)
+        else:
+            await query.edit_message_text("❌ Ошибка: проект не найден.")
+    else:
+        await query.edit_message_text("❌ Удаление отменено.")
+        await gallery_edit_project(update, context)
+    return ConversationHandler.END
+
 # ------------------------- Обработчики меню -------------------------
 @admin_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2561,12 +3027,11 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(menu_materials_callback, pattern="^menu_materials$"))
     app.add_handler(CallbackQueryHandler(menu_main_features_callback, pattern="^menu_main_features$"))
     app.add_handler(CallbackQueryHandler(menu_search_callback, pattern="^menu_search$"))
+    app.add_handler(CallbackQueryHandler(gallery_menu_callback, pattern="^menu_gallery$"))
 
     app.add_handler(CallbackQueryHandler(products_page_callback, pattern="^products_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(product_details_callback, pattern="^prod_details_\\d+$"))
     app.add_handler(CallbackQueryHandler(product_edit_callback, pattern="^prod_edit_\\d+$"))
-
-    # ========== ПРАВКА: min_cost – обработчик кнопки обновления ==========
     app.add_handler(CallbackQueryHandler(refresh_min_cost_callback, pattern="^prod_refresh_mincost_\\d+$"))
 
     # Добавление товара
@@ -2590,6 +3055,7 @@ def register_handlers(app: Application):
             CallbackQueryHandler(cancel, pattern="^menu_materials$"),
             CallbackQueryHandler(cancel, pattern="^menu_main_features$"),
             CallbackQueryHandler(cancel, pattern="^menu_search$"),
+            CallbackQueryHandler(cancel, pattern="^menu_gallery$"),
         ],
         per_message=False,
     )
@@ -2787,7 +3253,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(delete_mattype_conv)
 
-    # Управление основными характеристиками (справочник)
+    # Управление основными характеристиками
     app.add_handler(CallbackQueryHandler(mainfeat_page_callback, pattern="^mainfeat_page_\\d+$"))
     add_mainfeat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_mainfeat_entry, pattern="^mainfeat_add$")],
@@ -2927,6 +3393,66 @@ def register_handlers(app: Application):
     )
     app.add_handler(edit_material_conv)
 
+    # ------------------------- ГАЛЕРЕЯ -------------------------
+    # Навигация по галерее
+    app.add_handler(CallbackQueryHandler(gallery_page_callback, pattern="^gallery_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(gallery_back_to_list, pattern="^gallery_back$"))
+    app.add_handler(CallbackQueryHandler(gallery_view_project, pattern="^gallery_view_"))
+
+    # Создание проекта
+    gallery_create_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(gallery_create_start, pattern="^gallery_create$")],
+        states={
+            GALLERY_CREATE_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, gallery_create_desc)],
+            GALLERY_CREATE_PHOTOS: [
+                MessageHandler(filters.PHOTO, gallery_create_photos),
+                CallbackQueryHandler(gallery_create_photos, pattern="^(gallery_create_finish|gallery_create_cancel)$"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_gallery$"),
+        ],
+        per_message=False,
+    )
+    app.add_handler(gallery_create_conv)
+
+    # Редактирование проекта
+    gallery_edit_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(gallery_edit_project, pattern="^gallery_edit_")],
+        states={
+            GALLERY_EDIT: [
+                CallbackQueryHandler(gallery_edit_description, pattern="^gallery_edit_desc$"),
+                CallbackQueryHandler(gallery_edit_add_photos_start, pattern="^gallery_edit_add_photos$"),
+                CallbackQueryHandler(gallery_edit_delete_photo_start, pattern="^gallery_edit_delete_photo$"),
+                CallbackQueryHandler(gallery_edit_delete_project_confirm, pattern="^gallery_edit_delete_project$"),
+                CallbackQueryHandler(gallery_back_to_list, pattern="^gallery_back$"),
+                CallbackQueryHandler(gallery_view_project, pattern="^gallery_view_"),
+                CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            ],
+            GALLERY_EDIT_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, gallery_edit_description_save)],
+            GALLERY_EDIT_ADD_PHOTOS: [
+                MessageHandler(filters.PHOTO, gallery_edit_add_photos),
+                CallbackQueryHandler(gallery_edit_add_photos, pattern="^(gallery_add_finish|gallery_add_cancel)$"),
+            ],
+            GALLERY_EDIT_DELETE: [
+                CallbackQueryHandler(gallery_edit_delete_photo_execute, pattern="^gallery_del_photo_\\d+$"),
+                CallbackQueryHandler(gallery_edit_delete_photo_execute, pattern="^gallery_del_cancel$"),
+            ],
+            GALLERY_EDIT_DELETE_CONFIRM: [
+                CallbackQueryHandler(gallery_edit_delete_project_execute, pattern="^gallery_del_project_(yes|no)$"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_gallery$"),
+        ],
+        per_message=False,
+    )
+    app.add_handler(gallery_edit_conv)
+
 # ------------------------- Запуск бота -------------------------
 async def main():
     global db_pool, db
@@ -2952,7 +3478,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот запущен с поддержкой материалов и командой /reboot.")
+    logging.info("Бот запущен с поддержкой галереи проектов и командой /reboot.")
     await application.updater.start_polling()
     await asyncio.Event().wait()
 
