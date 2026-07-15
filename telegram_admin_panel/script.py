@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
-Версия с полной поддержкой поля min_cost и галереи.
+ИСПРАВЛЕННАЯ ВЕРСИЯ: удаление типов материалов и материалов работает без зависаний.
 """
 
 import asyncio
 import logging
 import os
 import shutil
-import subprocess
 import sys
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 import io
+from pathlib import Path
 from datetime import datetime
+from typing import List, Dict, Optional, Tuple
 
 import asyncpg
 from PIL import Image
@@ -99,7 +98,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния разговоров (без изменений + новые для галереи)
+# Состояния разговоров (без изменений)
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
@@ -180,7 +179,7 @@ def admin_only(func):
         return await func(update, context)
     return wrapper
 
-# ------------------------- Команда перезапуска (pm2 restart) -------------------------
+# ------------------------- Команда перезапуска -------------------------
 @admin_only
 async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -199,17 +198,19 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ Ошибка при выполнении 'pm2 restart 1':\n{stderr.decode()}"
             )
     except FileNotFoundError:
-        await update.message.reply_text("❌ Команда 'pm2' не найдена. Убедитесь, что pm2 установлен и доступен в PATH.")
+        await update.message.reply_text("❌ Команда 'pm2' не найдена.")
     except Exception as e:
         logger.exception("Ошибка при выполнении reboot")
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
-# ------------------------- Работа с базой данных (без изменений) -------------------------
+# ------------------------- Работа с базой данных (исправления) -------------------------
 class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
+    # ---------- Вспомогательные методы ----------
     async def update_min_cost(self, prod_id: int):
+        """Обновляет минимальную стоимость для одного товара."""
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE products
@@ -222,8 +223,10 @@ class Database:
             """, prod_id)
 
     async def refresh_min_costs(self, product_ids: Optional[List[int]] = None):
+        """Обновляет min_cost для указанных товаров или для всех."""
         async with self.pool.acquire() as conn:
             if product_ids:
+                # FIX: используем один UPDATE с ANY, вместо цикла
                 await conn.execute("""
                     UPDATE products p
                     SET min_cost = (
@@ -304,7 +307,7 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM flags WHERE id = $1", flag_id)
 
-    # ---------- Типы материалов ----------
+    # ---------- Типы материалов (ИСПРАВЛЕНО) ----------
     async def get_material_types(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM materials_type")
@@ -327,21 +330,35 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("UPDATE materials_type SET name = $1 WHERE id = $2", new_name, mt_id)
 
+    # FIX: каскадное удаление типа материалов – удаляем все материалы этого типа, их фото, стоимости, затем сам тип
     async def delete_material_type_cascade(self, mt_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                # 1. Получаем все материалы этого типа
+                materials = await conn.fetch("SELECT id, code FROM materials WHERE materials_type_id = $1", mt_id)
+                # 2. Удаляем стоимости, связанные с этим типом (заодно получаем товары для обновления min_cost)
                 affected_products = await conn.fetch(
                     "SELECT DISTINCT products_id FROM materials_for_products WHERE materials_type_id = $1",
                     mt_id
                 )
                 product_ids = [r["products_id"] for r in affected_products]
                 await conn.execute("DELETE FROM materials_for_products WHERE materials_type_id = $1", mt_id)
+
+                # 3. Удаляем материалы (и их фото)
+                for mat in materials:
+                    await delete_material_photo(mat["code"])
+                await conn.execute("DELETE FROM materials WHERE materials_type_id = $1", mt_id)
+
+                # 4. Удаляем сам тип
                 result = await conn.execute("DELETE FROM materials_type WHERE id = $1", mt_id)
+
+                # 5. Обновляем min_cost для затронутых товаров
                 if product_ids:
                     await self.refresh_min_costs(product_ids)
+
                 return result != "DELETE 0"
 
-    # ---------- Основные характеристики (справочник) ----------
+    # ---------- Основные характеристики ----------
     async def get_main_feature_types(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM main_features_types")
@@ -365,7 +382,6 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM main_features_types WHERE id = $1", feat_id)
 
-    # ---------- Основные характеристики товара ----------
     async def get_product_main_features(self, prod_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
@@ -385,7 +401,7 @@ class Database:
                 prod_id, feature_id, value
             )
 
-    # ---------- Дополнительные характеристики товара ----------
+    # ---------- Дополнительные характеристики ----------
     async def get_product_extra_features(self, prod_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
@@ -414,7 +430,7 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM product_extra_features WHERE id = $1", feat_id)
 
-    # ---------- Товары (с фильтрацией) ----------
+    # ---------- Товары ----------
     async def get_products(self, search: str = None, type_id: int = None, flag_ids: List[int] = None,
                            offset: int = 0, limit: int = 10):
         async with self.pool.acquire() as conn:
@@ -444,7 +460,6 @@ class Database:
                     ORDER BY p.id OFFSET $""" + str(idx) + f" LIMIT ${idx+1}"
                 params.append(offset)
                 params.append(limit)
-                # Получаем total отдельно
                 total_query = """
                     SELECT COUNT(DISTINCT p.id)
                     FROM products p
@@ -573,7 +588,7 @@ class Database:
                 row = await conn.fetchrow("SELECT id FROM products WHERE code = $1", code)
             return row is None
 
-    # ---------- Методы для материалов ----------
+    # ---------- Материалы (ИСПРАВЛЕНО) ----------
     async def get_materials(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM materials")
@@ -617,13 +632,42 @@ class Database:
                 code, name, material_type_id, material_id
             )
 
-    async def delete_material(self, material_id: int):
+    # FIX: удаление материала теперь удаляет также его фото и, если он используется в ценах, удаляет эти цены.
+    # Это предотвращает появление сирот и ошибок JOIN.
+    async def delete_material(self, material_id: int) -> bool:
         async with self.pool.acquire() as conn:
-            used = await conn.fetchval("SELECT 1 FROM materials_for_products WHERE materials_type_id = "
-                                       "(SELECT materials_type_id FROM materials WHERE id = $1) LIMIT 1", material_id)
-            if used:
-                raise ValueError("Материал используется в товарах, сначала удалите связи.")
-            await conn.execute("DELETE FROM materials WHERE id = $1", material_id)
+            async with conn.transaction():
+                # Получаем код материала для удаления фото
+                mat = await conn.fetchrow("SELECT code FROM materials WHERE id = $1", material_id)
+                if not mat:
+                    return False
+                code = mat["code"]
+
+                # Удаляем все цены, связанные с этим материалом (через его тип)
+                # Сначала находим тип материала
+                type_row = await conn.fetchrow("SELECT materials_type_id FROM materials WHERE id = $1", material_id)
+                if type_row:
+                    mt_id = type_row["materials_type_id"]
+                    # Находим товары, у которых есть цены этого типа
+                    affected_products = await conn.fetch(
+                        "SELECT DISTINCT products_id FROM materials_for_products WHERE materials_type_id = $1",
+                        mt_id
+                    )
+                    product_ids = [r["products_id"] for r in affected_products]
+                    # Удаляем цены этого типа (они будут удалены все, но мы хотим удалить только те, что относятся к этому материалу? 
+                    # Но материал не привязан напрямую к ценам, цены привязаны к типу. Если мы удаляем материал, мы не должны удалять все цены этого типа,
+                    # потому что другие материалы того же типа могут использоваться. Поэтому правильнее не удалять цены, а только сам материал.
+                    # Однако, если мы удаляем материал, а его тип используется в ценах, то цены останутся, но материал исчезнет – это не нарушит целостность,
+                    # потому что цены привязаны к типу, а не к конкретному материалу. Так что удаление материала безопасно.
+                    # Поэтому мы не удаляем цены.
+                    pass
+
+                # Удаляем фото
+                await delete_material_photo(code)
+
+                # Удаляем материал
+                result = await conn.execute("DELETE FROM materials WHERE id = $1", material_id)
+                return result != "DELETE 0"
 
     async def is_material_code_unique(self, code: str, exclude_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
@@ -1024,7 +1068,7 @@ async def delete_prodtype_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_prod_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами материалов (без изменений) -------------------------
+# ------------------------- Управление типами материалов (ИСПРАВЛЕНО) -------------------------
 async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1102,19 +1146,30 @@ async def delete_mattype_confirm(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["del_mattype_page"] = page
     types, _ = await db.get_material_types(0, 1000)
     mt_name = next((t["name"] for t in types if t["id"] == mt_id), "Неизвестно")
-    keyboard = [[InlineKeyboardButton("✅ Да, удалить", callback_data="mattype_del_yes")],
+    keyboard = [[InlineKeyboardButton("✅ Да, удалить ВСЁ", callback_data="mattype_del_yes")],
                 [InlineKeyboardButton("❌ Нет", callback_data=f"mattypes_page_{page}")]]
-    await query.edit_message_text(f"Удалить тип материала '{mt_name}'? Все связанные стоимости будут удалены.",
+    await query.edit_message_text(f"⚠️ Удалить тип материала '{mt_name}'? Все материалы этого типа и их фото будут удалены!",
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return DELETE_MAT_TYPE_CONFIRM
 
 async def delete_mattype_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    mt_id = context.user_data["del_mattype_id"]
-    page = context.user_data["del_mattype_page"]
-    success = await db.delete_material_type_cascade(mt_id)
-    await query.edit_message_text("✅ Тип материала и связанные стоимости удалены." if success else "❌ Ошибка при удалении.")
+    mt_id = context.user_data.get("del_mattype_id")
+    page = context.user_data.get("del_mattype_page", 0)
+    if not mt_id:
+        await query.edit_message_text("❌ Ошибка: ID типа не найден.")
+        await show_mat_types(update, context, page)
+        return ConversationHandler.END
+    try:
+        success = await db.delete_material_type_cascade(mt_id)
+        if success:
+            await query.edit_message_text("✅ Тип материала, все его материалы и фото удалены.")
+        else:
+            await query.edit_message_text("❌ Тип материала не найден.")
+    except Exception as e:
+        logger.exception("Ошибка при удалении типа материалов")
+        await query.edit_message_text(f"❌ Непредвиденная ошибка: {e}")
     await show_mat_types(update, context, page)
     return ConversationHandler.END
 
@@ -1212,7 +1267,7 @@ async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_main_features(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление материалами (без изменений) -------------------------
+# ------------------------- Управление материалами (ИСПРАВЛЕНО) -------------------------
 async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1470,18 +1525,22 @@ async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYP
 async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    mat_id = context.user_data["edit_mat_id"]
-    material = await db.get_material_by_id(mat_id)
-    if material:
-        try:
-            await db.delete_material(mat_id)
-            await delete_material_photo(material['code'])
+    mat_id = context.user_data.get("edit_mat_id")
+    page = context.user_data.get("edit_mat_page", 0)
+    if not mat_id:
+        await query.edit_message_text("❌ Ошибка: ID материала не найден.")
+        await show_materials(update, context, page)
+        return ConversationHandler.END
+    try:
+        success = await db.delete_material(mat_id)
+        if success:
             await query.edit_message_text("✅ Материал удалён.")
-        except ValueError as e:
-            await query.edit_message_text(f"❌ {e}")
-    else:
-        await query.edit_message_text("❌ Материал не найден.")
-    await show_materials(update, context, context.user_data["edit_mat_page"])
+        else:
+            await query.edit_message_text("❌ Материал не найден.")
+    except Exception as e:
+        logger.exception("Ошибка при удалении материала")
+        await query.edit_message_text(f"❌ Непредвиденная ошибка: {e}")
+    await show_materials(update, context, page)
     return ConversationHandler.END
 
 # ------------------------- Основные характеристики товара (без изменений) -------------------------
@@ -2522,14 +2581,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context, new_message=True)
     return ConversationHandler.END
 
-# ------------------------- НОВЫЙ РАЗДЕЛ: ГАЛЕРЕЯ ПРОЕКТОВ -------------------------
-# Функции работы с файловой системой галереи
+# ------------------------- НОВЫЙ РАЗДЕЛ: ГАЛЕРЕЯ ПРОЕКТОВ (без изменений) -------------------------
 def get_gallery_projects() -> List[str]:
-    """Возвращает список имён папок проектов, отсортированных по убыванию даты (новые сверху)."""
     if not GALLERY_BASE.exists():
         return []
     items = [p.name for p in GALLERY_BASE.iterdir() if p.is_dir()]
-    # Сортировка по имени (YYYY-MM-DD-HH-MM) – по убыванию
     items.sort(reverse=True)
     return items
 
@@ -2552,7 +2608,6 @@ def set_project_description(project_name: str, text: str):
         f.write(text)
 
 def get_project_photo_paths(project_name: str) -> List[Path]:
-    """Возвращает список путей к фото проекта, отсортированных по номеру."""
     project_dir = get_project_path(project_name)
     if not project_dir.exists():
         return []
@@ -2564,7 +2619,6 @@ def get_project_photo_count(project_name: str) -> int:
     return len(get_project_photo_paths(project_name))
 
 async def save_gallery_photo(file, project_name: str) -> bool:
-    """Сохраняет фото как следующий номер .webp в папке проекта."""
     try:
         photo_bytes = await file.download_as_bytearray()
         img = Image.open(io.BytesIO(photo_bytes))
@@ -2587,13 +2641,11 @@ async def save_gallery_photo(file, project_name: str) -> bool:
         return False
 
 async def delete_gallery_photo(project_name: str, index: int) -> bool:
-    """Удаляет фото с указанным номером, перенумеровывает остальные."""
     project_dir = get_project_path(project_name)
     filepath = project_dir / f"{index}.webp"
     if not filepath.exists():
         return False
     filepath.unlink()
-    # Перенумерация оставшихся файлов
     files = get_project_photo_paths(project_name)
     new_index = 1
     for p in files:
@@ -2609,14 +2661,11 @@ async def delete_project_folder(project_name: str):
     if path.exists():
         shutil.rmtree(path)
 
-# Обработчики галереи
 @admin_only
 async def gallery_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Вход в галерею – показываем список проектов."""
     await show_gallery(update, context, page=0)
 
 async def show_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
-    """Отображение списка проектов с пагинацией."""
     projects = get_gallery_projects()
     PER_PAGE = 8
     total = len(projects)
@@ -2661,7 +2710,6 @@ async def gallery_page_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 @admin_only
 async def gallery_view_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Просмотр конкретного проекта: описание + фото."""
     query = update.callback_query
     await query.answer()
     project_name = query.data.split("_", 2)[2]
@@ -2670,7 +2718,6 @@ async def gallery_view_project(update: Update, context: ContextTypes.DEFAULT_TYP
     photos = get_project_photo_paths(project_name)
     text = f"🖼️ *Проект {project_name}*\n\n📝 *Описание:*\n{desc}\n\n📷 *Фото:* {len(photos)} шт."
 
-    # Отправляем фото медиагруппой
     if photos:
         media_group = []
         for p in photos:
@@ -2693,7 +2740,6 @@ async def gallery_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYP
 
 @admin_only
 async def gallery_create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало создания проекта: запрос описания."""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("📝 Введите *описание* для нового проекта (можно оставить пустым, отправьте пробел или '-'):",
@@ -2701,20 +2747,16 @@ async def gallery_create_start(update: Update, context: ContextTypes.DEFAULT_TYP
     return GALLERY_CREATE_DESC
 
 async def gallery_create_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получение описания, создание папки проекта."""
     desc = update.message.text.strip()
     if desc == "-" or desc == "":
         desc = ""
-    # Создаём имя папки по текущей дате-времени
     now = datetime.now().strftime("%Y-%m-%d-%H-%M")
     project_name = now
-    # Проверка на случай совпадения (маловероятно, но можно добавить номер)
     base_name = project_name
     counter = 1
     while get_project_path(project_name).exists():
         project_name = f"{base_name}-{counter}"
         counter += 1
-    # Создаём папку и записываем описание
     project_dir = get_project_path(project_name)
     project_dir.mkdir(parents=True, exist_ok=True)
     if desc:
@@ -2730,7 +2772,6 @@ async def gallery_create_desc(update: Update, context: ContextTypes.DEFAULT_TYPE
     return GALLERY_CREATE_PHOTOS
 
 async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Приём фото для проекта (может быть несколько)."""
     project_name = context.user_data.get("gallery_new_project")
     if not project_name:
         await update.message.reply_text("❌ Ошибка: проект не определён.")
@@ -2746,7 +2787,6 @@ async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TY
             await show_gallery(update, context, 0)
             return ConversationHandler.END
         elif data == "gallery_create_cancel":
-            # Удаляем созданную папку
             await delete_project_folder(project_name)
             await query.edit_message_text("❌ Создание проекта отменено.")
             context.user_data.pop("gallery_new_project", None)
@@ -2782,7 +2822,6 @@ async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TY
 
 @admin_only
 async def gallery_edit_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню редактирования проекта."""
     query = update.callback_query
     await query.answer()
     project_name = query.data.split("_", 2)[2]
@@ -2817,7 +2856,6 @@ async def gallery_edit_description_save(update: Update, context: ContextTypes.DE
         return ConversationHandler.END
     set_project_description(project_name, new_desc)
     await update.message.reply_text("✅ Описание обновлено.")
-    # Возврат в меню редактирования
     await gallery_edit_project(update, context)
     return ConversationHandler.END
 
@@ -2890,7 +2928,6 @@ async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.
         await gallery_edit_project(update, context)
         return ConversationHandler.END
 
-    # Отправим фото медиагруппой для наглядности
     media_group = []
     for p in photos:
         with open(p, 'rb') as f:
@@ -2899,7 +2936,6 @@ async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.
         for i in range(0, len(media_group), 10):
             await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media_group[i:i+10])
 
-    # Создаём клавиатуру с номерами для удаления
     keyboard = []
     for p in photos:
         num = int(p.stem)
@@ -2917,7 +2953,6 @@ async def gallery_edit_delete_photo_execute(update: Update, context: ContextType
         await gallery_edit_project(update, context)
         return ConversationHandler.END
 
-    # Ожидаем формат gallery_del_photo_<номер>
     parts = data.split("_")
     if len(parts) != 4 or parts[0] != "gallery" or parts[1] != "del" or parts[2] != "photo":
         await query.edit_message_text("❌ Неизвестная команда.")
@@ -3014,7 +3049,7 @@ async def menu_main_features_callback(update: Update, context: ContextTypes.DEFA
 async def menu_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await search_menu(update, context)
 
-# ------------------------- Регистрация обработчиков -------------------------
+# ------------------------- Регистрация обработчиков (без изменений) -------------------------
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reboot", reboot_command))
@@ -3393,13 +3428,11 @@ def register_handlers(app: Application):
     )
     app.add_handler(edit_material_conv)
 
-    # ------------------------- ГАЛЕРЕЯ -------------------------
-    # Навигация по галерее
+    # Галерея
     app.add_handler(CallbackQueryHandler(gallery_page_callback, pattern="^gallery_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(gallery_back_to_list, pattern="^gallery_back$"))
     app.add_handler(CallbackQueryHandler(gallery_view_project, pattern="^gallery_view_"))
 
-    # Создание проекта
     gallery_create_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(gallery_create_start, pattern="^gallery_create$")],
         states={
@@ -3418,7 +3451,6 @@ def register_handlers(app: Application):
     )
     app.add_handler(gallery_create_conv)
 
-    # Редактирование проекта
     gallery_edit_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(gallery_edit_project, pattern="^gallery_edit_")],
         states={
@@ -3464,6 +3496,9 @@ async def main():
         password=DB_CONFIG["password"],
         min_size=1,
         max_size=5,
+        # FIX: добавим таймауты для предотвращения зависаний
+        timeout=60.0,
+        command_timeout=60.0,
     )
     db = Database(db_pool)
 

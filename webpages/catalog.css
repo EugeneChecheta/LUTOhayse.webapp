@@ -235,13 +235,19 @@ body {
     font-weight: bold;
     margin-bottom: 20px;
 }
+
+/* ===== СЕТКА КАТАЛОГА С КВАДРАТНЫМИ ПЛИТКАМИ ===== */
 .slider-containers {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 16px;
     padding: 16px 8px;
+    grid-auto-rows: 1fr; /* все строки одинаковой высоты */
 }
+
 .slider-items {
+    display: flex;
+    flex-direction: column;
     background: #e9e5e5;
     box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     border-radius: 12px;
@@ -249,19 +255,28 @@ body {
     transition: transform 0.3s;
     text-decoration: none;
     color: #000;
-    display: block;
+    height: 100%; /* занимает всю высоту ячейки */
 }
 .slider-items:hover {
     transform: scale(1.02);
     background-color: #f5f2f2;
 }
-.slider-items img {
+
+.image-wrapper {
     width: 100%;
-    height: auto;
+    aspect-ratio: 1/1;
+    overflow: hidden;
     border-radius: 12px;
-    margin-bottom: 8px;
+    background: #fff;
+    flex-shrink: 0;
+}
+.image-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
     display: block;
 }
+
 .product-name {
     font-weight: 600;
     margin-top: 8px;
@@ -280,6 +295,7 @@ body {
     margin-top: 6px;
     font-size: 15px;
 }
+
 .loader, .error-message, .empty {
     text-align: center;
     font-size: 18px;
@@ -287,7 +303,7 @@ body {
 }
 .error-message { color: #b33; }
 
-/* ===== БЛОК ФИЛЬТРОВ — ОСНОВНЫЕ СТИЛИ ===== */
+/* ===== БЛОК ФИЛЬТРОВ ===== */
 .filters {
     background: #f9f9f9;
     border-radius: 20px;
@@ -353,12 +369,10 @@ body {
     border: 1px solid #ddd;
     color: #333;
 }
-
 .flag-checkbox-label:hover {
     background: #f0f0f0;
     border-color: #bbb;
 }
-
 .flag-checkbox {
     width: 16px;
     height: 16px;
@@ -367,8 +381,11 @@ body {
     accent-color: var(--accent-color);
 }
 
-/* ===== АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ ===== */
+/* ===== АДАПТАЦИЯ ===== */
 @media (max-width: 768px) {
+    .slider-containers {
+        grid-template-columns: repeat(3, 1fr);
+    }
     .filters {
         padding: 12px 16px;
         gap: 16px;
@@ -399,24 +416,33 @@ body {
         margin-bottom: 5px;
     }
 
-    .slider-containers {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-    }
     .header__container { justify-content: center; gap: 15px; }
     .menu__list { column-gap: 20px; }
     .menu__link { font-size: 14px; }
     .logo-sub { font-size: 18px; }
     .goods { padding: 0 30px; }
     .header { font-size: 28px; }
-    .footer-top { flex-direction: column; align-items: center; text-align: center; }
-    .footer-left { text-align: center; }
-    .social-icons { justify-content: center; }
-    .footer-nav { justify-content: center; gap: 20px; }
-    .footer-bottom { flex-direction: column; align-items: center; gap: 10px; }
 }
 
 @media (max-width: 600px) {
+    .slider-containers {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 10px;
+        padding: 12px 4px;
+    }
+    .slider-items {
+        padding: 8px;
+    }
+    .product-name {
+        font-size: 12px;
+    }
+    .code-name {
+        font-size: 10px;
+    }
+    .product-price {
+        font-size: 12px;
+    }
+
     .filters {
         padding: 10px 12px;
         gap: 12px;
@@ -442,32 +468,11 @@ body {
         margin-bottom: 4px;
     }
 
-    .slider-containers {
-        grid-template-columns: repeat(2, 1fr) !important;
-        gap: 10px;
-        padding: 12px 4px;
-    }
-    .slider-items {
-        padding: 8px;
-    }
-    .product-name {
-        font-size: 12px;
-    }
-    .code-name {
-        font-size: 10px;
-    }
-    .product-price {
-        font-size: 12px;
-    }
     .logo {
         font-size: 24px;
     }
     .logo-sub {
         font-size: 16px;
-    }
-    .vk-svg, .tg-svg {
-        width: 28px;
-        height: 28px;
     }
     .goods {
         padding: 0 15px;

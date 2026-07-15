@@ -106,8 +106,10 @@
             : `<div class="product-price">Цена по запросу</div>`;
         return `
             <a href="/product/${codeEnc}" class="slider-items">
-                <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
-                     onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
+                <div class="image-wrapper">
+                    <img src="${img1}" alt="${escapeHtml(prod.name)}" loading="lazy"
+                         onerror="if(this.src==='${img1}'){this.src='${img2}';}else{this.src='/media/interface/placeholder.png';}">
+                </div>
                 <div class="product-name">${escapeHtml(prod.name)}</div>
                 <div class="code-name">Код: ${escapeHtml(prod.code)}</div>
                 ${priceHtml}
