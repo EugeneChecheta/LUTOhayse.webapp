@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
-ВЕРСИЯ: убраны ID из интерфейса, добавлен выбор типа материалов, сортировка по коду.
+ВЕРСИЯ: ИСПРАВЛЕНА функция добавления материалов – больше не падает при пропуске фото.
+ИСПРАВЛЕНИЕ: все отправки сообщений в finish_material_creation теперь используют context.bot.send_message
 """
-
 import asyncio
 import logging
 import os
@@ -98,7 +98,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния разговоров (без изменений, только переименованы для ясности)
+# Состояния разговоров
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
@@ -769,7 +769,7 @@ async def send_product_photos(chat_id: int, product_code: str, context: ContextT
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
 
-# ------------------------- Работа с фото материалов -------------------------
+# ------------------------- Работа с фото материалов (один файл на материал) -------------------------
 def get_material_photo_path(material_code: str) -> Path:
     return MATERIALS_MEDIA / f"{material_code}.webp"
 
@@ -797,6 +797,8 @@ async def move_material_photo(old_code: str, new_code: str):
     old_path = get_material_photo_path(old_code)
     new_path = get_material_photo_path(new_code)
     if old_path.exists():
+        if new_path.exists():
+            new_path.unlink()
         old_path.rename(new_path)
 
 async def send_material_photo(chat_id: int, material_code: str, context: ContextTypes.DEFAULT_TYPE):
@@ -845,7 +847,6 @@ async def cancel_to_product_edit(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 async def exit_to_materials_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Возврат к списку материалов с текущим типом
     type_id = context.user_data.get("materials_type_id")
     if type_id:
         await show_materials(update, context, type_id, context.user_data.get("materials_page", 0))
@@ -1245,7 +1246,7 @@ async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_
     return ConversationHandler.END
 
 # ------------------------- Управление материалами (просмотр и выбор типа) -------------------------
-async def show_material_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+async def show_material_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0, new_message: bool = False):
     limit = 8
     offset = page * limit
     types, total = await db.get_material_types(offset, limit)
@@ -1271,7 +1272,7 @@ async def show_material_type_choice(update: Update, context: ContextTypes.DEFAUL
             keyboard.append(nav)
         keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["mat_choice_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=new_message)
 
 async def material_choice_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1286,7 +1287,7 @@ async def material_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["materials_type_id"] = type_id
     await show_materials(update, context, type_id, 0)
 
-async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, type_id: int, page: int = 0):
+async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, type_id: int, page: int = 0, new_message: bool = False):
     limit = 8
     offset = page * limit
     materials, total = await db.get_materials(material_type_id=type_id, offset=offset, limit=limit)
@@ -1318,10 +1319,12 @@ async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, typ
         nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"materials_page_{page+1}"))
     if nav:
         keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data=f"mat_add_with_type_{type_id}_{page}")])
     keyboard.append([InlineKeyboardButton("🔄 Сменить тип", callback_data="mat_choice_back")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
+    context.user_data["materials_type_id"] = type_id
     context.user_data["materials_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=new_message)
 
 async def materials_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1373,6 +1376,7 @@ async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # ------------------------- Добавление материала -------------------------
 async def add_material_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало добавления материала через главное меню материалов (выбор типа)."""
     await update.callback_query.answer()
     types, _ = await db.get_material_types(0, 1000)
     if not types:
@@ -1383,7 +1387,21 @@ async def add_material_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.callback_query.edit_message_text("Выберите тип материала:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_MAT_TYPE_SELECT
 
+async def add_material_with_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавление материала с уже выбранным типом (из списка материалов)."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    type_id = int(parts[3])
+    page = int(parts[4])
+    context.user_data["return_mat_type_id"] = type_id
+    context.user_data["return_mat_page"] = page
+    context.user_data["new_mat_type_id"] = type_id
+    await query.edit_message_text("Введите *уникальный код* материала:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    return ADD_MAT_CODE
+
 async def add_material_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выбор типа материала при добавлении через главное меню."""
     query = update.callback_query
     await query.answer()
     type_id = int(query.data.split("_")[-1])
@@ -1403,28 +1421,91 @@ async def add_material_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_material_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
     context.user_data["new_mat_name"] = name
-    await update.message.reply_text("Теперь отправьте *фото* материала (одно изображение).", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    # Предлагаем отправить фото или пропустить
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Отправить фото", callback_data="mat_send_photo")],
+        [InlineKeyboardButton("⏩ Пропустить фото", callback_data="mat_skip_photo")],
+        [InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]
+    ])
+    await update.message.reply_text(
+        "Теперь отправьте *фото* материала (одно изображение) или нажмите «Пропустить фото».",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
     return ADD_MAT_PHOTO
 
 async def add_material_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка фото или пропуска при добавлении материала."""
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == "mat_skip_photo":
+            # Пропуск фото – завершаем создание, используя context.bot.send_message
+            await query.edit_message_text("⏩ Фото пропущено. Создаю материал...")
+            await finish_material_creation(update, context, with_photo=False)
+            return ConversationHandler.END
+        elif data == "mat_send_photo":
+            # Пользователь нажал "Отправить фото" – ждём фото
+            await query.edit_message_text(
+                "📷 Отправьте фото материала (одно изображение).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
+            )
+            return ADD_MAT_PHOTO
+        else:
+            await query.edit_message_text("Неизвестная команда.")
+            return ADD_MAT_PHOTO
+
+    # Если пришло фото
     if not update.message.photo:
-        await update.message.reply_text("❌ Пожалуйста, отправьте фото.", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Пожалуйста, отправьте фото или используйте кнопки.",
+                                        reply_markup=InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("📷 Отправить фото", callback_data="mat_send_photo")],
+                                            [InlineKeyboardButton("⏩ Пропустить фото", callback_data="mat_skip_photo")],
+                                            [InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]]
+                                        ))
         return ADD_MAT_PHOTO
+
     try:
         photo_file = await download_photo_with_retry(update.message.photo[-1])
         code = context.user_data["new_mat_code"]
         success = await save_material_photo(photo_file, code)
-        if not success:
-            await update.message.reply_text("❌ Ошибка при сохранении фото. Попробуйте ещё раз.")
-            return ADD_MAT_PHOTO
-        mat_id = await db.create_material(code, context.user_data["new_mat_name"], context.user_data["new_mat_type_id"])
-        await update.message.reply_text(f"✅ Материал создан, код: `{code}`.")
-        # После создания возвращаем к выбору типа
-        await show_material_type_choice(update, context, 0)
+        if success:
+            await update.message.reply_text("📷 Фото сохранено.")
+        else:
+            await update.message.reply_text("❌ Ошибка при сохранении фото. Продолжаем без фото.")
     except Exception as e:
-        logger.error(f"Ошибка добавления материала: {e}")
-        await update.message.reply_text("❌ Ошибка при создании материала.")
+        logger.error(f"Ошибка загрузки фото: {e}")
+        await update.message.reply_text("❌ Не удалось скачать фото. Продолжаем без фото.")
+
+    await finish_material_creation(update, context, with_photo=True)
     return ConversationHandler.END
+
+async def finish_material_creation(update: Update, context: ContextTypes.DEFAULT_TYPE, with_photo: bool):
+    """Завершает создание материала: сохраняет в БД и возвращается к списку.
+       Все сообщения отправляются через context.bot.send_message, чтобы избежать ошибок при вызове из callback_query."""
+    code = context.user_data["new_mat_code"]
+    name = context.user_data["new_mat_name"]
+    type_id = context.user_data["new_mat_type_id"]
+    chat_id = update.effective_chat.id
+
+    try:
+        mat_id = await db.create_material(code, name, type_id)
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ Материал создан, код: `{code}`.", parse_mode="Markdown")
+    except Exception as e:
+        logger.exception("Ошибка при создании материала в БД")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка при создании материала: {e}")
+        # Если был создан файл фото, удаляем его
+        await delete_material_photo(code)
+        return
+
+    # Возвращаемся к списку материалов, отправляя новое сообщение (new_message=True)
+    return_type_id = context.user_data.pop("return_mat_type_id", None)
+    return_page = context.user_data.pop("return_mat_page", 0)
+    if return_type_id is not None:
+        await show_materials(update, context, return_type_id, return_page, new_message=True)
+    else:
+        await show_material_type_choice(update, context, 0, new_message=True)
 
 # ------------------------- Редактирование материала -------------------------
 async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1488,7 +1569,7 @@ async def material_update_code(update: Update, context: ContextTypes.DEFAULT_TYP
     old_code = material['code']
     await db.update_material(mat_id, new_code, material['name'], material['materials_type_id'])
     await move_material_photo(old_code, new_code)
-    await update.message.reply_text("✅ Код обновлён, фото переименовано.")
+    await update.message.reply_text("✅ Код обновлён, файл фото переименован.")
     await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
@@ -1518,13 +1599,36 @@ async def material_update_type(update: Update, context: ContextTypes.DEFAULT_TYP
 async def material_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Отправьте новое фото для материала (одно изображение).", reply_markup=CANCEL_KEYBOARD)
+    await query.edit_message_text("Отправьте новое фото для материала (одно изображение) или нажмите «Удалить фото», чтобы удалить существующее.",
+                                  reply_markup=InlineKeyboardMarkup([
+                                      [InlineKeyboardButton("🗑️ Удалить фото", callback_data="mat_delete_photo")],
+                                      [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]]
+                                  ))
     return EDIT_MAT_PHOTO
 
 async def material_update_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        if query.data == "mat_delete_photo":
+            mat_id = context.user_data["edit_mat_id"]
+            material = await db.get_material_by_id(mat_id)
+            await delete_material_photo(material['code'])
+            await query.edit_message_text("✅ Фото удалено.")
+            await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
+            return ConversationHandler.END
+        else:
+            await query.edit_message_text("Неизвестная команда.")
+            return EDIT_MAT_PHOTO
+
     if not update.message.photo:
-        await update.message.reply_text("❌ Отправьте фото.", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Отправьте фото или используйте кнопку «Удалить фото».",
+                                        reply_markup=InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("🗑️ Удалить фото", callback_data="mat_delete_photo")],
+                                            [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]]
+                                        ))
         return EDIT_MAT_PHOTO
+
     try:
         photo_file = await download_photo_with_retry(update.message.photo[-1])
         mat_id = context.user_data["edit_mat_id"]
@@ -2607,6 +2711,11 @@ async def search_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE
     return SEARCH_TYPE_SELECT
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("return_mat_type_id") is not None:
+        type_id = context.user_data.pop("return_mat_type_id")
+        page = context.user_data.pop("return_mat_page", 0)
+        await show_materials(update, context, type_id, page)
+        return ConversationHandler.END
     if update.callback_query:
         await update.callback_query.edit_message_text("Операция отменена.")
         await show_main_menu(update, context, new_message=True)
@@ -3073,7 +3182,6 @@ async def menu_mat_types_callback(update: Update, context: ContextTypes.DEFAULT_
 
 @admin_only
 async def menu_materials_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Вход в материалы: показать выбор типа
     await show_material_type_choice(update, context, 0)
 
 @admin_only
@@ -3429,18 +3537,27 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(materials_page_callback, pattern="^materials_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(material_details, pattern="^mat_details_\\d+_\\d+_\\d+$"))
     app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+_\\d+$"))
-    # Кнопка "Сменить тип" в списке материалов
     app.add_handler(CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"))
 
     add_material_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(add_material_entry, pattern="^mat_add$")],
+        entry_points=[
+            CallbackQueryHandler(add_material_entry, pattern="^mat_add$"),
+            CallbackQueryHandler(add_material_with_type, pattern="^mat_add_with_type_\\d+_\\d+$"),
+        ],
         states={
             ADD_MAT_TYPE_SELECT: [CallbackQueryHandler(add_material_type_selected, pattern="^mat_add_type_\\d+$")],
             ADD_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_material_code)],
             ADD_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_material_name)],
-            ADD_MAT_PHOTO: [MessageHandler(filters.PHOTO, add_material_photo)],
+            ADD_MAT_PHOTO: [
+                MessageHandler(filters.PHOTO, add_material_photo),
+                CallbackQueryHandler(add_material_photo, pattern="^(mat_send_photo|mat_skip_photo)$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^main_menu$"),
+            CallbackQueryHandler(cancel, pattern="^menu_materials$"),
+        ],
         per_message=False,
     )
     app.add_handler(add_material_conv)
@@ -3461,7 +3578,10 @@ def register_handlers(app: Application):
             EDIT_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_name)],
             EDIT_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_code)],
             EDIT_MAT_TYPE: [CallbackQueryHandler(material_update_type, pattern="^mat_upd_type_\\d+$")],
-            EDIT_MAT_PHOTO: [MessageHandler(filters.PHOTO, material_update_photo)],
+            EDIT_MAT_PHOTO: [
+                MessageHandler(filters.PHOTO, material_update_photo),
+                CallbackQueryHandler(material_update_photo, pattern="^mat_delete_photo$"),
+            ],
             DELETE_MAT_CONFIRM: [CallbackQueryHandler(material_delete_execute, pattern="^mat_del_yes$")],
         },
         fallbacks=[
@@ -3558,7 +3678,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот запущен с поддержкой галереи проектов, сортировкой по коду и выбором типа материалов.")
+    logging.info("Бот запущен с поддержкой галереи проектов, сортировкой по коду, выбором типа материалов и файлами материалов.")
     await application.updater.start_polling()
     await asyncio.Event().wait()
 
