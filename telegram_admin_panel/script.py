@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
-ИСПРАВЛЕННАЯ ВЕРСИЯ: удаление типов материалов и материалов работает без зависаний.
+ВЕРСИЯ: убраны ID из интерфейса, добавлен выбор типа материалов, сортировка по коду.
 """
 
 import asyncio
@@ -98,14 +98,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния разговоров (без изменений)
+# Состояния разговоров (без изменений, только переименованы для ясности)
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
     ADD_PROD_TYPE_SELECT,
     EDIT_PROD_NAME,
     EDIT_PROD_CODE,
-    EDIT_PROD_TYPE_ID,
+    EDIT_PROD_TYPE_SELECT,
     EDIT_PROD_FLAGS,
     EDIT_PROD_COST_MENU,
     EDIT_PROD_COST_ADD_TYPE,
@@ -203,14 +203,13 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Ошибка при выполнении reboot")
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
-# ------------------------- Работа с базой данных (исправления) -------------------------
+# ------------------------- Работа с базой данных -------------------------
 class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
     # ---------- Вспомогательные методы ----------
     async def update_min_cost(self, prod_id: int):
-        """Обновляет минимальную стоимость для одного товара."""
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE products
@@ -223,10 +222,8 @@ class Database:
             """, prod_id)
 
     async def refresh_min_costs(self, product_ids: Optional[List[int]] = None):
-        """Обновляет min_cost для указанных товаров или для всех."""
         async with self.pool.acquire() as conn:
             if product_ids:
-                # FIX: используем один UPDATE с ANY, вместо цикла
                 await conn.execute("""
                     UPDATE products p
                     SET min_cost = (
@@ -251,7 +248,7 @@ class Database:
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM products_type")
             rows = await conn.fetch(
-                "SELECT id, name FROM products_type ORDER BY id OFFSET $1 LIMIT $2",
+                "SELECT id, name FROM products_type ORDER BY name OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
@@ -290,7 +287,7 @@ class Database:
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM flags")
             rows = await conn.fetch(
-                "SELECT id, name FROM flags ORDER BY id OFFSET $1 LIMIT $2",
+                "SELECT id, name FROM flags ORDER BY name OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
@@ -307,12 +304,12 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM flags WHERE id = $1", flag_id)
 
-    # ---------- Типы материалов (ИСПРАВЛЕНО) ----------
+    # ---------- Типы материалов ----------
     async def get_material_types(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM materials_type")
             rows = await conn.fetch(
-                "SELECT id, name FROM materials_type ORDER BY id OFFSET $1 LIMIT $2",
+                "SELECT id, name FROM materials_type ORDER BY name OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
@@ -330,32 +327,22 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("UPDATE materials_type SET name = $1 WHERE id = $2", new_name, mt_id)
 
-    # FIX: каскадное удаление типа материалов – удаляем все материалы этого типа, их фото, стоимости, затем сам тип
     async def delete_material_type_cascade(self, mt_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # 1. Получаем все материалы этого типа
                 materials = await conn.fetch("SELECT id, code FROM materials WHERE materials_type_id = $1", mt_id)
-                # 2. Удаляем стоимости, связанные с этим типом (заодно получаем товары для обновления min_cost)
                 affected_products = await conn.fetch(
                     "SELECT DISTINCT products_id FROM materials_for_products WHERE materials_type_id = $1",
                     mt_id
                 )
                 product_ids = [r["products_id"] for r in affected_products]
                 await conn.execute("DELETE FROM materials_for_products WHERE materials_type_id = $1", mt_id)
-
-                # 3. Удаляем материалы (и их фото)
                 for mat in materials:
                     await delete_material_photo(mat["code"])
                 await conn.execute("DELETE FROM materials WHERE materials_type_id = $1", mt_id)
-
-                # 4. Удаляем сам тип
                 result = await conn.execute("DELETE FROM materials_type WHERE id = $1", mt_id)
-
-                # 5. Обновляем min_cost для затронутых товаров
                 if product_ids:
                     await self.refresh_min_costs(product_ids)
-
                 return result != "DELETE 0"
 
     # ---------- Основные характеристики ----------
@@ -363,7 +350,7 @@ class Database:
         async with self.pool.acquire() as conn:
             total = await conn.fetchval("SELECT COUNT(*) FROM main_features_types")
             rows = await conn.fetch(
-                "SELECT id, name FROM main_features_types ORDER BY id OFFSET $1 LIMIT $2",
+                "SELECT id, name FROM main_features_types ORDER BY name OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
@@ -388,7 +375,7 @@ class Database:
                 "SELECT mft.id as feature_id, mft.name as feature_name, COALESCE(pmf.value, '') as value "
                 "FROM main_features_types mft "
                 "LEFT JOIN product_main_features pmf ON mft.id = pmf.feature_id AND pmf.products_id = $1 "
-                "ORDER BY mft.id", prod_id
+                "ORDER BY mft.name", prod_id
             )
             return [dict(r) for r in rows]
 
@@ -405,7 +392,7 @@ class Database:
     async def get_product_extra_features(self, prod_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, name, value FROM product_extra_features WHERE products_id = $1 ORDER BY id",
+                "SELECT id, name, value FROM product_extra_features WHERE products_id = $1 ORDER BY name",
                 prod_id
             )
             return [dict(r) for r in rows]
@@ -457,7 +444,7 @@ class Database:
                 query += """
                     GROUP BY p.id, p.code, p.name, p.products_type_id
                     HAVING COUNT(DISTINCT fp.flags_id) = $3
-                    ORDER BY p.id OFFSET $""" + str(idx) + f" LIMIT ${idx+1}"
+                    ORDER BY p.code OFFSET $""" + str(idx) + f" LIMIT ${idx+1}"
                 params.append(offset)
                 params.append(limit)
                 total_query = """
@@ -491,7 +478,7 @@ class Database:
                     query += f" AND products_type_id = ${idx}"
                     params.append(type_id)
                     idx += 1
-                query += f" ORDER BY id OFFSET ${idx} LIMIT ${idx+1}"
+                query += f" ORDER BY code OFFSET ${idx} LIMIT ${idx+1}"
                 params.append(offset)
                 params.append(limit)
                 total = await conn.fetchval(
@@ -539,7 +526,7 @@ class Database:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT f.id, f.name FROM flags f JOIN flags_for_products fp ON f.id = fp.flags_id "
-                "WHERE fp.products_id = $1 ORDER BY f.id", prod_id
+                "WHERE fp.products_id = $1 ORDER BY f.name", prod_id
             )
             return [dict(r) for r in rows]
 
@@ -558,7 +545,7 @@ class Database:
             rows = await conn.fetch(
                 "SELECT mfp.id, mfp.materials_type_id, mt.name as material_name, mfp.cost "
                 "FROM materials_for_products mfp JOIN materials_type mt ON mfp.materials_type_id = mt.id "
-                "WHERE mfp.products_id = $1 ORDER BY mt.id", prod_id
+                "WHERE mfp.products_id = $1 ORDER BY mt.name", prod_id
             )
             return [dict(r) for r in rows]
 
@@ -588,17 +575,28 @@ class Database:
                 row = await conn.fetchrow("SELECT id FROM products WHERE code = $1", code)
             return row is None
 
-    # ---------- Материалы (ИСПРАВЛЕНО) ----------
-    async def get_materials(self, offset=0, limit=10):
+    # ---------- Материалы ----------
+    async def get_materials(self, material_type_id: int = None, offset=0, limit=10):
         async with self.pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM materials")
-            rows = await conn.fetch(
-                "SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name "
-                "FROM materials m "
-                "JOIN materials_type mt ON m.materials_type_id = mt.id "
-                "ORDER BY m.id OFFSET $1 LIMIT $2",
-                offset, limit
-            )
+            if material_type_id is not None:
+                total = await conn.fetchval("SELECT COUNT(*) FROM materials WHERE materials_type_id = $1", material_type_id)
+                rows = await conn.fetch(
+                    "SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name "
+                    "FROM materials m "
+                    "JOIN materials_type mt ON m.materials_type_id = mt.id "
+                    "WHERE m.materials_type_id = $1 "
+                    "ORDER BY m.code OFFSET $2 LIMIT $3",
+                    material_type_id, offset, limit
+                )
+            else:
+                total = await conn.fetchval("SELECT COUNT(*) FROM materials")
+                rows = await conn.fetch(
+                    "SELECT m.id, m.code, m.name, m.materials_type_id, mt.name as type_name "
+                    "FROM materials m "
+                    "JOIN materials_type mt ON m.materials_type_id = mt.id "
+                    "ORDER BY m.code OFFSET $1 LIMIT $2",
+                    offset, limit
+                )
             return [dict(r) for r in rows], total
 
     async def get_material_by_id(self, material_id: int):
@@ -632,40 +630,14 @@ class Database:
                 code, name, material_type_id, material_id
             )
 
-    # FIX: удаление материала теперь удаляет также его фото и, если он используется в ценах, удаляет эти цены.
-    # Это предотвращает появление сирот и ошибок JOIN.
     async def delete_material(self, material_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # Получаем код материала для удаления фото
                 mat = await conn.fetchrow("SELECT code FROM materials WHERE id = $1", material_id)
                 if not mat:
                     return False
                 code = mat["code"]
-
-                # Удаляем все цены, связанные с этим материалом (через его тип)
-                # Сначала находим тип материала
-                type_row = await conn.fetchrow("SELECT materials_type_id FROM materials WHERE id = $1", material_id)
-                if type_row:
-                    mt_id = type_row["materials_type_id"]
-                    # Находим товары, у которых есть цены этого типа
-                    affected_products = await conn.fetch(
-                        "SELECT DISTINCT products_id FROM materials_for_products WHERE materials_type_id = $1",
-                        mt_id
-                    )
-                    product_ids = [r["products_id"] for r in affected_products]
-                    # Удаляем цены этого типа (они будут удалены все, но мы хотим удалить только те, что относятся к этому материалу? 
-                    # Но материал не привязан напрямую к ценам, цены привязаны к типу. Если мы удаляем материал, мы не должны удалять все цены этого типа,
-                    # потому что другие материалы того же типа могут использоваться. Поэтому правильнее не удалять цены, а только сам материал.
-                    # Однако, если мы удаляем материал, а его тип используется в ценах, то цены останутся, но материал исчезнет – это не нарушит целостность,
-                    # потому что цены привязаны к типу, а не к конкретному материалу. Так что удаление материала безопасно.
-                    # Поэтому мы не удаляем цены.
-                    pass
-
-                # Удаляем фото
                 await delete_material_photo(code)
-
-                # Удаляем материал
                 result = await conn.execute("DELETE FROM materials WHERE id = $1", material_id)
                 return result != "DELETE 0"
 
@@ -680,7 +652,7 @@ class Database:
 db_pool = None
 db = None
 
-# ------------------------- Работа с фото товаров (без изменений) -------------------------
+# ------------------------- Работа с фото товаров -------------------------
 async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
     for attempt in range(max_retries):
         try:
@@ -797,7 +769,7 @@ async def send_product_photos(chat_id: int, product_code: str, context: ContextT
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
 
-# ------------------------- Работа с фото материалов (без изменений) -------------------------
+# ------------------------- Работа с фото материалов -------------------------
 def get_material_photo_path(material_code: str) -> Path:
     return MATERIALS_MEDIA / f"{material_code}.webp"
 
@@ -835,7 +807,7 @@ async def send_material_photo(chat_id: int, material_code: str, context: Context
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У материала нет фото.")
 
-# ------------------------- Вспомогательные функции (без изменений) -------------------------
+# ------------------------- Вспомогательные функции -------------------------
 CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
 
 async def send_or_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -873,14 +845,19 @@ async def cancel_to_product_edit(update: Update, context: ContextTypes.DEFAULT_T
     return ConversationHandler.END
 
 async def exit_to_materials_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await materials_page_callback(update, context)
+    # Возврат к списку материалов с текущим типом
+    type_id = context.user_data.get("materials_type_id")
+    if type_id:
+        await show_materials(update, context, type_id, context.user_data.get("materials_page", 0))
+    else:
+        await show_material_type_choice(update, context)
     return ConversationHandler.END
 
 async def exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu_callback(update, context)
     return ConversationHandler.END
 
-# ------------------------- Управление флагами (без изменений) -------------------------
+# ------------------------- Управление флагами -------------------------
 async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -895,7 +872,7 @@ async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: i
         text += "Нет флагов."
     else:
         for f in flags:
-            text += f"`{f['id']}` – {f['name']}\n"
+            text += f"• {f['name']}\n"
     text += f"\nСтраница {page+1} из {total_pages}"
     keyboard = []
     for f in flags:
@@ -974,7 +951,7 @@ async def delete_flag_execute(update: Update, context: ContextTypes.DEFAULT_TYPE
     await show_flags(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами товаров (без изменений) -------------------------
+# ------------------------- Управление типами товаров -------------------------
 async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -989,7 +966,7 @@ async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         text += "Нет типов."
     else:
         for t in types:
-            text += f"`{t['id']}` – {t['name']}\n"
+            text += f"• {t['name']}\n"
     text += f"\nСтраница {page+1} из {total_pages}"
     keyboard = []
     for t in types:
@@ -1068,7 +1045,7 @@ async def delete_prodtype_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_prod_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление типами материалов (ИСПРАВЛЕНО) -------------------------
+# ------------------------- Управление типами материалов -------------------------
 async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1083,7 +1060,7 @@ async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         text += "Нет типов материалов."
     else:
         for t in types:
-            text += f"`{t['id']}` – {t['name']}\n"
+            text += f"• {t['name']}\n"
     text += f"\nСтраница {page+1} из {total_pages}"
     keyboard = []
     for t in types:
@@ -1173,7 +1150,7 @@ async def delete_mattype_execute(update: Update, context: ContextTypes.DEFAULT_T
     await show_mat_types(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление основными характеристиками (без изменений) -------------------------
+# ------------------------- Управление основными характеристиками -------------------------
 async def show_main_features(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
@@ -1188,7 +1165,7 @@ async def show_main_features(update: Update, context: ContextTypes.DEFAULT_TYPE,
         text += "Нет характеристик."
     else:
         for f in features:
-            text += f"`{f['id']}` – {f['name']}\n"
+            text += f"• {f['name']}\n"
     text += f"\nСтраница {page+1} из {total_pages}"
     keyboard = []
     for f in features:
@@ -1267,29 +1244,72 @@ async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_
     await show_main_features(update, context, page)
     return ConversationHandler.END
 
-# ------------------------- Управление материалами (ИСПРАВЛЕНО) -------------------------
-async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+# ------------------------- Управление материалами (просмотр и выбор типа) -------------------------
+async def show_material_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
-    materials, total = await db.get_materials(offset, limit)
+    types, total = await db.get_material_types(offset, limit)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     if page >= total_pages:
         page = total_pages - 1
         offset = page * limit
-        materials, total = await db.get_materials(offset, limit)
-    text = "*Материалы*\n\n"
+        types, total = await db.get_material_types(offset, limit)
+    text = "*Выберите тип материалов для просмотра:*\n\n"
+    if not types:
+        text += "Нет типов материалов. Сначала создайте тип в разделе 'Типы материалов'."
+        keyboard = [[InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")]]
+    else:
+        keyboard = []
+        for t in types:
+            keyboard.append([InlineKeyboardButton(t['name'], callback_data=f"mat_choose_type_{t['id']}")])
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"mat_choice_page_{page-1}"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"mat_choice_page_{page+1}"))
+        if nav:
+            keyboard.append(nav)
+        keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
+    context.user_data["mat_choice_page"] = page
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+async def material_choice_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split("_")[-1])
+    await show_material_type_choice(update, context, page)
+
+async def material_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    type_id = int(query.data.split("_")[-1])
+    context.user_data["materials_type_id"] = type_id
+    await show_materials(update, context, type_id, 0)
+
+async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, type_id: int, page: int = 0):
+    limit = 8
+    offset = page * limit
+    materials, total = await db.get_materials(material_type_id=type_id, offset=offset, limit=limit)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if page >= total_pages:
+        page = total_pages - 1
+        offset = page * limit
+        materials, total = await db.get_materials(material_type_id=type_id, offset=offset, limit=limit)
+    type_obj = await db.get_material_type_by_id(type_id)
+    type_name = type_obj["name"] if type_obj else "Неизвестно"
+    text = f"*Материалы* (тип: {type_name})\n\n"
     if not materials:
-        text += "Нет материалов."
+        text += "Нет материалов этого типа."
     else:
         for m in materials:
-            text += f"`{m['id']}` – {m['name']} (код: {m['code']}, тип: {m['type_name']})\n"
+            text += f"`{m['code']}` – {m['name']}\n"
     text += f"\nСтраница {page+1} из {max(1, total_pages)}"
     keyboard = []
     for m in materials:
         keyboard.append([
-            InlineKeyboardButton(f"📄 {m['name']}", callback_data=f"mat_details_{m['id']}_{page}"),
-            InlineKeyboardButton("✏️", callback_data=f"mat_edit_{m['id']}_{page}"),
-            InlineKeyboardButton("🗑️", callback_data=f"mat_del_confirm_{m['id']}_{page}")
+            InlineKeyboardButton(f"📄 {m['code']}", callback_data=f"mat_details_{m['id']}_{type_id}_{page}"),
+            InlineKeyboardButton("✏️", callback_data=f"mat_edit_{m['id']}_{type_id}_{page}"),
+            InlineKeyboardButton("🗑️", callback_data=f"mat_del_confirm_{m['id']}_{type_id}_{page}")
         ])
     nav = []
     if page > 0:
@@ -1298,7 +1318,7 @@ async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
         nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"materials_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
+    keyboard.append([InlineKeyboardButton("🔄 Сменить тип", callback_data="mat_choice_back")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["materials_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
@@ -1307,25 +1327,31 @@ async def materials_page_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     page = int(query.data.split("_")[-1])
-    await show_materials(update, context, page)
+    type_id = context.user_data.get("materials_type_id")
+    if type_id is None:
+        await query.edit_message_text("❌ Тип не выбран. Вернитесь в меню.")
+        await show_material_type_choice(update, context)
+        return
+    await show_materials(update, context, type_id, page)
 
 async def material_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, mat_id, page = query.data.split("_")
-    mat_id = int(mat_id)
-    page = int(page)
+    parts = query.data.split("_")
+    mat_id = int(parts[2])
+    type_id = int(parts[3])
+    page = int(parts[4])
     material = await db.get_material_by_id(mat_id)
     if not material:
         await query.edit_message_text("❌ Материал не найден.")
         return
-    text = (f"*Материал ID {material['id']}*\n\n"
+    text = (f"*Материал {material['code']}*\n\n"
             f"📛 *Название:* {material['name']}\n"
             f"🔢 *Код:* {material['code']}\n"
-            f"📂 *Тип:* {material['type_name']} (id {material['materials_type_id']})")
+            f"📂 *Тип:* {material['type_name']}")
     keyboard = [
-        [InlineKeyboardButton("🖼️ Посмотреть фото", callback_data=f"mat_view_photo_{mat_id}_{page}")],
-        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"mat_edit_{mat_id}_{page}")],
+        [InlineKeyboardButton("🖼️ Посмотреть фото", callback_data=f"mat_view_photo_{mat_id}_{type_id}_{page}")],
+        [InlineKeyboardButton("✏️ Редактировать", callback_data=f"mat_edit_{mat_id}_{type_id}_{page}")],
         [InlineKeyboardButton("◀ К списку материалов", callback_data=f"materials_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
@@ -1334,9 +1360,10 @@ async def material_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, _, mat_id, page = query.data.split("_")
-    mat_id = int(mat_id)
-    page = int(page)
+    parts = query.data.split("_")
+    mat_id = int(parts[3])
+    type_id = int(parts[4])
+    page = int(parts[5])
     material = await db.get_material_by_id(mat_id)
     if material:
         await send_material_photo(update.effective_chat.id, material['code'], context)
@@ -1344,6 +1371,7 @@ async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("❌ Материал не найден.")
     await material_details(update, context)
 
+# ------------------------- Добавление материала -------------------------
 async def add_material_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     types, _ = await db.get_material_types(0, 1000)
@@ -1390,29 +1418,33 @@ async def add_material_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ Ошибка при сохранении фото. Попробуйте ещё раз.")
             return ADD_MAT_PHOTO
         mat_id = await db.create_material(code, context.user_data["new_mat_name"], context.user_data["new_mat_type_id"])
-        await update.message.reply_text(f"✅ Материал создан, ID = {mat_id}.")
-        await show_materials(update, context, 0)
+        await update.message.reply_text(f"✅ Материал создан, код: `{code}`.")
+        # После создания возвращаем к выбору типа
+        await show_material_type_choice(update, context, 0)
     except Exception as e:
         logger.error(f"Ошибка добавления материала: {e}")
         await update.message.reply_text("❌ Ошибка при создании материала.")
     return ConversationHandler.END
 
+# ------------------------- Редактирование материала -------------------------
 async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, _, mat_id, page = query.data.split("_")
-    mat_id = int(mat_id)
-    page = int(page)
+    parts = query.data.split("_")
+    mat_id = int(parts[2])
+    type_id = int(parts[3])
+    page = int(parts[4])
     context.user_data["edit_mat_id"] = mat_id
+    context.user_data["edit_mat_type_id"] = type_id
     context.user_data["edit_mat_page"] = page
     material = await db.get_material_by_id(mat_id)
     if not material:
         await query.edit_message_text("❌ Материал не найден.")
         return ConversationHandler.END
-    text = (f"*Редактирование материала ID {mat_id}*\n\n"
+    text = (f"*Редактирование материала {material['code']}*\n\n"
             f"📛 *Название:* {material['name']}\n"
             f"🔢 *Код:* {material['code']}\n"
-            f"📂 *Тип:* {material['type_name']} (id {material['materials_type_id']})")
+            f"📂 *Тип:* {material['type_name']}")
     keyboard = [
         [InlineKeyboardButton("✏️ Название", callback_data="mat_edit_name"),
          InlineKeyboardButton("✏️ Код", callback_data="mat_edit_code")],
@@ -1437,7 +1469,7 @@ async def material_update_name(update: Update, context: ContextTypes.DEFAULT_TYP
     material = await db.get_material_by_id(mat_id)
     await db.update_material(mat_id, material['code'], new_name, material['materials_type_id'])
     await update.message.reply_text("✅ Название обновлено.")
-    await show_materials(update, context, context.user_data["edit_mat_page"])
+    await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
 async def material_edit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1457,7 +1489,7 @@ async def material_update_code(update: Update, context: ContextTypes.DEFAULT_TYP
     await db.update_material(mat_id, new_code, material['name'], material['materials_type_id'])
     await move_material_photo(old_code, new_code)
     await update.message.reply_text("✅ Код обновлён, фото переименовано.")
-    await show_materials(update, context, context.user_data["edit_mat_page"])
+    await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
 async def material_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1480,7 +1512,7 @@ async def material_update_type(update: Update, context: ContextTypes.DEFAULT_TYP
     material = await db.get_material_by_id(mat_id)
     await db.update_material(mat_id, material['code'], material['name'], new_type_id)
     await query.edit_message_text("✅ Тип материала обновлён.")
-    await show_materials(update, context, context.user_data["edit_mat_page"])
+    await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
 async def material_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1506,7 +1538,7 @@ async def material_update_photo(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Ошибка обновления фото материала: {e}")
         await update.message.reply_text("❌ Не удалось обновить фото.")
-    await show_materials(update, context, context.user_data["edit_mat_page"])
+    await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
 async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1518,7 +1550,7 @@ async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("✅ Да, удалить", callback_data="mat_del_yes")],
         [InlineKeyboardButton("❌ Нет", callback_data=f"materials_page_{context.user_data['edit_mat_page']}")]
     ]
-    await query.edit_message_text(f"Удалить материал *{material['name']}* (ID {mat_id}) навсегда?",
+    await query.edit_message_text(f"Удалить материал *{material['name']}* (код {material['code']}) навсегда?",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return DELETE_MAT_CONFIRM
 
@@ -1527,9 +1559,13 @@ async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     mat_id = context.user_data.get("edit_mat_id")
     page = context.user_data.get("edit_mat_page", 0)
+    type_id = context.user_data.get("edit_mat_type_id")
     if not mat_id:
         await query.edit_message_text("❌ Ошибка: ID материала не найден.")
-        await show_materials(update, context, page)
+        if type_id is not None:
+            await show_materials(update, context, type_id, page)
+        else:
+            await show_material_type_choice(update, context)
         return ConversationHandler.END
     try:
         success = await db.delete_material(mat_id)
@@ -1540,10 +1576,13 @@ async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logger.exception("Ошибка при удалении материала")
         await query.edit_message_text(f"❌ Непредвиденная ошибка: {e}")
-    await show_materials(update, context, page)
+    if type_id is not None:
+        await show_materials(update, context, type_id, page)
+    else:
+        await show_material_type_choice(update, context)
     return ConversationHandler.END
 
-# ------------------------- Основные характеристики товара (без изменений) -------------------------
+# ------------------------- Основные характеристики товара -------------------------
 async def product_main_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1588,7 +1627,7 @@ async def product_main_feature_save(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return PROD_MAIN_FEATURES
 
-# ------------------------- Дополнительные характеристики товара (без изменений) -------------------------
+# ------------------------- Дополнительные характеристики товара -------------------------
 async def product_extra_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1738,7 +1777,7 @@ async def product_extra_cancel(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
-# ------------------------- Управление фото товаров (без изменений) -------------------------
+# ------------------------- Управление фото товаров -------------------------
 async def show_photo_management(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int):
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -1995,7 +2034,7 @@ async def details_photos_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("❌ Товар не найден.")
     await show_product_details(update, context, prod_id)
 
-# ------------------------- Добавление товара, удаление, редактирование полей (без изменений) -------------------------
+# ------------------------- Добавление товара, удаление, редактирование полей -------------------------
 async def add_product_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("Введите *название* товара:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
@@ -2026,9 +2065,10 @@ async def add_product_type_selected(update: Update, context: ContextTypes.DEFAUL
     query = update.callback_query
     await query.answer()
     type_id = int(query.data.split("_")[-1])
-    prod_id = await db.create_product(context.user_data["new_prod_code"], context.user_data["new_prod_name"], type_id)
-    ensure_media_dir(context.user_data["new_prod_code"])
-    await query.edit_message_text(f"✅ Товар создан, ID = {prod_id}.")
+    code = context.user_data["new_prod_code"]
+    prod_id = await db.create_product(code, context.user_data["new_prod_name"], type_id)
+    ensure_media_dir(code)
+    await query.edit_message_text(f"✅ Товар создан, код: `{code}`.")
     await show_product_edit(update, context, prod_id, new_message=True)
     return ConversationHandler.END
 
@@ -2044,7 +2084,7 @@ async def delete_product_confirm_callback(update: Update, context: ContextTypes.
         [InlineKeyboardButton("✅ Да, удалить", callback_data=f"prod_del_yes_{prod_id}")],
         [InlineKeyboardButton("❌ Нет", callback_data=f"prod_edit_cancel_{prod_id}")],
     ]
-    await query.edit_message_text(f"Удалить товар *{product['name']}* (ID {prod_id}) навсегда?",
+    await query.edit_message_text(f"Удалить товар *{product['name']}* (код {product['code']}) навсегда?",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def delete_product_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2110,27 +2150,21 @@ async def edit_product_type_entry(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["edit_prod_id"] = prod_id
     types, _ = await db.get_product_types(0, 1000)
     if not types:
-        await query.edit_message_text("Нет типов товаров. Сначала создайте хотя бы один.")
+        await query.edit_message_text("❌ Нет типов товаров. Сначала создайте тип.")
         return ConversationHandler.END
-    type_list = "\n".join(f"`{t['id']}` – {t['name']}" for t in types)
-    await query.edit_message_text(f"Выберите новый тип товара, отправив его ID:\n\n{type_list}\n\nВведите *число* — ID типа:",
-                                  parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
-    return EDIT_PROD_TYPE_ID
+    keyboard = [[InlineKeyboardButton(t['name'], callback_data=f"prod_upd_type_{t['id']}")] for t in types]
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data=f"prod_edit_cancel_{prod_id}")])
+    await query.edit_message_text("Выберите новый тип товара:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_PROD_TYPE_SELECT
 
-async def edit_product_type_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        type_id = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("❌ Ошибка: нужно ввести целое число (ID типа). Попробуйте снова:", reply_markup=CANCEL_KEYBOARD)
-        return EDIT_PROD_TYPE_ID
-    types, _ = await db.get_product_types(0, 1000)
-    if not any(t['id'] == type_id for t in types):
-        await update.message.reply_text("❌ Тип с таким ID не найден. Попробуйте снова:", reply_markup=CANCEL_KEYBOARD)
-        return EDIT_PROD_TYPE_ID
+async def edit_product_type_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    new_type_id = int(query.data.split("_")[-1])
     prod_id = context.user_data["edit_prod_id"]
     prod = await db.get_product_by_id(prod_id)
-    await db.update_product(prod_id, prod["code"], prod["name"], type_id)
-    await update.message.reply_text("✅ Тип товара обновлён.")
+    await db.update_product(prod_id, prod["code"], prod["name"], new_type_id)
+    await query.edit_message_text("✅ Тип товара обновлён.")
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
@@ -2192,7 +2226,7 @@ async def edit_product_costs_menu(update: Update, context: ContextTypes.DEFAULT_
     costs = await db.get_costs_for_product(prod_id)
     text = "💰 *Текущие стоимости:*\n"
     if costs:
-        text += "\n".join(f"• {c['material_name']}: {c['cost']}₽ (id записи {c['id']})" for c in costs)
+        text += "\n".join(f"• {c['material_name']}: {c['cost']}₽" for c in costs)
     else:
         text += "Нет добавленных стоимостей."
     keyboard = [
@@ -2283,7 +2317,7 @@ async def refresh_min_cost_callback(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text("🔄 Минимальная цена пересчитана.")
     await show_product_edit(update, context, prod_id)
 
-# ------------------------- Отображение товаров с пагинацией (без изменений) -------------------------
+# ------------------------- Отображение товаров с пагинацией -------------------------
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         search: str = None, type_id: int = None, flag_ids: List[int] = None,
                         page: int = 0):
@@ -2310,11 +2344,11 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
         text += "Нет товаров, удовлетворяющих условиям."
     else:
         for p in products:
-            text += f"`{p['id']}` – {p['name']} (код: {p['code']})\n"
+            text += f"`{p['code']}` – {p['name']}\n"
     keyboard = []
     for p in products:
         keyboard.append([
-            InlineKeyboardButton(f"📄 {p['name']} (ID {p['id']})", callback_data=f"prod_details_{p['id']}"),
+            InlineKeyboardButton(f"📄 {p['code']} - {p['name']}", callback_data=f"prod_details_{p['id']}"),
             InlineKeyboardButton("✏️", callback_data=f"prod_edit_{p['id']}")
         ])
     nav = []
@@ -2373,7 +2407,7 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
     min_cost = product.get("min_cost")
     min_cost_text = f"{min_cost}₽" if min_cost is not None else "не определена"
     text = (
-        f"*Подробнее о товаре ID {prod_id}*\n\n"
+        f"*Подробнее о товаре*\n\n"
         f"📛 *Название:* {product['name']}\n"
         f"🔢 *Код:* {product['code']}\n"
         f"📂 *Тип:* {type_name}\n"
@@ -2402,14 +2436,14 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     flags = await db.get_product_flags(prod_id)
     flags_text = ", ".join(f["name"] for f in flags) if flags else "нет"
     costs = await db.get_costs_for_product(prod_id)
-    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽ (id {c['id']})" for c in costs) if costs else "нет"
+    costs_text = "\n".join(f"• {c['material_name']}: {c['cost']}₽" for c in costs) if costs else "нет"
     min_cost = product.get("min_cost")
     min_cost_text = f"{min_cost}₽" if min_cost is not None else "не определена"
     text = (
-        f"*Редактирование товара ID {prod_id}*\n\n"
+        f"*Редактирование товара {product['code']}*\n\n"
         f"📛 *Название:* {product['name']}\n"
         f"🔢 *Код:* {product['code']}\n"
-        f"📂 *Тип:* {type_name} (id {product['products_type_id']})\n"
+        f"📂 *Тип:* {type_name}\n"
         f"🏷️ *Флаги:* {flags_text}\n"
         f"💰 *Стоимости:*\n{costs_text}\n"
         f"🔽 *Минимальная стоимость:* {min_cost_text}"
@@ -2430,7 +2464,7 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
 
-# ------------------------- Расширенный поиск (без изменений) -------------------------
+# ------------------------- Расширенный поиск -------------------------
 async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2581,7 +2615,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context, new_message=True)
     return ConversationHandler.END
 
-# ------------------------- НОВЫЙ РАЗДЕЛ: ГАЛЕРЕЯ ПРОЕКТОВ (без изменений) -------------------------
+# ------------------------- ГАЛЕРЕЯ ПРОЕКТОВ -------------------------
 def get_gallery_projects() -> List[str]:
     if not GALLERY_BASE.exists():
         return []
@@ -3039,7 +3073,8 @@ async def menu_mat_types_callback(update: Update, context: ContextTypes.DEFAULT_
 
 @admin_only
 async def menu_materials_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_materials(update, context, 0)
+    # Вход в материалы: показать выбор типа
+    await show_material_type_choice(update, context, 0)
 
 @admin_only
 async def menu_main_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3049,7 +3084,7 @@ async def menu_main_features_callback(update: Update, context: ContextTypes.DEFA
 async def menu_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await search_menu(update, context)
 
-# ------------------------- Регистрация обработчиков (без изменений) -------------------------
+# ------------------------- Регистрация обработчиков -------------------------
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reboot", reboot_command))
@@ -3123,7 +3158,12 @@ def register_handlers(app: Application):
 
     edit_type_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_type_entry, pattern="^prod_edit_type_\\d+$")],
-        states={EDIT_PROD_TYPE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_type_id)]},
+        states={
+            EDIT_PROD_TYPE_SELECT: [
+                CallbackQueryHandler(edit_product_type_update, pattern="^prod_upd_type_\\d+$"),
+                CallbackQueryHandler(edit_cancel, pattern="^prod_edit_cancel_\\d+$"),
+            ]
+        },
         fallbacks=[
             CommandHandler("cancel", cancel),
             CallbackQueryHandler(cancel, pattern="^main_menu$"),
@@ -3384,9 +3424,13 @@ def register_handlers(app: Application):
     app.add_handler(search_advanced_conv)
 
     # Управление материалами
+    app.add_handler(CallbackQueryHandler(material_choice_page_callback, pattern="^mat_choice_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(material_type_chosen, pattern="^mat_choose_type_\\d+$"))
     app.add_handler(CallbackQueryHandler(materials_page_callback, pattern="^materials_page_\\d+$"))
-    app.add_handler(CallbackQueryHandler(material_details, pattern="^mat_details_\\d+_\\d+$"))
-    app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+$"))
+    app.add_handler(CallbackQueryHandler(material_details, pattern="^mat_details_\\d+_\\d+_\\d+$"))
+    app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+_\\d+$"))
+    # Кнопка "Сменить тип" в списке материалов
+    app.add_handler(CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"))
 
     add_material_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_material_entry, pattern="^mat_add$")],
@@ -3402,7 +3446,7 @@ def register_handlers(app: Application):
     app.add_handler(add_material_conv)
 
     edit_material_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(material_edit_entry, pattern="^mat_edit_\\d+_\\d+$")],
+        entry_points=[CallbackQueryHandler(material_edit_entry, pattern="^mat_edit_\\d+_\\d+_\\d+$")],
         states={
             EDIT_MAT_SELECT: [
                 CallbackQueryHandler(material_edit_name, pattern="^mat_edit_name$"),
@@ -3412,6 +3456,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(material_edit_delete, pattern="^mat_edit_delete$"),
                 CallbackQueryHandler(exit_to_materials_page, pattern="^materials_page_\\d+$"),
                 CallbackQueryHandler(exit_to_main_menu, pattern="^main_menu$"),
+                CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"),
             ],
             EDIT_MAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_name)],
             EDIT_MAT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, material_update_code)],
@@ -3423,6 +3468,7 @@ def register_handlers(app: Application):
             CommandHandler("cancel", cancel),
             CallbackQueryHandler(exit_to_main_menu, pattern="^main_menu$"),
             CallbackQueryHandler(exit_to_materials_page, pattern="^materials_page_\\d+$"),
+            CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"),
         ],
         per_message=False,
     )
@@ -3496,7 +3542,6 @@ async def main():
         password=DB_CONFIG["password"],
         min_size=1,
         max_size=5,
-        # FIX: добавим таймауты для предотвращения зависаний
         timeout=60.0,
         command_timeout=60.0,
     )
@@ -3513,7 +3558,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот запущен с поддержкой галереи проектов и командой /reboot.")
+    logging.info("Бот запущен с поддержкой галереи проектов, сортировкой по коду и выбором типа материалов.")
     await application.updater.start_polling()
     await asyncio.Event().wait()
 
