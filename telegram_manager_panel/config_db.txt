@@ -1,0 +1,5 @@
+host=localhost
+port=5432
+database=luto_db
+user=postgres
+password=4-ThybrJ-8
