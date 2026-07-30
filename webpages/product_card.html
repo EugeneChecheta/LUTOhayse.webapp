@@ -9,47 +9,46 @@
 </head>
 <body>
 
-<!-- Значок профиля -->
-<div class="profile-icon-wrapper">
-    <a href="/profile" class="profile-fixed-link">
-        <img src="/media/interface/profile_icon.svg" alt="Профиль">
-    </a>
-</div>
+    <!-- Значок профиля -->
+    <div class="profile-icon-wrapper">
+        <a href="/profile" class="profile-fixed-link">
+            <img src="/media/interface/profile_icon.svg" alt="Профиль">
+        </a>
+    </div>
 
-<!-- Фиксированная корзина в правом верхнем углу -->
-<div class="cart-icon-wrapper">
-    <a href="/cart" class="cart-fixed-link">
-        <img src="/media/interface/cart_icon.svg" alt="Корзина">
-        <span id="cart-count" class="cart-count-badge">0</span>
-    </a>
-</div>
+    <!-- Фиксированная корзина -->
+    <div class="cart-icon-wrapper">
+        <a href="/cart" class="cart-fixed-link">
+            <img src="/media/interface/cart_icon.svg" alt="Корзина">
+            <span id="cart-count" class="cart-count-badge">0</span>
+        </a>
+    </div>
 
-<header>
-    <section class="main__header">
-        <div class="header__container">
-            <div class="menu__body">
-                <nav class="menu__body menu__body-main">
-                    <ul class="menu__list">
-                        <li class="menu__item site-logo">
-                            <h1 class="logo">
-                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
-                            </h1>
-                        </li>
-                    </ul>
-                </nav>
-                <nav class="menu__body menu__body-user">
-                    <ul class="menu__list">
-                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
-                    </ul>
-                </nav>
+    <header>
+        <section class="main__header">
+            <div class="header__container">
+                <div class="menu__body">
+                    <nav class="menu__body menu__body-main">
+                        <ul class="menu__list">
+                            <li class="menu__item site-logo">
+                                <h1 class="logo">
+                                    <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                                </h1>
+                            </li>
+                        </ul>
+                    </nav>
+                    <nav class="menu__body menu__body-user">
+                        <ul class="menu__list">
+                            <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
+                        </ul>
+                    </nav>
+                </div>
             </div>
-        </div>
-    </section>
-</header>
+        </section>
+    </header>
 
-<main class="page-container two-col-layout" id="productRoot">
-    <!-- Левая колонка: параметры и схема (30%) -->
-    <div class="left-info">
+    <main class="page-container two-col-layout" id="productRoot">
+        <!-- Панель товара (название, цена, материал) -->
         <aside class="product-panel">
             <h1 class="product-title" id="productTitle">Загрузка...</h1>
             <div class="price-block">
@@ -63,463 +62,461 @@
                 <button id="btnAddToCart" class="btn-cart">Добавить в корзину</button>
             </div>
         </aside>
+
+        <!-- Галерея -->
+        <section class="right-gallery desktop-gallery" id="gallerySection">
+            <div class="gallery-wrapper" id="slider"></div>
+            <div class="slider-dots" id="sliderDots"></div>
+        </section>
+
+        <!-- Схема и характеристики -->
         <div class="size-schema-block">
             <img id="sizeImage" class="dimensions-img" src="" alt="Схема размеров">
             <div id="featuresContainer"></div>
         </div>
-    </div>
+    </main>
 
-    <!-- Правая колонка: галерея (70%) -->
-    <section class="right-gallery desktop-gallery" id="gallerySection">
-        <div class="gallery-wrapper" id="slider"></div>
-        <div class="slider-dots" id="sliderDots"></div>
-    </section>
-</main>
-
-<!-- Модальное окно выбора материалов -->
-<div id="materialModal" class="modal material-modal">
-    <div class="modal-content material-modal-content">
-        <span class="close-modal">&times;</span>
-        <h2>Выберите материал</h2>
-        <div class="tabs" id="materialTabs"></div>
-        <div id="materialsList" class="materials-container"></div>
-    </div>
-</div>
-
-<footer>
-    <div class="footer-top">
-        <div class="footer-left">
-            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
-            <div class="phone-label">Звонок по России бесплатный</div>
-            <div class="phone-number">8 (999) 700-05-50</div>
+    <!-- Модальное окно выбора материалов -->
+    <div id="materialModal" class="modal material-modal">
+        <div class="modal-content material-modal-content">
+            <span class="close-modal">&times;</span>
+            <h2>Выберите материал</h2>
+            <div class="tabs" id="materialTabs"></div>
+            <div id="materialsList" class="materials-container"></div>
         </div>
-        <nav class="footer-nav">
-            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
-            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
-            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
-        </nav>
     </div>
-    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
-</footer>
 
-<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
+    <footer>
+        <div class="footer-top">
+            <div class="footer-left">
+                <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+                <div class="phone-label">Звонок по России бесплатный</div>
+                <div class="phone-number">8 (999) 700-05-50</div>
+            </div>
+            <nav class="footer-nav">
+                <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
+                <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
+                <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
+            </nav>
+        </div>
+        <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+    </footer>
 
-<script>
-    let productData = null;
-    let selectedMaterial = null;
-    let minCost = null; // минимальная цена
-    const productCode = window.location.pathname.split('/').pop();
-    const cartCountSpan = document.getElementById('cart-count');
+    <div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
-    async function updateCartCount() {
-        try {
-            const resp = await fetch('/api/cart');
-            const data = await resp.json();
-            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-            if (cartCountSpan) cartCountSpan.textContent = totalItems;
-        } catch(e) { console.error(e); }
-    }
+    <script>
+        let productData = null;
+        let selectedMaterial = null;
+        let minCost = null;
+        const productCode = window.location.pathname.split('/').pop();
+        const cartCountSpan = document.getElementById('cart-count');
 
-    async function loadProduct(code) {
-        try {
-            const resp = await fetch(`/api/product/${code}`);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            productData = await resp.json();
-            renderProduct(productData);
-        } catch (err) {
-            console.error(err);
-            document.getElementById('productTitle').innerText = 'Ошибка загрузки товара';
-        }
-    }
-
-    function renderProduct(data) {
-        const product = data.product;
-        const costs = data.costs || [];
-        const minCostFromApi = data.min_cost;
-        const mainFeatures = data.main_features || [];
-        const extraFeatures = data.extra_features || [];
-        const photos = data.photos || { preview: null, size: null, main: [] };
-
-        document.getElementById('productTitle').innerText = product.name;
-        // Устанавливаем минимальную цену
-        minCost = minCostFromApi;
-        if (minCost !== null && minCost !== undefined) {
-            document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
-        } else {
-            document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+        async function updateCartCount() {
+            try {
+                const resp = await fetch('/api/cart');
+                const data = await resp.json();
+                const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+                if (cartCountSpan) cartCountSpan.textContent = totalItems;
+            } catch (e) { console.error(e); }
         }
 
-        const sizeImg = document.getElementById('sizeImage');
-        if (photos.size) {
-            sizeImg.src = photos.size;
-            sizeImg.style.display = 'block';
-        } else {
-            sizeImg.style.display = 'none';
-        }
-
-        const featuresContainer = document.getElementById('featuresContainer');
-        featuresContainer.innerHTML = '';
-
-        if (mainFeatures.length) {
-            const mainTitle = document.createElement('h3');
-            mainTitle.textContent = 'Основные характеристики';
-            mainTitle.className = 'features-title';
-            featuresContainer.appendChild(mainTitle);
-            const mainTable = createFeatureTable(mainFeatures);
-            featuresContainer.appendChild(mainTable);
-        }
-
-        if (extraFeatures.length) {
-            const extraTitle = document.createElement('h3');
-            extraTitle.textContent = 'Дополнительные характеристики';
-            extraTitle.className = 'features-title';
-            featuresContainer.appendChild(extraTitle);
-            const extraTable = createFeatureTable(extraFeatures, true);
-            featuresContainer.appendChild(extraTable);
-        }
-
-        appendStaticFeatures(featuresContainer);
-
-        // Построение слайдера
-        const slider = document.getElementById('slider');
-        slider.innerHTML = '';
-        let allImages = [];
-        if (photos.main.length === 0 && !photos.preview) {
-            allImages = ['/media/interface/placeholder.png'];
-        } else {
-            if (photos.preview) allImages.push(photos.preview);
-            allImages.push(...photos.main);
-        }
-        allImages.forEach(src => {
-            const slideDiv = document.createElement('div');
-            slideDiv.className = 'slide';
-            const img = document.createElement('img');
-            img.src = src;
-            img.alt = 'Фото товара';
-            slideDiv.appendChild(img);
-            slider.appendChild(slideDiv);
-        });
-        initSlider(allImages.length);
-
-        window.productCosts = costs;
-    }
-
-    function createFeatureTable(features, isExtra = false) {
-        const table = document.createElement('table');
-        table.className = 'spec-table';
-        const tbody = document.createElement('tbody');
-        features.forEach(f => {
-            const row = tbody.insertRow();
-            const cellName = row.insertCell(0);
-            const cellValue = row.insertCell(1);
-            cellName.textContent = isExtra ? f.name : f.name;
-            cellValue.textContent = f.value || '—';
-        });
-        table.appendChild(tbody);
-        return table;
-    }
-
-    function appendStaticFeatures(container) {
-        const staticFeatures = [
-            { name: "Срок производства", value: "21 день" },
-            { name: "Требуется сборка", value: "Нет" },
-            { name: "Декларация до", value: "10.09.2030" },
-            { name: "Декларация от", value: "11.09.2025" },
-            { name: "Декларация", value: "ЕАЭС N RU Д-RU.PA08.B.13389/25" },
-            { name: "Материал общий", value: "ППУ ST, Синтепон, Спанбонд, Холлофайбер, Брус сосна просушенная в\\с, березовая фанера в\\с, термовойлок" },
-            { name: "Материал каркаса", value: "Сосновый брус/березовая фанера" },
-            { name: "Страна производства", value: "Россия" },
-            { name: "Бренд", value: "LUTOhayse" },
-            { name: "Мягкость сиденья", value: "Средняя" },
-            { name: "Наполнитель сиденья", value: "Пенополиуретан" },
-            { name: "Наполнение подушек", value: "Крошка ППУ" },
-            { name: "Тип сборки", value: "Не требует сборки, только установить фурнитуру" },
-            { name: "Наличие ножек", value: "Да" },
-            { name: "Наполнение", value: "ППУ" },
-            { name: "Особенности", value: "Ортопедические свойства; на ножках" }
-        ];
-        const staticTitle = document.createElement('h3');
-        staticTitle.textContent = 'Общие характеристики';
-        staticTitle.className = 'features-title';
-        container.appendChild(staticTitle);
-        const staticTable = document.createElement('table');
-        staticTable.className = 'spec-table';
-        const tbody = document.createElement('tbody');
-        staticFeatures.forEach(f => {
-            const row = tbody.insertRow();
-            const cellName = row.insertCell(0);
-            const cellValue = row.insertCell(1);
-            cellName.textContent = f.name;
-            cellValue.textContent = f.value;
-        });
-        staticTable.appendChild(tbody);
-        container.appendChild(staticTable);
-    }
-
-    let currentSlide = 0;
-    let totalSlides = 0;
-    let sliderElement = null;
-    let isDragging = false;
-
-    function initSlider(slidesCount) {
-        totalSlides = slidesCount;
-        if (totalSlides <= 1) return;
-        sliderElement = document.getElementById('slider');
-        if (!sliderElement) return;
-        sliderElement.style.display = 'flex';
-        sliderElement.style.transition = 'transform 0.3s ease';
-        updateSliderTransform();
-
-        const dotsContainer = document.getElementById('sliderDots');
-        dotsContainer.innerHTML = '';
-        for (let i = 0; i < totalSlides; i++) {
-            const dot = document.createElement('div');
-            dot.className = 'dot' + (i === 0 ? ' active' : '');
-            dot.addEventListener('click', (function(idx) {
-                return function() { goToSlide(idx); };
-            })(i));
-            dotsContainer.appendChild(dot);
-        }
-
-        const gallery = document.getElementById('gallerySection');
-        gallery.addEventListener('mousemove', (e) => {
-            const rect = gallery.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const percent = Math.min(1, Math.max(0, mouseX / rect.width));
-            const newIndex = Math.floor(percent * totalSlides);
-            if (newIndex !== currentSlide) {
-                goToSlide(newIndex);
+        async function loadProduct(code) {
+            try {
+                const resp = await fetch(`/api/product/${code}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                productData = await resp.json();
+                renderProduct(productData);
+            } catch (err) {
+                console.error(err);
+                document.getElementById('productTitle').innerText = 'Ошибка загрузки товара';
             }
-        });
-
-        let touchStartX = 0;
-        gallery.addEventListener('touchstart', (e) => {
-            touchStartX = e.touches[0].clientX;
-            isDragging = true;
-        });
-        gallery.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            const dx = e.touches[0].clientX - touchStartX;
-            if (Math.abs(dx) > 30) {
-                if (dx > 0 && currentSlide > 0) goToSlide(currentSlide - 1);
-                else if (dx < 0 && currentSlide < totalSlides - 1) goToSlide(currentSlide + 1);
-                isDragging = false;
-            }
-        });
-        gallery.addEventListener('touchend', () => {
-            isDragging = false;
-        });
-    }
-
-    function goToSlide(index) {
-        if (index < 0) index = 0;
-        if (index >= totalSlides) index = totalSlides - 1;
-        if (index === currentSlide) return;
-        currentSlide = index;
-        updateSliderTransform();
-        updateDots();
-    }
-
-    function updateSliderTransform() {
-        if (!sliderElement) return;
-        const shift = -currentSlide * 100;
-        sliderElement.style.transform = `translateX(${shift}%)`;
-    }
-
-    function updateDots() {
-        const dots = document.querySelectorAll('.dot');
-        dots.forEach((dot, i) => {
-            if (i === currentSlide) dot.classList.add('active');
-            else dot.classList.remove('active');
-        });
-    }
-
-    const modal = document.getElementById('materialModal');
-    const chooseBtn = document.getElementById('chooseMaterialBtn');
-    const closeModalSpan = document.querySelector('.close-modal');
-    let allMaterials = [];
-
-    async function loadMaterials() {
-        try {
-            const resp = await fetch('/api/materials');
-            if (!resp.ok) throw new Error('Ошибка загрузки материалов');
-            allMaterials = await resp.json();
-        } catch (err) {
-            console.error(err);
-            allMaterials = [];
         }
-    }
 
-    async function openMaterialModal() {
-        if (allMaterials.length === 0) {
-            await loadMaterials();
-        }
-        renderMaterialTabsAndGrid();
-        modal.style.display = 'block';
-    }
+        function renderProduct(data) {
+            const product = data.product;
+            const costs = data.costs || [];
+            const minCostFromApi = data.min_cost;
+            const mainFeatures = data.main_features || [];
+            const extraFeatures = data.extra_features || [];
+            const photos = data.photos || { preview: null, size: null, main: [] };
 
-    function renderMaterialTabsAndGrid() {
-        const groups = {};
-        allMaterials.forEach(mat => {
-            if (!groups[mat.materials_type_id]) {
-                groups[mat.materials_type_id] = {
-                    type_id: mat.materials_type_id,
-                    type_name: mat.type_name,
-                    items: []
-                };
-            }
-            groups[mat.materials_type_id].items.push(mat);
-        });
-        const typeIds = Object.keys(groups).map(Number);
-        const tabsContainer = document.getElementById('materialTabs');
-        tabsContainer.innerHTML = '';
-        typeIds.forEach((typeId, idx) => {
-            const tab = document.createElement('div');
-            tab.className = 'tab' + (idx === 0 ? ' active' : '');
-            tab.dataset.type = typeId;
-            tab.textContent = groups[typeId].type_name;
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('#materialTabs .tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                renderMaterialGrid(groups[typeId].items);
-            });
-            tabsContainer.appendChild(tab);
-        });
-        if (typeIds.length) {
-            renderMaterialGrid(groups[typeIds[0]].items);
-        } else {
-            document.getElementById('materialsList').innerHTML = '<p>Нет доступных материалов</p>';
-        }
-    }
-
-    function renderMaterialGrid(materials) {
-        const container = document.getElementById('materialsList');
-        container.innerHTML = '';
-        materials.forEach(mat => {
-            const card = document.createElement('div');
-            card.className = 'material-card';
-            card.dataset.id = mat.id;
-            card.dataset.code = mat.code;
-            card.dataset.name = mat.name;
-            card.dataset.typeId = mat.materials_type_id;
-            card.dataset.typeName = mat.type_name;
-            card.dataset.photo = mat.photo_url || '/media/interface/placeholder.png';
-            const img = document.createElement('img');
-            img.src = card.dataset.photo;
-            img.alt = mat.name;
-            img.onerror = () => { img.src = '/media/interface/placeholder.png'; };
-            const nameSpan = document.createElement('div');
-            nameSpan.className = 'material-name';
-            nameSpan.textContent = mat.name;
-            const codeSpan = document.createElement('div');
-            codeSpan.className = 'material-code';
-            codeSpan.textContent = `Код: ${mat.code}`;
-            card.appendChild(img);
-            card.appendChild(nameSpan);
-            card.appendChild(codeSpan);
-            card.addEventListener('click', () => selectMaterial(mat));
-            container.appendChild(card);
-        });
-    }
-
-    function selectMaterial(mat) {
-        selectedMaterial = mat;
-        const selectedText = document.getElementById('selectedMaterialText');
-        selectedText.innerHTML = `Выбран материал: <strong>${mat.name}</strong> (${mat.code})`;
-        if (window.productCosts && window.productCosts.length) {
-            const costEntry = window.productCosts.find(c => c.id === mat.materials_type_id);
-            if (costEntry) {
-                document.getElementById('priceCurrent').innerHTML = `${costEntry.cost} <sup>₽</sup>`;
+            document.getElementById('productTitle').innerText = product.name;
+            minCost = minCostFromApi;
+            if (minCost !== null && minCost !== undefined) {
+                document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
             } else {
-                // если не нашли цену для типа материала, показываем минимальную
+                document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+            }
+
+            const sizeImg = document.getElementById('sizeImage');
+            if (photos.size) {
+                sizeImg.src = photos.size;
+                sizeImg.style.display = 'block';
+            } else {
+                sizeImg.style.display = 'none';
+            }
+
+            const featuresContainer = document.getElementById('featuresContainer');
+            featuresContainer.innerHTML = '';
+
+            if (mainFeatures.length) {
+                const mainTitle = document.createElement('h3');
+                mainTitle.textContent = 'Основные характеристики';
+                mainTitle.className = 'features-title';
+                featuresContainer.appendChild(mainTitle);
+                const mainTable = createFeatureTable(mainFeatures);
+                featuresContainer.appendChild(mainTable);
+            }
+
+            if (extraFeatures.length) {
+                const extraTitle = document.createElement('h3');
+                extraTitle.textContent = 'Дополнительные характеристики';
+                extraTitle.className = 'features-title';
+                featuresContainer.appendChild(extraTitle);
+                const extraTable = createFeatureTable(extraFeatures, true);
+                featuresContainer.appendChild(extraTable);
+            }
+
+            appendStaticFeatures(featuresContainer);
+
+            const slider = document.getElementById('slider');
+            slider.innerHTML = '';
+            let allImages = [];
+            if (photos.main.length === 0 && !photos.preview) {
+                allImages = ['/media/interface/placeholder.png'];
+            } else {
+                if (photos.preview) allImages.push(photos.preview);
+                allImages.push(...photos.main);
+            }
+            allImages.forEach(src => {
+                const slideDiv = document.createElement('div');
+                slideDiv.className = 'slide';
+                const img = document.createElement('img');
+                img.src = src;
+                img.alt = 'Фото товара';
+                slideDiv.appendChild(img);
+                slider.appendChild(slideDiv);
+            });
+            initSlider(allImages.length);
+
+            window.productCosts = costs;
+        }
+
+        function createFeatureTable(features, isExtra = false) {
+            const table = document.createElement('table');
+            table.className = 'spec-table';
+            const tbody = document.createElement('tbody');
+            features.forEach(f => {
+                const row = tbody.insertRow();
+                const cellName = row.insertCell(0);
+                const cellValue = row.insertCell(1);
+                cellName.textContent = isExtra ? f.name : f.name;
+                cellValue.textContent = f.value || '—';
+            });
+            table.appendChild(tbody);
+            return table;
+        }
+
+        function appendStaticFeatures(container) {
+            const staticFeatures = [
+                { name: "Срок производства", value: "21 день" },
+                { name: "Требуется сборка", value: "Нет" },
+                { name: "Декларация до", value: "10.09.2030" },
+                { name: "Декларация от", value: "11.09.2025" },
+                { name: "Декларация", value: "ЕАЭС N RU Д-RU.PA08.B.13389/25" },
+                { name: "Материал общий", value: "ППУ ST, Синтепон, Спанбонд, Холлофайбер, Брус сосна просушенная в\\с, березовая фанера в\\с, термовойлок" },
+                { name: "Материал каркаса", value: "Сосновый брус/березовая фанера" },
+                { name: "Страна производства", value: "Россия" },
+                { name: "Бренд", value: "LUTOhayse" },
+                { name: "Мягкость сиденья", value: "Средняя" },
+                { name: "Наполнитель сиденья", value: "Пенополиуретан" },
+                { name: "Наполнение подушек", value: "Крошка ППУ" },
+                { name: "Тип сборки", value: "Не требует сборки, только установить фурнитуру" },
+                { name: "Наличие ножек", value: "Да" },
+                { name: "Наполнение", value: "ППУ" },
+                { name: "Особенности", value: "Ортопедические свойства; на ножках" }
+            ];
+            const staticTitle = document.createElement('h3');
+            staticTitle.textContent = 'Общие характеристики';
+            staticTitle.className = 'features-title';
+            container.appendChild(staticTitle);
+            const staticTable = document.createElement('table');
+            staticTable.className = 'spec-table';
+            const tbody = document.createElement('tbody');
+            staticFeatures.forEach(f => {
+                const row = tbody.insertRow();
+                const cellName = row.insertCell(0);
+                const cellValue = row.insertCell(1);
+                cellName.textContent = f.name;
+                cellValue.textContent = f.value;
+            });
+            staticTable.appendChild(tbody);
+            container.appendChild(staticTable);
+        }
+
+        let currentSlide = 0;
+        let totalSlides = 0;
+        let sliderElement = null;
+        let isDragging = false;
+
+        function initSlider(slidesCount) {
+            totalSlides = slidesCount;
+            if (totalSlides <= 1) return;
+            sliderElement = document.getElementById('slider');
+            if (!sliderElement) return;
+            sliderElement.style.display = 'flex';
+            sliderElement.style.transition = 'transform 0.3s ease';
+            updateSliderTransform();
+
+            const dotsContainer = document.getElementById('sliderDots');
+            dotsContainer.innerHTML = '';
+            for (let i = 0; i < totalSlides; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'dot' + (i === 0 ? ' active' : '');
+                dot.addEventListener('click', (function(idx) {
+                    return function() { goToSlide(idx); };
+                })(i));
+                dotsContainer.appendChild(dot);
+            }
+
+            const gallery = document.getElementById('gallerySection');
+            gallery.addEventListener('mousemove', (e) => {
+                const rect = gallery.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const percent = Math.min(1, Math.max(0, mouseX / rect.width));
+                const newIndex = Math.floor(percent * totalSlides);
+                if (newIndex !== currentSlide) {
+                    goToSlide(newIndex);
+                }
+            });
+
+            let touchStartX = 0;
+            gallery.addEventListener('touchstart', (e) => {
+                touchStartX = e.touches[0].clientX;
+                isDragging = true;
+            });
+            gallery.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                const dx = e.touches[0].clientX - touchStartX;
+                if (Math.abs(dx) > 30) {
+                    if (dx > 0 && currentSlide > 0) goToSlide(currentSlide - 1);
+                    else if (dx < 0 && currentSlide < totalSlides - 1) goToSlide(currentSlide + 1);
+                    isDragging = false;
+                }
+            });
+            gallery.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+        }
+
+        function goToSlide(index) {
+            if (index < 0) index = 0;
+            if (index >= totalSlides) index = totalSlides - 1;
+            if (index === currentSlide) return;
+            currentSlide = index;
+            updateSliderTransform();
+            updateDots();
+        }
+
+        function updateSliderTransform() {
+            if (!sliderElement) return;
+            const shift = -currentSlide * 100;
+            sliderElement.style.transform = `translateX(${shift}%)`;
+        }
+
+        function updateDots() {
+            const dots = document.querySelectorAll('.dot');
+            dots.forEach((dot, i) => {
+                if (i === currentSlide) dot.classList.add('active');
+                else dot.classList.remove('active');
+            });
+        }
+
+        const modal = document.getElementById('materialModal');
+        const chooseBtn = document.getElementById('chooseMaterialBtn');
+        const closeModalSpan = document.querySelector('.close-modal');
+        let allMaterials = [];
+
+        async function loadMaterials() {
+            try {
+                const resp = await fetch('/api/materials');
+                if (!resp.ok) throw new Error('Ошибка загрузки материалов');
+                allMaterials = await resp.json();
+            } catch (err) {
+                console.error(err);
+                allMaterials = [];
+            }
+        }
+
+        async function openMaterialModal() {
+            if (allMaterials.length === 0) {
+                await loadMaterials();
+            }
+            renderMaterialTabsAndGrid();
+            modal.style.display = 'block';
+        }
+
+        function renderMaterialTabsAndGrid() {
+            const groups = {};
+            allMaterials.forEach(mat => {
+                if (!groups[mat.materials_type_id]) {
+                    groups[mat.materials_type_id] = {
+                        type_id: mat.materials_type_id,
+                        type_name: mat.type_name,
+                        items: []
+                    };
+                }
+                groups[mat.materials_type_id].items.push(mat);
+            });
+            const typeIds = Object.keys(groups).map(Number);
+            const tabsContainer = document.getElementById('materialTabs');
+            tabsContainer.innerHTML = '';
+            typeIds.forEach((typeId, idx) => {
+                const tab = document.createElement('div');
+                tab.className = 'tab' + (idx === 0 ? ' active' : '');
+                tab.dataset.type = typeId;
+                tab.textContent = groups[typeId].type_name;
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('#materialTabs .tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    renderMaterialGrid(groups[typeId].items);
+                });
+                tabsContainer.appendChild(tab);
+            });
+            if (typeIds.length) {
+                renderMaterialGrid(groups[typeIds[0]].items);
+            } else {
+                document.getElementById('materialsList').innerHTML = '<p>Нет доступных материалов</p>';
+            }
+        }
+
+        function renderMaterialGrid(materials) {
+            const container = document.getElementById('materialsList');
+            container.innerHTML = '';
+            materials.forEach(mat => {
+                const card = document.createElement('div');
+                card.className = 'material-card';
+                card.dataset.id = mat.id;
+                card.dataset.code = mat.code;
+                card.dataset.name = mat.name;
+                card.dataset.typeId = mat.materials_type_id;
+                card.dataset.typeName = mat.type_name;
+                card.dataset.photo = mat.photo_url || '/media/interface/placeholder.png';
+                const img = document.createElement('img');
+                img.src = card.dataset.photo;
+                img.alt = mat.name;
+                img.onerror = () => { img.src = '/media/interface/placeholder.png'; };
+                const nameSpan = document.createElement('div');
+                nameSpan.className = 'material-name';
+                nameSpan.textContent = mat.name;
+                const codeSpan = document.createElement('div');
+                codeSpan.className = 'material-code';
+                codeSpan.textContent = `Код: ${mat.code}`;
+                card.appendChild(img);
+                card.appendChild(nameSpan);
+                card.appendChild(codeSpan);
+                card.addEventListener('click', () => selectMaterial(mat));
+                container.appendChild(card);
+            });
+        }
+
+        function selectMaterial(mat) {
+            selectedMaterial = mat;
+            const selectedText = document.getElementById('selectedMaterialText');
+            selectedText.innerHTML = `Выбран материал: <strong>${mat.name}</strong> (${mat.code})`;
+            if (window.productCosts && window.productCosts.length) {
+                const costEntry = window.productCosts.find(c => c.id === mat.materials_type_id);
+                if (costEntry) {
+                    document.getElementById('priceCurrent').innerHTML = `${costEntry.cost} <sup>₽</sup>`;
+                } else {
+                    if (minCost !== null && minCost !== undefined) {
+                        document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
+                    } else {
+                        document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+                    }
+                }
+            } else {
                 if (minCost !== null && minCost !== undefined) {
                     document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
                 } else {
                     document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
                 }
             }
-        } else {
-            if (minCost !== null && minCost !== undefined) {
-                document.getElementById('priceCurrent').innerHTML = `от ${minCost} <sup>₽</sup>`;
-            } else {
-                document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
+            document.getElementById('addToCartContainer').style.display = 'block';
+            modal.style.display = 'none';
+        }
+
+        chooseBtn.addEventListener('click', openMaterialModal);
+        if (closeModalSpan) {
+            closeModalSpan.addEventListener('click', () => { modal.style.display = 'none'; });
+        }
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+
+        const addToCartBtn = document.getElementById('btnAddToCart');
+        addToCartBtn.addEventListener('click', async () => {
+            if (!selectedMaterial || !productData) {
+                alert('Сначала выберите материал');
+                return;
             }
-        }
-        document.getElementById('addToCartContainer').style.display = 'block';
-        modal.style.display = 'none';
-    }
-
-    chooseBtn.addEventListener('click', openMaterialModal);
-    if (closeModalSpan) {
-        closeModalSpan.addEventListener('click', () => { modal.style.display = 'none'; });
-    }
-    window.addEventListener('click', (e) => {
-        if (e.target === modal) modal.style.display = 'none';
-    });
-
-    const addToCartBtn = document.getElementById('btnAddToCart');
-    addToCartBtn.addEventListener('click', async () => {
-        if (!selectedMaterial || !productData) {
-            alert('Сначала выберите материал');
-            return;
-        }
-        const product = productData.product;
-        const costEntry = window.productCosts.find(c => c.id === selectedMaterial.materials_type_id);
-        if (!costEntry) {
-            alert('Для выбранного материала не указана стоимость. Обратитесь к администратору.');
-            return;
-        }
-
-        // Запрос количества
-        let quantity = 1;
-        const inputQuantity = prompt('Введите количество:', '1');
-        if (inputQuantity === null) return; // отмена
-        const parsed = parseInt(inputQuantity, 10);
-        if (!isNaN(parsed) && parsed > 0) {
-            quantity = parsed;
-        } else {
-            alert('Введите корректное целое число больше 0');
-            return;
-        }
-
-        const payload = {
-            product_code: product.code,
-            product_name: product.name,
-            material_id: selectedMaterial.id,
-            material_code: selectedMaterial.code,
-            material_name: selectedMaterial.name,
-            cost: costEntry.cost,
-            quantity: quantity
-        };
-        try {
-            const resp = await fetch('/api/cart/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
-            if (data.success) {
-                alert('Товар добавлен в корзину');
-                updateCartCount();
-            } else {
-                alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+            const product = productData.product;
+            const costEntry = window.productCosts.find(c => c.id === selectedMaterial.materials_type_id);
+            if (!costEntry) {
+                alert('Для выбранного материала не указана стоимость. Обратитесь к администратору.');
+                return;
             }
-        } catch (err) {
-            console.error(err);
-            alert('Не удалось добавить товар в корзину');
-        }
-    });
 
-    const aboutModal = document.getElementById('aboutModal');
-    const aboutLink = document.getElementById('aboutLink');
-    const closeAboutSpan = aboutModal.querySelector('.close');
-    aboutLink.onclick = (e) => { e.preventDefault(); aboutModal.style.display = 'block'; };
-    closeAboutSpan.onclick = () => aboutModal.style.display = 'none';
-    window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
+            let quantity = 1;
+            const inputQuantity = prompt('Введите количество:', '1');
+            if (inputQuantity === null) return;
+            const parsed = parseInt(inputQuantity, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+                quantity = parsed;
+            } else {
+                alert('Введите корректное целое число больше 0');
+                return;
+            }
 
-    loadProduct(productCode);
-    updateCartCount();
-    setInterval(updateCartCount, 5000);
-</script>
+            const payload = {
+                product_code: product.code,
+                product_name: product.name,
+                material_id: selectedMaterial.id,
+                material_code: selectedMaterial.code,
+                material_name: selectedMaterial.name,
+                cost: costEntry.cost,
+                quantity: quantity
+            };
+            try {
+                const resp = await fetch('/api/cart/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    alert('Товар добавлен в корзину');
+                    updateCartCount();
+                } else {
+                    alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Не удалось добавить товар в корзину');
+            }
+        });
+
+        const aboutModal = document.getElementById('aboutModal');
+        const aboutLink = document.getElementById('aboutLink');
+        const closeAboutSpan = aboutModal.querySelector('.close');
+        aboutLink.onclick = (e) => { e.preventDefault();
+            aboutModal.style.display = 'block'; };
+        closeAboutSpan.onclick = () => aboutModal.style.display = 'none';
+        window.onclick = (e) => { if (e.target === aboutModal) aboutModal.style.display = 'none'; };
+
+        loadProduct(productCode);
+        updateCartCount();
+        setInterval(updateCartCount, 5000);
+    </script>
 </body>
 </html>

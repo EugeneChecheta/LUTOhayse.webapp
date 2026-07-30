@@ -15,6 +15,7 @@ body {
     font-family: 'Montserrat', sans-serif;
     background-color: #fff;
     color: var(--main-color);
+    overflow: hidden; /* предотвращаем прокрутку всей страницы */
 }
 
 /* ========== ФИКСИРОВАННАЯ КОРЗИНА ========== */
@@ -168,6 +169,7 @@ body {
     padding: 10px 0;
     box-shadow: inset 0px -1px 0px rgba(0,0,0,0.1);
     background-color: #f9f9f9;
+    flex-shrink: 0; /* не сжимается */
 }
 .header__container {
     max-width: 1920px;
@@ -223,66 +225,88 @@ body {
     .logo-sub { font-size: 14px; }
 }
 
-/* ===== ДВЕ КОЛОНКИ (левая 30%, правая 70%) ===== */
+/* ===== ОСНОВНОЙ КОНТЕЙНЕР ===== */
 .page-container.two-col-layout {
+    max-width: 1600px;
+    margin: 10px auto; /* уменьшены отступы для экономии места */
+    padding: 0 40px;
     display: grid;
     grid-template-columns: 1fr 2.5fr;
+    grid-template-rows: auto auto;
     gap: 40px;
-    max-width: 1600px;
-    margin: 40px auto;
-    padding: 0 40px;
+    height: calc(100vh - 80px); /* хедер ~70px + небольшие отступы */
+    max-height: calc(100vh - 80px);
+    overflow-y: auto; /* если контент не помещается, скролл внутри контейнера */
 }
-.left-info {
-    display: flex;
-    flex-direction: column;
-    gap: 40px;
+
+/* Размещение элементов в десктопной сетке */
+.product-panel {
+    grid-column: 1 / 2;
+    grid-row: 1 / 2;
 }
-@media (max-width: 992px) {
-    .page-container.two-col-layout {
-        grid-template-columns: 1fr;
-        gap: 30px;
-    }
+
+.size-schema-block {
+    grid-column: 1 / 2;
+    grid-row: 2 / 3;
+    max-height: 45vh;      /* ограничиваем высоту схемы */
+    overflow-y: auto;      /* прокрутка внутри, если много текста */
+}
+
+.right-gallery {
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+    height: 100%;          /* занимает всю высоту колонки */
+    min-height: 0;         /* позволяет корректно работать flex / object-fit */
+    overflow: hidden;
+    border-radius: 16px;
+    background: #fafafa;
+    cursor: pointer;
 }
 
 /* ===== ПАНЕЛЬ ТОВАРА ===== */
 .product-panel {
     background: #f9f9f9;
     border-radius: 16px;
-    padding: 25px 30px;
+    padding: 15px 20px;    /* уменьшены внутренние отступы */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow-y: auto;      /* если панель переполняется */
 }
 .product-title {
-    font-size: 24px;
+    font-size: 22px;       /* чуть меньше */
     font-weight: 700;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
 }
 .price-current {
-    font-size: 36px;
+    font-size: 30px;
     font-weight: 700;
-    margin: 15px 0;
+    margin: 10px 0;
 }
 .selected-material {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 15px;
-    margin: 15px 0;
+    gap: 10px;
+    margin: 10px 0;
     background: #fff;
-    padding: 12px 15px;
+    padding: 10px 12px;
     border-radius: 12px;
     border: 1px solid #eee;
 }
 #selectedMaterialText {
-    font-size: 14px;
+    font-size: 13px;
     color: #333;
 }
 .choose-material-btn {
     background: #628b35;
     color: white;
     border: none;
-    padding: 8px 20px;
+    padding: 6px 16px;
     border-radius: 30px;
     font-weight: 600;
+    font-size: 14px;
     cursor: pointer;
     transition: background 0.2s;
 }
@@ -291,7 +315,7 @@ body {
 }
 .btn-cart-container {
     position: relative;
-    margin-top: 20px;
+    margin-top: 10px;
 }
 .btn-cart {
     display: flex;
@@ -299,14 +323,14 @@ body {
     background: #a7c584;
     color: #fff;
     font-weight: 700;
-    padding: 12px 24px;
+    padding: 10px 20px;
     border-radius: 8px;
     text-decoration: none;
     text-align: center;
     cursor: pointer;
     border: none;
     width: 100%;
-    font-size: 16px;
+    font-size: 15px;
 }
 .btn-cart:hover { background: #6b8a47; }
 
@@ -317,54 +341,57 @@ body {
     padding: 10px;
 }
 .dimensions-img {
-    width: 100%;
-    margin-bottom: 20px;
+    width: auto;           /* ширина подстраивается под высоту */
+    max-height: 30vh;      /* ограничиваем высоту */
+    display: block;
+    margin: 0 auto 15px;
     cursor: pointer;
     transition: 0.2s;
 }
 .dimensions-img:active { transform: scale(1.05); }
 .features-title {
-    font-size: 18px;
-    margin: 25px 0 10px;
+    font-size: 16px;
+    margin: 15px 0 8px;
     font-weight: 700;
 }
 .spec-table {
     width: 100%;
-    font-size: 14px;
+    font-size: 13px;
     border-collapse: collapse;
 }
 .spec-table tr {
     border-bottom: 1px solid #eee;
 }
 .spec-table td {
-    padding: 8px 0;
+    padding: 6px 0;
 }
 .spec-table td:first-child {
-    width: 200px;
+    width: 160px;
     color: #666;
     font-weight: 500;
 }
 @media (max-width: 600px) {
-    .spec-table td:first-child { width: 130px; }
+    .spec-table td:first-child { width: 110px; }
 }
 
-/* ===== ПРАВАЯ ГАЛЕРЕЯ (без стрелок) ===== */
-.right-gallery {
-    position: relative;
-    overflow: hidden;
-    border-radius: 16px;
-    background: #fafafa;
-    cursor: pointer;
-}
+/* ===== ГАЛЕРЕЯ ===== */
 #slider {
     display: flex;
     transition: transform 0.3s ease;
+    width: 100%;
+    height: 100%;
 }
 .slide {
     flex: 0 0 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .slide img {
     width: 100%;
+    height: 100%;
+    object-fit: contain;   /* фото полностью помещается без обрезки */
     display: block;
     pointer-events: none;
 }
@@ -372,7 +399,7 @@ body {
     display: flex;
     justify-content: center;
     gap: 8px;
-    margin: 15px 0 10px;
+    margin: 10px 0 5px;
 }
 .dot {
     width: 10px;
@@ -386,7 +413,7 @@ body {
     background: #628b35;
 }
 
-/* ===== МОДАЛЬНОЕ ОКНО ДЛЯ МАТЕРИАЛОВ ===== */
+/* ===== МОДАЛЬНОЕ ОКНО МАТЕРИАЛОВ ===== */
 .modal.material-modal {
     display: none;
     position: fixed;
@@ -498,30 +525,31 @@ body {
 
 /* ===== ФУТЕР ===== */
 footer {
-    margin-top: 60px;
+    margin-top: 0;          /* убран отступ, чтобы не занимал лишнее место */
     background: #fff;
     border-top: 1px solid #ddd;
-    padding: 40px 20px 20px;
+    padding: 20px 20px 10px;
+    flex-shrink: 0;
 }
 .footer-top {
     max-width: 1200px;
-    margin: 0 auto 30px;
+    margin: 0 auto 15px;
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
 }
-.footer-left .logo { font-size: 28px; }
+.footer-left .logo { font-size: 24px; }
 .social-icons { display: flex; gap: 15px; }
-.vk-svg, .tg-svg { width: 38px; }
-.footer-nav { display: flex; gap: 40px; flex-wrap: wrap; }
+.vk-svg, .tg-svg { width: 30px; }
+.footer-nav { display: flex; gap: 30px; flex-wrap: wrap; }
 .footer-column ul { list-style: none; }
-.footer-column a { text-decoration: none; color: #777; }
+.footer-column a { text-decoration: none; color: #777; font-size: 13px; }
 .footer-bottom {
     text-align: center;
-    font-size: 12px;
+    font-size: 11px;
     color: #999;
     border-top: 1px solid #ddd;
-    padding-top: 15px;
+    padding-top: 10px;
 }
 
 /* ===== МОДАЛКА "О НАС" ===== */
@@ -545,4 +573,162 @@ footer {
     float: right;
     font-size: 28px;
     cursor: pointer;
+}
+
+/* ========== МОБИЛЬНАЯ ПЕРЕСТАНОВКА И АДАПТАЦИЯ ========== */
+@media (max-width: 992px) {
+    .page-container.two-col-layout {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;               /* уменьшен зазор */
+        padding: 10px 15px;
+        margin: 0;
+        height: calc(100vh - 70px); /* под хедер */
+        max-height: calc(100vh - 70px);
+        overflow-y: auto;
+    }
+
+    /* Задаём порядок: панель → галерея → характеристики */
+    .product-panel {
+        order: 1;
+        flex: 0 0 auto;          /* не растягивается */
+        padding: 15px 15px;
+        max-height: 35vh;
+        overflow-y: auto;
+    }
+    .right-gallery {
+        order: 2;
+        flex: 0 0 45vh;          /* фиксированная высота галереи на мобилках */
+        width: 100%;
+        min-height: 30vh;
+        height: 45vh;
+    }
+    .size-schema-block {
+        order: 3;
+        flex: 0 0 auto;
+        max-height: 30vh;        /* ограничена высота схемы */
+        overflow-y: auto;
+        padding: 8px;
+    }
+
+    /* Убираем грид-свойства */
+    .product-panel,
+    .size-schema-block,
+    .right-gallery {
+        grid-column: auto;
+        grid-row: auto;
+        width: 100%;
+    }
+
+    .dimensions-img {
+        max-height: 20vh;        /* на мобилках схема меньше */
+    }
+
+    .product-title {
+        font-size: 18px;
+        margin-bottom: 5px;
+    }
+    .price-current {
+        font-size: 24px;
+        margin: 5px 0;
+    }
+    .selected-material {
+        padding: 6px 10px;
+        margin: 5px 0;
+    }
+    .btn-cart {
+        padding: 8px 16px;
+        font-size: 14px;
+    }
+    .features-title {
+        font-size: 14px;
+        margin: 10px 0 5px;
+    }
+    .spec-table {
+        font-size: 12px;
+    }
+    .spec-table td {
+        padding: 4px 0;
+    }
+    footer {
+        padding: 10px 15px;
+    }
+    .footer-top {
+        margin-bottom: 8px;
+    }
+    .footer-nav {
+        gap: 15px;
+    }
+    .footer-column a {
+        font-size: 12px;
+    }
+    .footer-left .logo {
+        font-size: 20px;
+    }
+}
+
+@media (max-width: 480px) {
+    .page-container.two-col-layout {
+        height: calc(100vh - 60px);
+        max-height: calc(100vh - 60px);
+        padding: 5px 10px;
+        gap: 10px;
+    }
+    .product-panel {
+        max-height: 30vh;
+        padding: 10px;
+    }
+    .right-gallery {
+        height: 35vh;
+        min-height: 25vh;
+        flex: 0 0 35vh;
+    }
+    .size-schema-block {
+        max-height: 25vh;
+        padding: 5px;
+    }
+    .dimensions-img {
+        max-height: 15vh;
+        margin-bottom: 8px;
+    }
+    .product-title {
+        font-size: 16px;
+    }
+    .price-current {
+        font-size: 20px;
+        margin: 3px 0;
+    }
+    .selected-material {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    .btn-cart {
+        font-size: 13px;
+        padding: 6px 12px;
+    }
+    .features-title {
+        font-size: 13px;
+    }
+    .spec-table {
+        font-size: 11px;
+    }
+    .spec-table td:first-child {
+        width: 90px;
+    }
+    footer {
+        padding: 8px 10px;
+    }
+    .footer-left .logo {
+        font-size: 18px;
+    }
+    .footer-nav {
+        gap: 10px;
+    }
+    .footer-column a {
+        font-size: 11px;
+    }
+    .footer-bottom {
+        font-size: 10px;
+        padding-top: 6px;
+    }
 }
