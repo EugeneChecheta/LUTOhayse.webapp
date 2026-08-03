@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
-ВЕРСИЯ: 2.0 – ПОЛНОСТЬЮ ПЕРЕРАБОТАНА ФУНКЦИЯ ДОБАВЛЕНИЯ МАТЕРИАЛОВ (аналог добавления товаров).
-ИСПРАВЛЕНИЯ: упрощён и стабилизирован процесс создания материалов, убраны проблемные вызовы edit_message_text,
-добавлена единая точка входа, корректный возврат в списки.
+ВЕРСИЯ: 2.1 – ИСПРАВЛЕНО РЕДАКТИРОВАНИЕ МАТЕРИАЛОВ,
+УБРАНА КНОПКА ДОБАВЛЕНИЯ С ПРЕДУСТАНОВЛЕННЫМ ТИПОМ,
+ДОБАВЛЕНИЕ МАТЕРИАЛА ВСЕГДА ЗАПРАШИВАЕТ ТИП.
 """
 import asyncio
 import logging
@@ -1270,7 +1270,7 @@ async def show_material_type_choice(update: Update, context: ContextTypes.DEFAUL
             nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"mat_choice_page_{page+1}"))
         if nav:
             keyboard.append(nav)
-        # Добавляем кнопку для добавления материала с выбором типа
+        # Кнопка добавления материала (без предустановленного типа)
         keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
         keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["mat_choice_page"] = page
@@ -1321,8 +1321,8 @@ async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, typ
         nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"materials_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    # Кнопка добавления материала с предустановленным типом
-    keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data=f"mat_add_with_type_{type_id}_{page}")])
+    # Кнопка добавления материала (без предустановленного типа)
+    keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
     keyboard.append([InlineKeyboardButton("🔄 Сменить тип", callback_data="mat_choice_back")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["materials_type_id"] = type_id
@@ -1377,35 +1377,15 @@ async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("❌ Материал не найден.")
     await material_details(update, context)
 
-# ------------------------- НОВАЯ ЛОГИКА ДОБАВЛЕНИЯ МАТЕРИАЛА (ПЕРЕРАБОТАНА) -------------------------
+# ------------------------- НОВАЯ ЛОГИКА ДОБАВЛЕНИЯ МАТЕРИАЛА (ВСЕГДА ЗАПРАШИВАЕТ ТИП) -------------------------
 async def start_add_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Единая точка входа для добавления материала.
-    Если передан тип (из списка материалов) – используем его, иначе показываем выбор типа.
+    Всегда показывает выбор типа материала.
     """
     query = update.callback_query
     await query.answer()
-    data = query.data
-
-    # Если пришли из списка материалов с типом
-    if data.startswith("mat_add_with_type_"):
-        parts = data.split("_")
-        type_id = int(parts[3])
-        page = int(parts[4])
-        context.user_data["new_mat_type_id"] = type_id
-        context.user_data["return_mat_type_id"] = type_id
-        context.user_data["return_mat_page"] = page
-        await query.edit_message_text("Введите *код* материала (уникальный):", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
-        return ADD_MAT_CODE
-
-    # Иначе проверяем, есть ли текущий тип в контексте (если мы находимся в списке)
-    current_type_id = context.user_data.get("materials_type_id")
-    if current_type_id is not None:
-        context.user_data["new_mat_type_id"] = current_type_id
-        await query.edit_message_text("Введите *код* материала (уникальный):", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
-        return ADD_MAT_CODE
-
-    # Нет типа – показываем выбор
+    # Показываем выбор типа
     types, _ = await db.get_material_types(0, 1000)
     if not types:
         await query.edit_message_text("❌ Нет типов материалов. Сначала создайте тип материала.")
@@ -1417,14 +1397,14 @@ async def start_add_material(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ADD_MAT_SELECT_TYPE
 
 async def add_material_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик выбора типа материала (если не был предопределён)."""
+    """Обработчик выбора типа материала."""
     query = update.callback_query
     await query.answer()
     type_id = int(query.data.split("_")[-1])
     context.user_data["new_mat_type_id"] = type_id
-    # Сохраняем тип для возврата (если потребуется)
+    # Сохраняем тип для возврата
     context.user_data["return_mat_type_id"] = type_id
-    context.user_data["return_mat_page"] = 0  # вернёмся на первую страницу
+    context.user_data["return_mat_page"] = 0
     await query.edit_message_text("Введите *код* материала (уникальный):", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
     return ADD_MAT_CODE
 
@@ -1457,7 +1437,7 @@ async def add_material_name_handler(update: Update, context: ContextTypes.DEFAUL
         context.user_data.pop("new_mat_type_id", None)
         return ConversationHandler.END
 
-    # Возвращаемся к списку материалов, если известен тип, иначе к выбору типа
+    # Возвращаемся к списку материалов выбранного типа
     return_type_id = context.user_data.pop("return_mat_type_id", None)
     return_page = context.user_data.pop("return_mat_page", 0)
     # Очищаем остальные временные данные
@@ -1471,7 +1451,7 @@ async def add_material_name_handler(update: Update, context: ContextTypes.DEFAUL
         await show_material_type_choice(update, context, 0, new_message=True)
     return ConversationHandler.END
 
-# ------------------------- Редактирование материала (оставлено без изменений, но работает) -------------------------
+# ------------------------- Редактирование материала -------------------------
 async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1557,7 +1537,9 @@ async def material_update_type(update: Update, context: ContextTypes.DEFAULT_TYP
     material = await db.get_material_by_id(mat_id)
     await db.update_material(mat_id, material['code'], material['name'], new_type_id)
     await query.edit_message_text("✅ Тип материала обновлён.")
-    await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
+    # Обновляем контекст на новый тип и переходим к списку материалов нового типа
+    context.user_data["edit_mat_type_id"] = new_type_id
+    await show_materials(update, context, new_type_id, 0)
     return ConversationHandler.END
 
 async def material_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3503,12 +3485,9 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+_\\d+$"))
     app.add_handler(CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"))
 
-    # НОВЫЙ ConversationHandler для добавления материалов
+    # Добавление материалов (всегда спрашивает тип)
     add_material_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(start_add_material, pattern="^mat_add$"),
-            CallbackQueryHandler(start_add_material, pattern="^mat_add_with_type_\\d+_\\d+$"),
-        ],
+        entry_points=[CallbackQueryHandler(start_add_material, pattern="^mat_add$")],
         states={
             ADD_MAT_SELECT_TYPE: [
                 CallbackQueryHandler(add_material_select_type, pattern="^mat_add_type_\\d+$"),
