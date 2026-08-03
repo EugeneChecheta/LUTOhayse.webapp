@@ -164,7 +164,11 @@
             });
             const data = await resp.json();
             if (data.success) {
-                window.location.href = '/profile';
+                // После успешного входа перенаправляем на страницу, указанную в параметре next,
+                // или на /profile по умолчанию.
+                const urlParams = new URLSearchParams(window.location.search);
+                const next = urlParams.get('next') || '/profile';
+                window.location.href = next;
             } else {
                 errorDiv.textContent = data.error || 'Ошибка входа';
             }

@@ -1,6 +1,6 @@
 import psycopg2
 import os
-from flask import Flask, jsonify, send_from_directory, abort, request, session
+from flask import Flask, jsonify, send_from_directory, abort, request, session, redirect
 from flask_cors import CORS
 import glob
 from pathlib import Path
@@ -845,6 +845,10 @@ def register_page():
 
 @app.route('/profile')
 def profile_page():
+    # Проверяем авторизацию на сервере, чтобы не было возврата на профиль по кнопке "Назад"
+    if 'user_id' not in session:
+        # Перенаправляем на страницу входа с параметром next, чтобы после входа вернуться на профиль
+        return redirect('/login?next=/profile')
     return send_from_directory('webpages', 'profile.html')
 
 
