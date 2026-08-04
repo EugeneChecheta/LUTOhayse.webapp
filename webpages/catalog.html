@@ -25,7 +25,7 @@
 <body>
 
 <!-- Значок профиля -->
-<div class="profile-icon-wrapper">
+<div class="profile-icon-wrapper" id="profileIcon">
     <a href="/profile" class="profile-fixed-link">
         <img src="/media/interface/profile_icon.svg" alt="Профиль">
     </a>
@@ -52,11 +52,6 @@
                         </li>
                     </ul>
                 </nav>
-                <nav class="menu__body menu__body-user">
-                    <ul class="menu__list">
-                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
-                    </ul>
-                </nav>
             </div>
         </div>
     </section>
@@ -81,6 +76,8 @@
     <div id="catalog-loader" class="loader">Загрузка товаров...</div>
     <div id="catalog-grid" class="slider-containers" style="display: none;"></div>
     <div id="catalog-error" class="error-message" style="display: none;">Не удалось загрузить товары. Попробуйте позже.</div>
+    <div id="load-more-btn" class="load-more-btn" style="display: none;">Показать ещё</div>
+    <div id="loader-more" class="loader-more" style="display: none;">Загрузка...</div>
 </main>
 
 <footer>
@@ -89,17 +86,19 @@
             <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
             <div class="phone-label">Звонок по России бесплатный</div>
             <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
         </div>
-        <nav class="footer-nav">
-            <div class="footer-column"><h4>О нас</h4><ul><li><a href="#" id="aboutLink">Декларация о соответствии</a></li></ul></div>
-            <div class="footer-column"><h4>Покупки</h4><ul><li><a href="#">Доставка</a></li><li><a href="#">Гарантия возврата</a></li></ul></div>
-            <div class="footer-column"><h4>Сотрудничество</h4><ul><li><a href="#">Комплектация объектов</a></li><li><a href="#">Дизайнерам</a></li></ul></div>
-        </nav>
     </div>
     <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
 </footer>
-
-<div id="aboutModal" class="modal"><div class="modal-content"><span class="close">&times;</span><h2>Декларация о соответствии</h2><p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p></div></div>
 
 <script>
     const gridContainer = document.getElementById('catalog-grid');
@@ -108,8 +107,15 @@
     const typeSelect = document.getElementById('type-select');
     const flagsContainer = document.getElementById('flags-checkboxes');
     const cartCountSpan = document.getElementById('cart-count');
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    const loaderMore = document.getElementById('loader-more');
+    const profileIcon = document.getElementById('profileIcon');
 
-    let currentTimeout = null;
+    let currentPage = 1;
+    let totalProducts = 0;
+    let loading = false;
+    let currentFilters = { typeId: '', flagIds: [] };
+    let productsLoaded = []; // все загруженные товары
 
     // ===== ЕДИНАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ КАРТОЧКИ ТОВАРА =====
     function createProductCardHTML(prod) {
@@ -150,42 +156,80 @@
         } catch(e) { console.error(e); }
     }
 
-    function renderProducts(products) {
+    function renderProducts(products, append = false) {
+        if (!append) {
+            gridContainer.innerHTML = '';
+            productsLoaded = [];
+        }
         if (!products.length) {
-            gridContainer.innerHTML = '<p class="empty">Товаров не найдено</p>';
-            gridContainer.style.display = 'grid';
+            if (!append) {
+                gridContainer.innerHTML = '<p class="empty">Товаров не найдено</p>';
+                gridContainer.style.display = 'grid';
+            }
             return;
         }
         let html = '';
         for (const prod of products) {
             html += createProductCardHTML(prod);
         }
-        gridContainer.innerHTML = html;
+        if (append) {
+            gridContainer.insertAdjacentHTML('beforeend', html);
+        } else {
+            gridContainer.innerHTML = html;
+        }
+        productsLoaded = productsLoaded.concat(products);
         gridContainer.style.display = 'grid';
     }
 
-    async function loadProducts() {
+    async function loadProducts(page = 1, append = false) {
+        if (loading) return;
+        loading = true;
+        loadMoreBtn.style.display = 'none';
+        loaderMore.style.display = 'block';
+        if (!append) {
+            loader.style.display = 'block';
+            gridContainer.style.display = 'none';
+            errorBlock.style.display = 'none';
+        }
+
         const typeId = typeSelect.value;
         const selectedFlags = Array.from(document.querySelectorAll('.flag-checkbox:checked')).map(cb => cb.value);
+        currentFilters.typeId = typeId;
+        currentFilters.flagIds = selectedFlags;
+
         let url = '/api/products?';
         const params = new URLSearchParams();
         if (typeId) params.append('type_id', typeId);
         selectedFlags.forEach(fid => params.append('flag_ids', fid));
+        params.append('page', page);
+        params.append('limit', 12);
         url += params.toString();
+
         try {
-            loader.style.display = 'block';
-            gridContainer.style.display = 'none';
-            errorBlock.style.display = 'none';
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const products = await response.json();
-            renderProducts(products);
+            const data = await response.json();
+            const products = data.items || [];
+            totalProducts = data.total || 0;
+            renderProducts(products, append);
+            currentPage = page;
+            if (currentPage * 12 < totalProducts) {
+                loadMoreBtn.style.display = 'block';
+            } else {
+                loadMoreBtn.style.display = 'none';
+            }
         } catch (err) {
             console.error(err);
-            loader.style.display = 'none';
-            errorBlock.style.display = 'block';
+            if (!append) {
+                loader.style.display = 'none';
+                errorBlock.style.display = 'block';
+            } else {
+                alert('Не удалось загрузить следующую страницу');
+            }
         } finally {
             loader.style.display = 'none';
+            loaderMore.style.display = 'none';
+            loading = false;
         }
     }
 
@@ -218,15 +262,16 @@
                     flagsContainer.appendChild(label);
                 });
             }
-            await loadProducts();
+            // Загружаем первую страницу
+            await loadProducts(1, false);
         } catch (err) {
             console.error('Ошибка загрузки фильтров:', err);
         }
     }
 
     function onChangeFilter() {
-        if (currentTimeout) clearTimeout(currentTimeout);
-        currentTimeout = setTimeout(() => loadProducts(), 300);
+        // сброс пагинации при изменении фильтров
+        loadProducts(1, false);
     }
 
     typeSelect.addEventListener('change', onChangeFilter);
@@ -234,15 +279,28 @@
         if (e.target.classList.contains('flag-checkbox')) onChangeFilter();
     });
 
-    const modal = document.getElementById('aboutModal');
-    const aboutLink = document.getElementById('aboutLink');
-    const closeSpan = document.querySelector('.close');
-    aboutLink.onclick = (e) => { e.preventDefault(); modal.style.display = 'block'; };
-    closeSpan.onclick = () => modal.style.display = 'none';
-    window.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+    loadMoreBtn.addEventListener('click', () => {
+        loadProducts(currentPage + 1, true);
+    });
+
+    // Обновление цвета профиля
+    async function updateProfileIcon() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            if (profileIcon) {
+                if (data.authenticated) {
+                    profileIcon.style.background = '#628b35';
+                } else {
+                    profileIcon.style.background = '#e3342f';
+                }
+            }
+        } catch(e) { console.error(e); }
+    }
 
     loadFilters();
     updateCartCount();
+    updateProfileIcon();
     setInterval(updateCartCount, 5000);
 </script>
 </body>

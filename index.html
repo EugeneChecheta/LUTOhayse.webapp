@@ -26,7 +26,7 @@
 <body>
 
 <!-- Значок профиля -->
-<div class="profile-icon-wrapper">
+<div class="profile-icon-wrapper" id="profileIcon">
     <a href="/profile" class="profile-fixed-link">
         <img src="/media/interface/profile_icon.svg" alt="Профиль">
     </a>
@@ -50,16 +50,6 @@
                             <h1 class="logo">
                                 <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
                             </h1>
-                        </li>
-                    </ul>
-                </nav>
-                <nav class="menu__body menu__body-user">
-                    <ul class="menu__list">
-                        <li class="menu__item">
-                            <a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a>
-                        </li>
-                        <li class="menu__item">
-                            <a href="/login" class="menu__link" id="authLink">Войти</a>
                         </li>
                     </ul>
                 </nav>
@@ -131,50 +121,21 @@
             <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
             <div class="phone-label">Звонок по России бесплатный</div>
             <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
         </div>
-        <nav class="footer-nav">
-            <div class="footer-column">
-                <h4 id="aboutBtn" style="cursor: pointer;">О нас</h4>
-                <ul>
-                    <li><a href="javascript:void(0);" id="contactsBtn">Контакты</a></li>
-                    <li><a href="#">Поставщикам</a></li>
-                </ul>
-            </div>
-            <div class="footer-column">
-                <h4>Покупки</h4>
-                <ul>
-                    <li><a href="#">Доставка</a></li>
-                    <li><a href="#">Гарантия возврата</a></li>
-                </ul>
-            </div>
-            <div class="footer-column">
-                <h4>Сотрудничество</h4>
-                <ul>
-                    <li><a href="#">Комплектация объектов</a></li>
-                    <li><a href="#">Дизайнерам</a></li>
-                </ul>
-            </div>
-        </nav>
     </div>
     <div class="footer-bottom">
         <div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div>
     </div>
 </footer>
-
-<div id="aboutModal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>Декларация о соответствии</h2>
-        <p>ЕАЭС N RU Д-RU.PA08.B.13389/25<br>Дата регистрации: 11.09.2025</p>
-    </div>
-</div>
-<div id="contactsModal" class="modal">
-    <div class="modal-content">
-        <span class="close">&times;</span>
-        <h2>Контакты</h2>
-        <p>Телефон: +7 (999) 700-05-50<br>Email: luto.house@mail.ru</p>
-    </div>
-</div>
 
 <script>
     async function fetchJSON(url) {
@@ -215,18 +176,29 @@
         `;
     }
 
-    // Обновление ссылки на профиль
+    // Обновление ссылки на профиль и цвета иконки
     async function updateAuthLink() {
         try {
             const resp = await fetch('/api/auth/me');
             const data = await resp.json();
             const authLink = document.getElementById('authLink');
+            const profileIcon = document.getElementById('profileIcon');
             if (data.authenticated) {
-                authLink.textContent = 'Личный кабинет';
-                authLink.href = '/profile';
+                if (authLink) {
+                    authLink.textContent = 'Личный кабинет';
+                    authLink.href = '/profile';
+                }
+                if (profileIcon) {
+                    profileIcon.style.background = '#628b35'; // зелёный
+                }
             } else {
-                authLink.textContent = 'Войти';
-                authLink.href = '/login';
+                if (authLink) {
+                    authLink.textContent = 'Войти';
+                    authLink.href = '/login';
+                }
+                if (profileIcon) {
+                    profileIcon.style.background = '#e3342f'; // красный
+                }
             }
         } catch(e) { console.error(e); }
     }
@@ -304,14 +276,15 @@
     async function loadFeaturedProducts() {
         const container = document.getElementById('featuredProducts');
         try {
-            const products = await fetchJSON('/api/products');
+            // загружаем только первую страницу для блока "Популярные"
+            const data = await fetchJSON('/api/products?page=1&limit=8');
+            const products = data.items || [];
             if (!products.length) {
                 container.innerHTML = '<p class="empty">Нет товаров для отображения</p>';
                 return;
             }
-            const items = products.slice(0, 8);
             let html = '';
-            for (let prod of items) {
+            for (let prod of products) {
                 html += createProductCardHTML(prod);
             }
             container.innerHTML = html;
@@ -353,26 +326,6 @@
         }
     }
 
-    function initModals() {
-        const aboutModal = document.getElementById('aboutModal');
-        const contactsModal = document.getElementById('contactsModal');
-        const aboutBtn = document.getElementById('aboutBtn');
-        const contactsBtn = document.getElementById('contactsBtn');
-        const closeBtns = document.querySelectorAll('.modal .close');
-        aboutBtn.onclick = () => aboutModal.style.display = 'block';
-        contactsBtn.onclick = () => contactsModal.style.display = 'block';
-        closeBtns.forEach(btn => {
-            btn.onclick = () => {
-                aboutModal.style.display = 'none';
-                contactsModal.style.display = 'none';
-            };
-        });
-        window.onclick = (e) => {
-            if (e.target === aboutModal) aboutModal.style.display = 'none';
-            if (e.target === contactsModal) contactsModal.style.display = 'none';
-        };
-    }
-
     document.addEventListener('DOMContentLoaded', () => {
         buildCarousel();
         document.getElementById('prevSlide').addEventListener('click', prevSlide);
@@ -380,7 +333,6 @@
         resetAutoSlide();
         loadFeaturedProducts();
         loadGalleryPreview();
-        initModals();
     });
 </script>
 </body>

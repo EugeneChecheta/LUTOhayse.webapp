@@ -381,6 +381,30 @@ body {
     accent-color: var(--accent-color);
 }
 
+/* ===== КНОПКА "ПОКАЗАТЬ ЕЩЁ" ===== */
+.load-more-btn {
+    display: block;
+    margin: 30px auto 20px;
+    padding: 12px 40px;
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.load-more-btn:hover {
+    background: #4a6b27;
+}
+.loader-more {
+    text-align: center;
+    padding: 20px;
+    font-size: 16px;
+    color: #777;
+}
+
 /* ===== АДАПТАЦИЯ ===== */
 @media (max-width: 768px) {
     .slider-containers {

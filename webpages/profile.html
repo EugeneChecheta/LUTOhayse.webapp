@@ -118,7 +118,7 @@
 <body>
 
 <!-- Значок профиля -->
-<div class="profile-icon-wrapper">
+<div class="profile-icon-wrapper" id="profileIcon">
     <a href="/profile" class="profile-fixed-link">
         <img src="/media/interface/profile_icon.svg" alt="Профиль">
     </a>
@@ -143,11 +143,6 @@
                                 <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
                             </h1>
                         </li>
-                    </ul>
-                </nav>
-                <nav class="menu__body menu__body-user">
-                    <ul class="menu__list">
-                        <li class="menu__item"><a href="tel:+79997000550" class="menu__link">+7(999)700-05-50</a></li>
                     </ul>
                 </nav>
             </div>
@@ -194,8 +189,29 @@
     </div>
 </div>
 
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+</footer>
+
 <script>
     let currentUser = null;
+    const profileIcon = document.getElementById('profileIcon');
 
     async function updateCartCount() {
         try {
@@ -222,6 +238,7 @@
             document.getElementById('email').value = currentUser.email || '';
             document.getElementById('address').value = currentUser.address || '';
             document.getElementById('contact_time').value = currentUser.contact_time || '';
+            if (profileIcon) profileIcon.style.background = '#628b35'; // авторизован
         } catch (err) {
             console.error(err);
             window.location.href = '/login';

@@ -205,12 +205,18 @@ def flags():
         return jsonify({'error': 'Internal server error'}), 500
 
 
-# ----- API: список товаров с фильтрацией (ИСПРАВЛЕНО: добавлен min_cost) -----
+# ----- API: список товаров с фильтрацией и пагинацией -----
 @app.route('/api/products')
 def products():
     try:
         type_id = request.args.get('type_id', type=int)
         flag_ids = request.args.getlist('flag_ids', type=int)
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 12, type=int)
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 50:
+            limit = 12
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -223,52 +229,53 @@ def products():
             )
         """
 
-        if flag_ids:
-            query = f"""
-                SELECT p.code, p.name, p.min_cost
-                FROM products p
-                JOIN flags_for_products fp ON p.id = fp.products_id
-                WHERE 1=1
-                AND {hidden_flag_condition}
-            """
-            params = []
-            if type_id is not None:
-                query += " AND p.products_type_id = %s"
-                params.append(type_id)
-            query += " AND fp.flags_id = ANY(%s)"
-            params.append(flag_ids)
-            query += """
-                GROUP BY p.id, p.code, p.name, p.min_cost
-                HAVING COUNT(DISTINCT fp.flags_id) = %s
-                ORDER BY p.id
-            """
-            params.append(len(flag_ids))
-            cur.execute(query, params)
-        else:
-            query = f"""
-                SELECT code, name, min_cost
-                FROM products p
-                WHERE 1=1
-                AND {hidden_flag_condition}
-            """
-            params = []
-            if type_id is not None:
-                query += " AND products_type_id = %s"
-                params.append(type_id)
-            query += " ORDER BY id"
-            cur.execute(query, params)
+        # Базовый запрос для получения данных
+        base_query = f"""
+            SELECT p.code, p.name, p.min_cost
+            FROM products p
+            WHERE 1=1
+            AND {hidden_flag_condition}
+        """
+        params = []
 
+        if type_id is not None:
+            base_query += " AND p.products_type_id = %s"
+            params.append(type_id)
+
+        if flag_ids:
+            base_query += """
+                AND EXISTS (
+                    SELECT 1 FROM flags_for_products fp
+                    WHERE fp.products_id = p.id AND fp.flags_id = ANY(%s)
+                    GROUP BY fp.products_id
+                    HAVING COUNT(DISTINCT fp.flags_id) = %s
+                )
+            """
+            params.append(flag_ids)
+            params.append(len(flag_ids))
+
+        # Запрос для подсчёта общего количества
+        count_query = f"SELECT COUNT(*) FROM ({base_query}) AS sub"
+        cur.execute(count_query, params)
+        total = cur.fetchone()[0]
+
+        # Запрос с пагинацией
+        paginated_query = base_query + " ORDER BY p.id LIMIT %s OFFSET %s"
+        params_paginated = params + [limit, (page - 1) * limit]
+        cur.execute(paginated_query, params_paginated)
         rows = cur.fetchall()
+
         cur.close()
         conn.close()
-        # ИСПРАВЛЕНО: возвращаем min_cost
-        return jsonify([{'code': r[0], 'name': r[1], 'min_cost': r[2]} for r in rows])
+
+        items = [{'code': r[0], 'name': r[1], 'min_cost': r[2]} for r in rows]
+        return jsonify({'items': items, 'total': total, 'page': page, 'limit': limit})
     except Exception as e:
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 
-# ----- API: детальная информация о товаре по коду (ИСПРАВЛЕНО: добавлен min_cost) -----
+# ----- API: детальная информация о товаре по коду -----
 @app.route('/api/product/<code>')
 def product_details(code):
     try:
@@ -292,7 +299,7 @@ def product_details(code):
             'id': prod_id,
             'code': product_row[1],
             'name': product_row[2],
-            'min_cost': product_row[3],          # ИСПРАВЛЕНО
+            'min_cost': product_row[3],
             'products_type_id': product_row[4],
             'type_name': product_row[5]
         }
@@ -344,7 +351,7 @@ def product_details(code):
             'main_features': main_features,
             'extra_features': extra_features,
             'photos': photos,
-            'min_cost': product_data['min_cost']   # ИСПРАВЛЕНО: для обратной совместимости на фронтенде
+            'min_cost': product_data['min_cost']
         }
         return jsonify(result)
     except Exception as e:
