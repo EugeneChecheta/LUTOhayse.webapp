@@ -58,7 +58,7 @@
     </header>
 
     <main class="page-container two-col-layout" id="productRoot">
-        <!-- Панель товара (название, цена, материал) -->
+        <!-- Панель товара -->
         <aside class="product-panel">
             <h1 class="product-title" id="productTitle">Загрузка...</h1>
             <div class="price-block">
@@ -96,6 +96,12 @@
         </div>
     </div>
 
+    <!-- Модальное окно для зума -->
+    <div id="zoomModal" class="zoom-modal">
+        <span class="zoom-close">&times;</span>
+        <img class="zoom-modal-content" id="zoomImage" src="" alt="Увеличенное изображение">
+    </div>
+
     <footer>
         <div class="footer-top">
             <div class="footer-left">
@@ -124,6 +130,31 @@
         const cartCountSpan = document.getElementById('cart-count');
         const profileIcon = document.getElementById('profileIcon');
 
+        // ---- Зум ----
+        const zoomModal = document.getElementById('zoomModal');
+        const zoomImage = document.getElementById('zoomImage');
+        const zoomClose = document.querySelector('.zoom-close');
+
+        function openZoom(src) {
+            zoomImage.src = src;
+            zoomModal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeZoom() {
+            zoomModal.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        zoomClose.addEventListener('click', closeZoom);
+        zoomModal.addEventListener('click', function(e) {
+            if (e.target === zoomModal) closeZoom();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && zoomModal.style.display === 'flex') closeZoom();
+        });
+
+        // ---- Корзина ----
         async function updateCartCount() {
             try {
                 const resp = await fetch('/api/cart');
@@ -133,6 +164,7 @@
             } catch (e) { console.error(e); }
         }
 
+        // ---- Загрузка товара ----
         async function loadProduct(code) {
             try {
                 const resp = await fetch(`/api/product/${code}`);
@@ -161,14 +193,19 @@
                 document.getElementById('priceCurrent').innerHTML = 'Цена по запросу';
             }
 
+            // Схема
             const sizeImg = document.getElementById('sizeImage');
             if (photos.size) {
                 sizeImg.src = photos.size;
                 sizeImg.style.display = 'block';
+                sizeImg.addEventListener('click', function() {
+                    openZoom(photos.size);
+                });
             } else {
                 sizeImg.style.display = 'none';
             }
 
+            // Характеристики
             const featuresContainer = document.getElementById('featuresContainer');
             featuresContainer.innerHTML = '';
 
@@ -192,6 +229,7 @@
 
             appendStaticFeatures(featuresContainer);
 
+            // Галерея (слайдер)
             const slider = document.getElementById('slider');
             slider.innerHTML = '';
             let allImages = [];
@@ -207,12 +245,27 @@
                 const img = document.createElement('img');
                 img.src = src;
                 img.alt = 'Фото товара';
+                img.loading = 'lazy';
                 slideDiv.appendChild(img);
                 slider.appendChild(slideDiv);
             });
             initSlider(allImages.length);
 
+            // Клик по галерее – зум (делегирование)
+            const gallery = document.getElementById('gallerySection');
+            // Удаляем старый обработчик, чтобы не дублировать
+            gallery.removeEventListener('click', galleryZoomHandler);
+            gallery.addEventListener('click', galleryZoomHandler);
+
             window.productCosts = costs;
+        }
+
+        // Отдельная функция для обработчика клика по галерее
+        function galleryZoomHandler(e) {
+            const img = e.target.closest('.slide img');
+            if (img) {
+                openZoom(img.src);
+            }
         }
 
         function createFeatureTable(features, isExtra = false) {
@@ -267,6 +320,7 @@
             container.appendChild(staticTable);
         }
 
+        // ---- Слайдер ----
         let currentSlide = 0;
         let totalSlides = 0;
         let sliderElement = null;
@@ -345,6 +399,7 @@
             });
         }
 
+        // ---- Материалы ----
         const modal = document.getElementById('materialModal');
         const chooseBtn = document.getElementById('chooseMaterialBtn');
         const closeModalSpan = document.querySelector('.close-modal');
@@ -467,6 +522,7 @@
             if (e.target === modal) modal.style.display = 'none';
         });
 
+        // ---- Добавление в корзину ----
         const addToCartBtn = document.getElementById('btnAddToCart');
         addToCartBtn.addEventListener('click', async () => {
             if (!selectedMaterial || !productData) {
@@ -519,7 +575,7 @@
             }
         });
 
-        // Обновление цвета профиля
+        // ---- Профиль ----
         async function updateProfileIcon() {
             try {
                 const resp = await fetch('/api/auth/me');
@@ -534,6 +590,7 @@
             } catch(e) { console.error(e); }
         }
 
+        // ---- Запуск ----
         loadProduct(productCode);
         updateCartCount();
         updateProfileIcon();

@@ -65,6 +65,12 @@
     <div id="load-more-btn" class="load-more-btn">Показать ещё</div>
 </main>
 
+<!-- Модальное окно для зума -->
+<div id="zoomModal" class="zoom-modal">
+    <span class="zoom-close">&times;</span>
+    <img class="zoom-modal-content" id="zoomImage" src="" alt="Увеличенное изображение">
+</div>
+
 <footer>
     <div class="footer-top">
         <div class="footer-left">
@@ -92,10 +98,31 @@
     const loaderMore = document.getElementById('loader-more');
     const profileIcon = document.getElementById('profileIcon');
 
-    let currentPage = 1;
-    let totalProjects = 0;
-    let loading = false;
+    // ---- Зум ----
+    const zoomModal = document.getElementById('zoomModal');
+    const zoomImage = document.getElementById('zoomImage');
+    const zoomClose = document.querySelector('.zoom-close');
 
+    function openZoom(src) {
+        zoomImage.src = src;
+        zoomModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeZoom() {
+        zoomModal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    zoomClose.addEventListener('click', closeZoom);
+    zoomModal.addEventListener('click', function(e) {
+        if (e.target === zoomModal) closeZoom();
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && zoomModal.style.display === 'flex') closeZoom();
+    });
+
+    // ---- Корзина ----
     async function updateCartCount() {
         try {
             const resp = await fetch('/api/cart');
@@ -115,7 +142,7 @@
         });
     }
 
-    // Создание плитки со слайдером и описанием под ней
+    // ---- Создание плитки ----
     function createProjectTile(proj) {
         const tile = document.createElement('div');
         tile.className = 'gallery-tile';
@@ -133,7 +160,7 @@
         sliderContainer.appendChild(sliderInner);
         tile.appendChild(sliderContainer);
 
-        // Информация (без названия, только количество фото)
+        // Информация
         const infoDiv = document.createElement('div');
         infoDiv.className = 'tile-info';
         const countSpan = document.createElement('div');
@@ -147,7 +174,7 @@
         infoDiv.appendChild(detailBtn);
         tile.appendChild(infoDiv);
 
-        // Контейнер для описания (скрыт по умолчанию)
+        // Описание
         const descContainer = document.createElement('div');
         descContainer.className = 'tile-description';
         descContainer.style.display = 'none';
@@ -155,14 +182,13 @@
         tile.appendChild(descContainer);
 
         // Загружаем изображения для слайдера
-        loadTileImages(proj.folder, sliderInner);
+        loadTileImages(proj.folder, sliderInner, sliderContainer);
 
-        // Обработчик кнопки "Подробнее" — раскрытие/скрытие описания
+        // Обработчик кнопки "Подробнее"
         detailBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const folder = detailBtn.dataset.folder;
 
-            // Если описание уже загружено, просто переключаем видимость
             if (descContainer.dataset.loaded === 'true') {
                 const isHidden = descContainer.style.display === 'none';
                 descContainer.style.display = isHidden ? 'block' : 'none';
@@ -170,7 +196,6 @@
                 return;
             }
 
-            // Загружаем описание
             try {
                 const resp = await fetch(`/api/gallery/project/${encodeURIComponent(folder)}`);
                 if (!resp.ok) throw new Error('Failed to load description');
@@ -191,7 +216,7 @@
         return tile;
     }
 
-    async function loadTileImages(folder, container) {
+    async function loadTileImages(folder, container, sliderContainer) {
         try {
             const resp = await fetch(`/api/gallery/project/${encodeURIComponent(folder)}`);
             if (!resp.ok) throw new Error('Failed to load images');
@@ -212,8 +237,16 @@
                 slide.appendChild(img);
                 container.appendChild(slide);
             });
-            // Инициализируем слайдер для этой плитки
-            initTileSlider(container.parentElement, images.length);
+
+            // Обработчик клика по слайдеру для зума (делегирование)
+            sliderContainer.addEventListener('click', function(e) {
+                const img = e.target.closest('.tile-slide img');
+                if (img) {
+                    openZoom(img.src);
+                }
+            });
+
+            initTileSlider(sliderContainer, images.length);
         } catch (err) {
             console.error('Error loading images for', folder, err);
             container.innerHTML = '<div class="tile-error">Ошибка загрузки</div>';
@@ -269,7 +302,7 @@
         });
     }
 
-    // Загрузка проектов
+    // ---- Загрузка проектов ----
     async function loadProjects(page, append = false) {
         if (loading) return;
         loading = true;
@@ -317,11 +350,15 @@
         }
     }
 
+    let currentPage = 1;
+    let totalProjects = 0;
+    let loading = false;
+
     loadMoreBtn.addEventListener('click', () => {
         loadProjects(currentPage + 1, true);
     });
 
-    // Обновление цвета профиля
+    // ---- Профиль ----
     async function updateProfileIcon() {
         try {
             const resp = await fetch('/api/auth/me');
@@ -336,7 +373,7 @@
         } catch(e) { console.error(e); }
     }
 
-    // Инициализация
+    // ---- Запуск ----
     document.addEventListener('DOMContentLoaded', () => {
         updateProfileIcon();
         updateCartCount();
