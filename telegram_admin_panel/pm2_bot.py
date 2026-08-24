@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления скриптами PM2.
-Версия 1.0
+Версия 2.1
+- При выполнении restart/start/stop для отдельного скрипта вместо результата действия
+  выводится статус всех скриптов (как при нажатии кнопки "Статус всех").
+- После отправки статуса меню с кнопками обновляется (редактируется) – чат не захламляется.
 """
 import asyncio
 import logging
 import os
+import re
 import sys
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -32,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------------- Чтение конфигураций -------------------------
-def read_token():
+def read_token() -> str:
     if not TOKEN_FILE.exists():
         logger.error(f"Файл token.txt не найден: {TOKEN_FILE}")
         sys.exit(1)
@@ -47,7 +51,7 @@ def read_token():
         logger.error(f"Ошибка чтения token.txt: {e}")
         sys.exit(1)
 
-def read_admin_ids():
+def read_admin_ids() -> List[int]:
     if not ADMIN_FILE.exists():
         logger.warning(f"Файл admin_ids.txt не найден: {ADMIN_FILE}")
         return []
@@ -88,15 +92,50 @@ def get_scripts_info() -> List[Dict[str, str]]:
         scripts.append({"name": name, "description": description})
     return sorted(scripts, key=lambda x: x["name"])
 
-async def run_pm2_command(action: str, script_name: str = None) -> str:
+def parse_pm2_status(raw_output: str) -> str:
+    """
+    Парсит вывод `pm2 status` и возвращает краткий отчёт:
+    имя_скрипта: состояние (online/offline/stopped/...)
+    """
+    # Удаляем ANSI-последовательности
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    clean = ansi_escape.sub('', raw_output)
+
+    lines = clean.splitlines()
+    result_lines = []
+
+    for line in lines:
+        # Нас интересуют строки, начинающиеся с '│' и не являющиеся линиями таблицы
+        if not line.startswith('│'):
+            continue
+        if any(ch in line for ch in ('─', '┬', '┼', '┌', '├', '└')):
+            continue
+        # Разбиваем по вертикальной черте
+        parts = [p.strip() for p in line.split('│')]
+        # Убираем пустые части (первая и последняя могут быть пустыми)
+        parts = [p for p in parts if p]
+        if len(parts) < 9:
+            continue
+        # Имя находится во второй колонке (индекс 1), статус — в девятой (индекс 8)
+        name = parts[1].strip()
+        status = parts[8].strip()
+        if name and status:
+            result_lines.append(f"{name}: {status}")
+
+    if not result_lines:
+        return "Нет данных о статусе скриптов."
+    return "\n".join(result_lines)
+
+async def run_pm2_command(action: str, script_name: Optional[str] = None) -> str:
     """
     Выполняет команду pm2.
     action: 'restart', 'start', 'stop', 'status'
-    script_name: имя скрипта или None / 'all' для всех
+    script_name: имя скрипта или None/'all' для всех
     Возвращает строку с результатом.
+    Для action='status' возвращает краткий отформатированный список.
     """
     if action == "status":
-        # Для status всегда выполняем без имени (вывод всех)
+        # Всегда запрашиваем статус всех процессов
         cmd = ["pm2", "status"]
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -105,10 +144,11 @@ async def run_pm2_command(action: str, script_name: str = None) -> str:
         )
         stdout, stderr = await process.communicate()
         out = stdout.decode().strip() or stderr.decode().strip()
-        return out or "Команда выполнена без вывода."
+        return parse_pm2_status(out) if out else "Команда выполнена без вывода."
 
-    # Для остальных действий
+    # Действия restart/start/stop — только для отдельных скриптов (не для всех)
     if script_name is None or script_name == "all":
+        # Групповые операции удалены, но на всякий случай оставляем обработку
         scripts = get_scripts_info()
         if not scripts:
             return "Нет скриптов для управления."
@@ -133,7 +173,8 @@ async def run_pm2_command(action: str, script_name: str = None) -> str:
             stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await process.communicate()
-        return stdout.decode().strip() or stderr.decode().strip() or f"Команда {action} для {script_name} выполнена."
+        out = stdout.decode().strip() or stderr.decode().strip()
+        return out or f"Команда {action} для {script_name} выполнена."
 
 # ------------------------- Обработчики бота -------------------------
 @admin_only
@@ -154,25 +195,21 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new_mess
                 text += f"   {s['description']}\n"
 
     keyboard = []
+    # Кнопки для каждого скрипта: перезапуск, запуск, остановка (без статуса)
     for s in scripts:
         name = s['name']
         row = [
             InlineKeyboardButton("🔄", callback_data=f"restart_{name}"),
             InlineKeyboardButton("▶️", callback_data=f"start_{name}"),
             InlineKeyboardButton("⏹", callback_data=f"stop_{name}"),
-            InlineKeyboardButton("📊", callback_data=f"status_{name}"),
         ]
         keyboard.append(row)
 
+    # Отдельная кнопка статуса всех
     if scripts:
-        all_row = [
-            InlineKeyboardButton("🔄 Все", callback_data="restart_all"),
-            InlineKeyboardButton("▶️ Все", callback_data="start_all"),
-            InlineKeyboardButton("⏹ Все", callback_data="stop_all"),
-            InlineKeyboardButton("📊 Все", callback_data="status_all"),
-        ]
-        keyboard.append(all_row)
+        keyboard.append([InlineKeyboardButton("📊 Статус всех", callback_data="status_all")])
 
+    # Вспомогательные кнопки
     keyboard.append([InlineKeyboardButton("🔄 Обновить список", callback_data="refresh")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
 
@@ -210,7 +247,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "main_menu":
-        # Показываем главное меню (это же меню, просто обновляем)
         await show_menu(update, context, new_message=False)
         return
 
@@ -218,33 +254,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_menu(update, context, new_message=False)
         return
 
-    # Формат: action_scriptname, например "restart_myapp" или "restart_all"
+    if data == "status_all":
+        # Запрос статуса всех скриптов
+        result = await run_pm2_command("status")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"📊 *Статус всех скриптов:*\n```\n{result}\n```",
+            parse_mode="Markdown"
+        )
+        await show_menu(update, context, new_message=False)
+        return
+
+    # Обработка действий для отдельных скриптов: restart_xxx, start_xxx, stop_xxx
     parts = data.split("_", 1)
     if len(parts) != 2:
         await query.edit_message_text("❌ Неверная команда.")
         return
 
     action, script = parts
-    # Допустимые действия: restart, start, stop, status
-    if action not in ("restart", "start", "stop", "status"):
+    if action not in ("restart", "start", "stop"):
         await query.edit_message_text("❌ Неизвестное действие.")
         return
 
-    # Выполняем команду
-    result = await run_pm2_command(action, script)
+    # Выполняем команду для конкретного скрипта (результат не выводим)
+    await run_pm2_command(action, script)
 
-    # Отправляем результат в отдельном сообщении
+    # Отправляем статус всех скриптов (как при нажатии на кнопку "Статус всех")
+    status_result = await run_pm2_command("status")
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"⚙️ *{action.capitalize()}* для `{script}`:\n```\n{result}\n```",
+        text=f"📊 *Статус всех скриптов после действия `{action}` для `{script}`:*\n```\n{status_result}\n```",
         parse_mode="Markdown"
     )
-    # Обновляем меню (возвращаемся к списку)
+
+    # Возвращаемся к меню (редактируем текущее сообщение с кнопками)
     await show_menu(update, context, new_message=False)
 
 @admin_only
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /status – показывает статус всех скриптов."""
+    """Команда /status – показывает статус всех скриптов в кратком виде."""
     result = await run_pm2_command("status")
     await update.message.reply_text(
         f"📊 *Статус всех скриптов:*\n```\n{result}\n```",
@@ -281,7 +329,7 @@ def main():
     # Обработчик всех callback-кнопок (единый)
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("Бот управления PM2 запущен")
+    logger.info("Бот управления PM2 запущен (v2.1)")
     application.run_polling()
 
 if __name__ == "__main__":

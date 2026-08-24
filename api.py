@@ -12,10 +12,15 @@ import json
 import urllib.request
 import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
+import logging
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(24))
 CORS(app, supports_credentials=True)
+
+# Настройка логирования для отладки
+logging.basicConfig(level=logging.INFO)
+app.logger.setLevel(logging.INFO)
 
 
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
@@ -426,7 +431,7 @@ def get_gallery_projects(page=1, limit=10):
             'preview': preview,
             'image_count': len(images),
             'description': description,
-            'date': folder.name  # можно преобразовать в читаемый формат
+            'date': folder.name
         })
     return projects, total
 
@@ -602,6 +607,64 @@ def update_profile():
         conn.close()
 
 
+# ========= СМЕНА ПАРОЛЯ (ИСПРАВЛЕННАЯ ВЕРСИЯ) =========
+@app.route('/api/auth/change-password', methods=['POST'])
+def change_password():
+    app.logger.info("Запрос на смену пароля получен")
+    user_id = session.get('user_id')
+    if not user_id:
+        app.logger.warning("Попытка смены пароля без авторизации")
+        return jsonify({'error': 'Не авторизован'}), 401
+
+    data = request.get_json()
+    if not data:
+        app.logger.warning("Пустой JSON в запросе")
+        return jsonify({'error': 'Отсутствуют данные'}), 400
+
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+    confirm_password = data.get('confirm_password')
+
+    if not current_password or not new_password or not confirm_password:
+        app.logger.warning("Не все поля заполнены")
+        return jsonify({'error': 'Все поля обязательны'}), 400
+
+    if new_password != confirm_password:
+        app.logger.warning("Новый пароль и подтверждение не совпадают")
+        return jsonify({'error': 'Новый пароль и подтверждение не совпадают'}), 400
+
+    if len(new_password) < 6:
+        app.logger.warning("Слишком короткий новый пароль")
+        return jsonify({'error': 'Новый пароль должен содержать не менее 6 символов'}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            app.logger.warning(f"Пользователь с id {user_id} не найден")
+            return jsonify({'error': 'Пользователь не найден'}), 404
+
+        if not check_password_hash(row[0], current_password):
+            app.logger.warning(f"Неверный текущий пароль для пользователя {user_id}")
+            return jsonify({'error': 'Неверный текущий пароль'}), 401
+
+        new_hash = generate_password_hash(new_password)
+        cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user_id))
+        conn.commit()
+        app.logger.info(f"Пароль успешно изменён для пользователя {user_id}")
+        return jsonify({'success': True})
+
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Ошибка при смене пароля: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 # ========= ИСТОРИЯ ЗАКАЗОВ =========
 @app.route('/api/orders/history')
 def order_history():
@@ -630,7 +693,6 @@ def order_history():
                 'order_date': row[7].isoformat(),
                 'status': row[8]
             })
-        # Для каждого заказа получим позиции
         for order in orders:
             cur.execute("""
                 SELECT product_code, product_name, material_name, cost, quantity
@@ -651,7 +713,6 @@ def order_history():
 
 # ========= КОРЗИНА (сессия) =========
 def get_cart_session():
-    """Возвращает список товаров в корзине из сессии"""
     if 'cart' not in session:
         session['cart'] = []
     return session['cart']
@@ -738,7 +799,7 @@ def clear_cart():
     return jsonify({'success': True})
 
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА (с привязкой к пользователю, если авторизован) =========
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
@@ -750,7 +811,6 @@ def create_order():
     if not cart:
         return jsonify({'error': 'Корзина пуста'}), 400
 
-    # session_id всегда генерируется, если отсутствует
     session_id = session.get('session_id')
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -781,11 +841,7 @@ def create_order():
                   item['cost'], item.get('quantity', 1)))
 
         conn.commit()
-
-        # Отправка уведомления
         send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
-
-        # Очистка корзины
         session.pop('cart', None)
         session.modified = True
 
@@ -852,9 +908,7 @@ def register_page():
 
 @app.route('/profile')
 def profile_page():
-    # Проверяем авторизацию на сервере, чтобы не было возврата на профиль по кнопке "Назад"
     if 'user_id' not in session:
-        # Перенаправляем на страницу входа с параметром next, чтобы после входа вернуться на профиль
         return redirect('/login?next=/profile')
     return send_from_directory('webpages', 'profile.html')
 
@@ -879,7 +933,6 @@ def favicon():
     return send_from_directory('media/interface', 'favicon.png')
 
 
-# ----- Запуск -----
 if __name__ == '__main__':
     Path('webpages').mkdir(exist_ok=True)
     Path('media/products').mkdir(parents=True, exist_ok=True)

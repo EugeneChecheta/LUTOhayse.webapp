@@ -58,10 +58,9 @@
     </section>
 </header>
 
+<!-- Карусель (без стрелок) -->
 <section class="carousel" id="mainCarousel">
     <div class="carousel-inner"></div>
-    <button class="carousel-control prev" id="prevSlide">❮</button>
-    <button class="carousel-control next" id="nextSlide">❯</button>
     <div class="carousel-dots" id="carouselDots"></div>
 </section>
 
@@ -215,6 +214,7 @@
     updateCartCount();
     setInterval(updateCartCount, 5000);
 
+    // ---- Карусель (без стрелок) ----
     const carouselImages = [
         '/media/index/carousel_1.webp',
         '/media/index/carousel_2.webp',
@@ -267,7 +267,6 @@
     }
 
     function nextSlide() { goToSlide(currentSlide + 1); }
-    function prevSlide() { goToSlide(currentSlide - 1); }
     function resetAutoSlide() {
         if (autoInterval) clearInterval(autoInterval);
         autoInterval = setInterval(() => nextSlide(), 4000);
@@ -276,7 +275,6 @@
     async function loadFeaturedProducts() {
         const container = document.getElementById('featuredProducts');
         try {
-            // загружаем только первую страницу для блока "Популярные"
             const data = await fetchJSON('/api/products?page=1&limit=8');
             const products = data.items || [];
             if (!products.length) {
@@ -328,8 +326,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         buildCarousel();
-        document.getElementById('prevSlide').addEventListener('click', prevSlide);
-        document.getElementById('nextSlide').addEventListener('click', nextSlide);
         resetAutoSlide();
         loadFeaturedProducts();
         loadGalleryPreview();

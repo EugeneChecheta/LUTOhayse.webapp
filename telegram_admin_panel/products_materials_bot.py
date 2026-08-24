@@ -31,7 +31,7 @@ from telegram.request import HTTPXRequest
 
 # ------------------------- Пути к файлам -------------------------
 BASE_DIR = Path(__file__).parent
-TOKEN_FILE = BASE_DIR / "token.txt"
+TOKEN_FILE = BASE_DIR / "token_products_materials.txt"
 CONFIG_DB_FILE = BASE_DIR / "config_db.txt"
 ADMIN_FILE = BASE_DIR / "admin_ids.txt"
 

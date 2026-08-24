@@ -64,13 +64,31 @@
             border: 1px solid #ddd;
             border-radius: 12px;
         }
-        button {
+        .btn-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 5px;
+        }
+        .btn {
             background: #628b35;
             color: white;
             border: none;
             padding: 10px 20px;
             border-radius: 30px;
             cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #4a6b27;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
         }
         .order-card {
             background: white;
@@ -112,6 +130,74 @@
         }
         .order-item a:hover {
             text-decoration: underline;
+        }
+
+        /* Модальное окно для смены пароля */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background: #fff;
+            margin: 15% auto;
+            padding: 25px;
+            width: 90%;
+            max-width: 480px;
+            border-radius: 20px;
+            position: relative;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        .modal .close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #aaa;
+        }
+        .modal .close:hover {
+            color: black;
+        }
+        .modal h2 {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .modal .form-group {
+            margin-bottom: 18px;
+        }
+        .modal .form-group label {
+            font-weight: 600;
+        }
+        .modal .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            font-size: 16px;
+        }
+        .modal .btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+        }
+        .modal .error-msg {
+            color: #e3342f;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .modal .success-msg {
+            color: #628b35;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -179,13 +265,41 @@
                 <label>Удобное время для связи</label>
                 <input type="text" id="contact_time" placeholder="например: с 10 до 18">
             </div>
-            <button type="submit">Сохранить</button>
+            <div class="btn-row">
+                <button type="submit" class="btn">Сохранить</button>
+                <button type="button" id="changePasswordBtn" class="btn btn-secondary">Изменить пароль</button>
+            </div>
         </form>
     </div>
 
     <div class="orders-block">
         <h2>История заказов</h2>
         <div id="ordersList" class="loader">Загрузка...</div>
+    </div>
+</div>
+
+<!-- Модальное окно смены пароля -->
+<div id="changePasswordModal" class="modal">
+    <div class="modal-content">
+        <span class="close" id="closeChangePassword">&times;</span>
+        <h2>Смена пароля</h2>
+        <div id="passwordModalError" class="error-msg" style="display:none;"></div>
+        <div id="passwordModalSuccess" class="success-msg" style="display:none;"></div>
+        <form id="changePasswordForm">
+            <div class="form-group">
+                <label>Текущий пароль</label>
+                <input type="password" id="currentPassword" required autocomplete="current-password">
+            </div>
+            <div class="form-group">
+                <label>Новый пароль</label>
+                <input type="password" id="newPassword" required autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label>Повторите новый пароль</label>
+                <input type="password" id="confirmPassword" required autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn">Сменить пароль</button>
+        </form>
     </div>
 </div>
 
@@ -213,21 +327,48 @@
     let currentUser = null;
     const profileIcon = document.getElementById('profileIcon');
 
+    // Вспомогательная функция для fetch с обработкой ошибок и чтением JSON
+    async function fetchJson(url, options = {}) {
+        const response = await fetch(url, {
+            ...options,
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+        // Пытаемся распарсить ответ как JSON (даже при ошибке)
+        let data = null;
+        let text = '';
+        try {
+            text = await response.text();
+            data = text ? JSON.parse(text) : null;
+        } catch (e) {
+            // Если не JSON, оставляем data = null
+        }
+        if (!response.ok) {
+            // Если есть поле error в ответе – используем его, иначе общее сообщение
+            const errorMsg = data && data.error ? data.error : `Ошибка ${response.status}: ${text || 'Неизвестная ошибка'}`;
+            throw new Error(errorMsg);
+        }
+        return data;
+    }
+
     async function updateCartCount() {
         try {
-            const resp = await fetch('/api/cart');
-            const data = await resp.json();
+            const data = await fetchJson('/api/cart');
             const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
             const cartCountSpan = document.getElementById('cart-count');
             if (cartCountSpan) cartCountSpan.textContent = totalItems;
-        } catch(e) { console.error(e); }
+        } catch(e) {
+            console.error('Не удалось обновить корзину', e);
+        }
     }
     updateCartCount();
 
     async function loadUserAndProfile() {
         try {
-            const resp = await fetch('/api/auth/me');
-            const data = await resp.json();
+            const data = await fetchJson('/api/auth/me');
             if (!data.authenticated) {
                 window.location.href = '/login';
                 return;
@@ -238,7 +379,7 @@
             document.getElementById('email').value = currentUser.email || '';
             document.getElementById('address').value = currentUser.address || '';
             document.getElementById('contact_time').value = currentUser.contact_time || '';
-            if (profileIcon) profileIcon.style.background = '#628b35'; // авторизован
+            if (profileIcon) profileIcon.style.background = '#628b35';
         } catch (err) {
             console.error(err);
             window.location.href = '/login';
@@ -248,9 +389,7 @@
     async function loadOrders() {
         const container = document.getElementById('ordersList');
         try {
-            const resp = await fetch('/api/orders/history');
-            if (!resp.ok) throw new Error('Unauthorized');
-            const orders = await resp.json();
+            const orders = await fetchJson('/api/orders/history');
             if (orders.length === 0) {
                 container.innerHTML = '<div class="empty">У вас пока нет заказов.</div>';
                 return;
@@ -306,26 +445,121 @@
             contact_time: document.getElementById('contact_time').value.trim()
         };
         try {
-            const resp = await fetch('/api/auth/profile', {
+            const data = await fetchJson('/api/auth/profile', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            const data = await resp.json();
             if (data.success) {
                 alert('Данные обновлены');
             } else {
                 alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
             }
         } catch (err) {
-            alert('Ошибка соединения');
+            alert('Ошибка при обновлении данных: ' + err.message);
         }
     });
 
     document.getElementById('logoutBtn').addEventListener('click', async (e) => {
         e.preventDefault();
-        await fetch('/api/auth/logout', { method: 'POST' });
-        window.location.href = '/';
+        try {
+            await fetchJson('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/';
+        } catch (err) {
+            alert('Ошибка выхода: ' + err.message);
+        }
+    });
+
+    // ========== СМЕНА ПАРОЛЯ (исправленная версия) ==========
+    const changePasswordBtn = document.getElementById('changePasswordBtn');
+    const modal = document.getElementById('changePasswordModal');
+    const closeModal = document.getElementById('closeChangePassword');
+    const passwordForm = document.getElementById('changePasswordForm');
+    const errorDiv = document.getElementById('passwordModalError');
+    const successDiv = document.getElementById('passwordModalSuccess');
+
+    function openModal() {
+        modal.style.display = 'block';
+        errorDiv.style.display = 'none';
+        successDiv.style.display = 'none';
+        passwordForm.reset();
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeModalFunc() {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    changePasswordBtn.addEventListener('click', openModal);
+    closeModal.addEventListener('click', closeModalFunc);
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) closeModalFunc();
+    });
+
+    passwordForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorDiv.style.display = 'none';
+        successDiv.style.display = 'none';
+
+        const current = document.getElementById('currentPassword').value;
+        const newPwd = document.getElementById('newPassword').value;
+        const confirmPwd = document.getElementById('confirmPassword').value;
+
+        if (!current || !newPwd || !confirmPwd) {
+            errorDiv.textContent = 'Все поля обязательны для заполнения';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        if (newPwd !== confirmPwd) {
+            errorDiv.textContent = 'Новый пароль и подтверждение не совпадают';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        if (newPwd.length < 6) {
+            errorDiv.textContent = 'Пароль должен содержать не менее 6 символов';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        try {
+            // Используем fetch напрямую, чтобы получить тело ошибки
+            const response = await fetch('/api/auth/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    current_password: current,
+                    new_password: newPwd,
+                    confirm_password: confirmPwd
+                })
+            });
+
+            const text = await response.text();
+            let data = null;
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                // если ответ не JSON
+                data = { error: text || 'Неизвестная ошибка сервера' };
+            }
+
+            if (response.ok && data.success) {
+                successDiv.textContent = 'Пароль успешно изменён!';
+                successDiv.style.display = 'block';
+                setTimeout(closeModalFunc, 1500);
+            } else {
+                // Показываем ошибку из ответа или общее сообщение
+                const errorMsg = data && data.error ? data.error : `Ошибка ${response.status}`;
+                errorDiv.textContent = errorMsg;
+                errorDiv.style.display = 'block';
+            }
+        } catch (err) {
+            // Сетевая ошибка или ошибка запроса
+            console.error('Ошибка при смене пароля:', err);
+            errorDiv.textContent = 'Ошибка соединения с сервером. Проверьте, запущен ли сервер и доступен ли эндпоинт.';
+            errorDiv.style.display = 'block';
+        }
     });
 
     loadUserAndProfile();

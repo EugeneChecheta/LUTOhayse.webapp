@@ -77,6 +77,35 @@
             color: #628b35;
             text-decoration: none;
         }
+        /* === НОВЫЙ БЛОК ПОДДЕРЖКИ === */
+        .support-block {
+            margin-top: 24px;
+            text-align: center;
+            padding: 16px 12px;
+            background: #f9f9f9;
+            border-radius: 16px;
+            border: 1px solid #eee;
+        }
+        .support-block p {
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #333;
+        }
+        .support-btn {
+            display: inline-block;
+            background: #628b35;
+            color: white;
+            padding: 8px 28px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .support-btn:hover {
+            background: #4a6b27;
+        }
+        /* ======================== */
     </style>
 </head>
 <body>
@@ -130,6 +159,12 @@
     </form>
     <div class="register-link">
         Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+    </div>
+
+    <!-- НОВЫЙ БЛОК: поддержка -->
+    <div class="support-block">
+        <p>Возникли проблемы со входом в аккаунт? Напишите нам!</p>
+        <a href="https://vk.ru/lutohay" target="_blank" class="support-btn">Написать в ВК</a>
     </div>
 </div>
 
