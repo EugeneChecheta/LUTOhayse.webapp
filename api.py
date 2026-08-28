@@ -113,7 +113,7 @@ def send_order_notification(order_id, user_name, phone, total_sum):
         threading.Thread(target=send_to_admin, args=(admin_id,)).start()
 
 
-# ----- Вспомогательная функция для создания таблиц, если их нет -----
+# ----- Вспомогательная функция для создания таблиц, если их нет, и добавления недостающих колонок -----
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -169,6 +169,102 @@ def init_db():
         cur.execute("""
             ALTER TABLE orders ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
         """)
+
+    # Добавляем колонку extra_data в order_items для хранения деталей топперов
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM information_schema.columns 
+        WHERE table_name='order_items' AND column_name='extra_data'
+    """)
+    if cur.fetchone()[0] == 0:
+        cur.execute("""
+            ALTER TABLE order_items ADD COLUMN extra_data TEXT;
+        """)
+
+    # --- Таблицы для топперов (создаются, если отсутствуют) ---
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topper_sizes (
+            id SERIAL PRIMARY KEY,
+            size VARCHAR(50) NOT NULL UNIQUE
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topper_layers (
+            id SERIAL PRIMARY KEY,
+            code VARCHAR(100) NOT NULL UNIQUE,
+            name VARCHAR(200) NOT NULL,
+            description TEXT
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topper_covers (
+            id SERIAL PRIMARY KEY,
+            code VARCHAR(100) NOT NULL UNIQUE,
+            name VARCHAR(200) NOT NULL,
+            description TEXT
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topper_layer_prices (
+            id SERIAL PRIMARY KEY,
+            layer_id INTEGER NOT NULL,
+            size_id INTEGER NOT NULL,
+            price INTEGER NOT NULL CHECK (price >= 0),
+            CONSTRAINT fk_tlp_layer
+                FOREIGN KEY (layer_id)
+                REFERENCES topper_layers(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_tlp_size
+                FOREIGN KEY (size_id)
+                REFERENCES topper_sizes(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_tlp_layer_size UNIQUE(layer_id, size_id)
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topper_cover_prices (
+            id SERIAL PRIMARY KEY,
+            cover_id INTEGER NOT NULL,
+            size_id INTEGER NOT NULL,
+            price INTEGER NOT NULL CHECK (price >= 0),
+            CONSTRAINT fk_tcp_cover
+                FOREIGN KEY (cover_id)
+                REFERENCES topper_covers(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_tcp_size
+                FOREIGN KEY (size_id)
+                REFERENCES topper_sizes(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_tcp_cover_size UNIQUE(cover_id, size_id)
+        );
+    """)
+
+    # --- Добавление новых колонок в существующие таблицы, если их нет ---
+    # Для topper_layers: color_text, is_hidden
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM information_schema.columns 
+        WHERE table_name='topper_layers' AND column_name='color_text'
+    """)
+    if cur.fetchone()[0] == 0:
+        cur.execute("ALTER TABLE topper_layers ADD COLUMN color_text VARCHAR(20) DEFAULT '#000000';")
+
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM information_schema.columns 
+        WHERE table_name='topper_layers' AND column_name='is_hidden'
+    """)
+    if cur.fetchone()[0] == 0:
+        cur.execute("ALTER TABLE topper_layers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
+
+    # Для topper_covers: is_hidden
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM information_schema.columns 
+        WHERE table_name='topper_covers' AND column_name='is_hidden'
+    """)
+    if cur.fetchone()[0] == 0:
+        cur.execute("ALTER TABLE topper_covers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
 
     conn.commit()
     cur.close()
@@ -607,7 +703,7 @@ def update_profile():
         conn.close()
 
 
-# ========= СМЕНА ПАРОЛЯ (ИСПРАВЛЕННАЯ ВЕРСИЯ) =========
+# ========= СМЕНА ПАРОЛЯ =========
 @app.route('/api/auth/change-password', methods=['POST'])
 def change_password():
     app.logger.info("Запрос на смену пароля получен")
@@ -695,11 +791,28 @@ def order_history():
             })
         for order in orders:
             cur.execute("""
-                SELECT product_code, product_name, material_name, cost, quantity
+                SELECT product_code, product_name, material_name, cost, quantity, extra_data
                 FROM order_items
                 WHERE order_id = %s
             """, (order['id'],))
-            items = [{'product_code': r[0], 'product_name': r[1], 'material_name': r[2], 'cost': r[3], 'quantity': r[4]} for r in cur.fetchall()]
+            items = []
+            for r in cur.fetchall():
+                item = {
+                    'product_code': r[0],
+                    'product_name': r[1],
+                    'material_name': r[2],
+                    'cost': r[3],
+                    'quantity': r[4]
+                }
+                if r[5] is not None:  # extra_data для топпера
+                    try:
+                        extra = json.loads(r[5])
+                        item['extra_data'] = extra
+                        # Отмечаем, что это топпер
+                        item['is_topper'] = True
+                    except:
+                        pass
+                items.append(item)
             order['items'] = items
             order['total'] = sum(it['cost'] * it['quantity'] for it in items)
         return jsonify(orders)
@@ -750,6 +863,7 @@ def add_to_cart():
 
     new_item = {
         'id': str(uuid.uuid4()),
+        'type': 'product',  # метка для отличия от топперов
         'product_code': data['product_code'],
         'product_name': data['product_name'],
         'material_id': data['material_id'],
@@ -799,6 +913,208 @@ def clear_cart():
     return jsonify({'success': True})
 
 
+# ========= ТОППЕРЫ: справочники =========
+
+@app.route('/api/topper/sizes')
+def topper_sizes():
+    """Возвращает список размеров (только id и name). Цена размера отсутствует."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, size FROM topper_sizes ORDER BY id")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        result = []
+        for r in rows:
+            size_str = r[1]
+            width = None
+            length = None
+            if 'x' in size_str:
+                parts = size_str.split('x')
+                if len(parts) == 2:
+                    try:
+                        width = int(parts[0].strip())
+                        length = int(parts[1].strip())
+                    except:
+                        pass
+            result.append({
+                'id': r[0],
+                'name': size_str,
+                'width': width,
+                'length': length,
+                'price': 0
+            })
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"API /topper/sizes error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/topper/layers')
+def topper_layers():
+    """Возвращает список слоёв с ценами для указанного размера, исключая скрытые, с цветом текста."""
+    size_id = request.args.get('size_id', type=int)
+    if size_id is None:
+        return jsonify({'error': 'Параметр size_id обязателен'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT l.id, l.name, l.description, p.price, l.color_text, l.is_hidden
+            FROM topper_layers l
+            JOIN topper_layer_prices p ON l.id = p.layer_id
+            WHERE p.size_id = %s AND (l.is_hidden IS NULL OR l.is_hidden = false)
+            ORDER BY l.id
+        """, (size_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([{
+            'id': r[0],
+            'name': r[1],
+            'description': r[2] or '',
+            'price': r[3] or 0,
+            'color_text': r[4] if r[4] is not None else '#000000',
+            'is_hidden': r[5] if r[5] is not None else False
+        } for r in rows])
+    except Exception as e:
+        app.logger.error(f"API /topper/layers error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/topper/covers')
+def topper_covers():
+    """Возвращает список чехлов с ценами для указанного размера, исключая скрытые."""
+    size_id = request.args.get('size_id', type=int)
+    if size_id is None:
+        return jsonify({'error': 'Параметр size_id обязателен'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.id, c.name, c.description, p.price, c.is_hidden
+            FROM topper_covers c
+            JOIN topper_cover_prices p ON c.id = p.cover_id
+            WHERE p.size_id = %s AND (c.is_hidden IS NULL OR c.is_hidden = false)
+            ORDER BY c.id
+        """, (size_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([{
+            'id': r[0],
+            'name': r[1],
+            'description': r[2] or '',
+            'price': r[3] or 0,
+            'is_hidden': r[4] if r[4] is not None else False
+        } for r in rows])
+    except Exception as e:
+        app.logger.error(f"API /topper/covers error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ========= ДОБАВЛЕНИЕ СОБРАННОГО ТОППЕРА В КОРЗИНУ =========
+@app.route('/api/cart/add-topper', methods=['POST'])
+def add_topper_to_cart():
+    data = request.get_json()
+    size_id = data.get('size_id')
+    layer_ids = data.get('layer_ids', [])
+    cover_id = data.get('cover_id')
+    quantity = data.get('quantity', 1)
+
+    if not size_id or not layer_ids or cover_id is None:
+        return jsonify({'error': 'Необходимо указать размер, хотя бы один слой и чехол'}), 400
+
+    if not isinstance(layer_ids, list) or len(layer_ids) == 0:
+        return jsonify({'error': 'Выберите хотя бы один слой'}), 400
+
+    try:
+        quantity = int(quantity)
+        if quantity < 1:
+            quantity = 1
+    except:
+        quantity = 1
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Получаем размер (только имя)
+        cur.execute("SELECT id, size FROM topper_sizes WHERE id = %s", (size_id,))
+        size_row = cur.fetchone()
+        if not size_row:
+            return jsonify({'error': 'Размер не найден'}), 404
+        size_name = size_row[1]
+
+        # Получаем информацию о слоях (имена и цены)
+        # Используем set для уникальности в запросе, но цены суммируем с учётом дубликатов
+        unique_layer_ids = list(set(layer_ids))
+        if unique_layer_ids:
+            cur.execute("""
+                SELECT l.id, l.name, COALESCE(p.price, 0)
+                FROM topper_layers l
+                LEFT JOIN topper_layer_prices p ON l.id = p.layer_id AND p.size_id = %s
+                WHERE l.id = ANY(%s)
+            """, (size_id, unique_layer_ids))
+            layer_info = {row[0]: {'name': row[1], 'price': row[2]} for row in cur.fetchall()}
+            layers_names = []
+            total_layers_price = 0
+            for lid in layer_ids:
+                if lid not in layer_info:
+                    return jsonify({'error': f'Слой с id {lid} не найден или не имеет цены для данного размера'}), 404
+                layers_names.append(layer_info[lid]['name'])
+                total_layers_price += layer_info[lid]['price']
+        else:
+            total_layers_price = 0
+            layers_names = []
+
+        # Получаем цену чехла
+        cur.execute("""
+            SELECT c.id, c.name, COALESCE(p.price, 0)
+            FROM topper_covers c
+            LEFT JOIN topper_cover_prices p ON c.id = p.cover_id AND p.size_id = %s
+            WHERE c.id = %s
+        """, (size_id, cover_id))
+        cover_row = cur.fetchone()
+        if not cover_row:
+            return jsonify({'error': 'Чехол не найден или не имеет цены для данного размера'}), 404
+        cover_price = cover_row[2] or 0
+        cover_name = cover_row[1]
+
+        total_price = total_layers_price + cover_price
+
+        cart = get_cart_session()
+        new_item = {
+            'id': str(uuid.uuid4()),
+            'type': 'topper',
+            'product_code': 'TOPPER',
+            'product_name': f'Собранный топпер ({size_name})',
+            'material_code': '',
+            'material_name': '',
+            'cost': total_price,
+            'quantity': quantity,
+            'extra_data': {
+                'size_id': size_id,
+                'size_name': size_name,
+                'layer_ids': layer_ids,
+                'layer_names': layers_names,
+                'cover_id': cover_id,
+                'cover_name': cover_name,
+                'total_price': total_price
+            }
+        }
+        cart.append(new_item)
+        save_cart_session(cart)
+
+        return jsonify({'success': True, 'cart': cart})
+    except Exception as e:
+        app.logger.error(f"API /cart/add-topper error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 # ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
@@ -834,11 +1150,22 @@ def create_order():
         for item in cart:
             item_total = item['cost'] * item.get('quantity', 1)
             total_sum += item_total
-            cur.execute("""
-                INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (order_id, item['product_code'], item['product_name'], item['material_code'], item['material_name'],
-                  item['cost'], item.get('quantity', 1)))
+
+            if item.get('type') == 'topper' and item.get('extra_data'):
+                extra_json = json.dumps(item['extra_data'])
+                cur.execute("""
+                    INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity, extra_data)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (order_id, item['product_code'], item['product_name'],
+                      item.get('material_code', ''), item.get('material_name', ''),
+                      item['cost'], item.get('quantity', 1), extra_json))
+            else:
+                cur.execute("""
+                    INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (order_id, item['product_code'], item['product_name'],
+                      item['material_code'], item['material_name'],
+                      item['cost'], item.get('quantity', 1)))
 
         conn.commit()
         send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
@@ -921,6 +1248,15 @@ def gallery_page():
 @app.route('/gallery.css')
 def gallery_css():
     return send_from_directory('webpages', 'gallery.css')
+
+
+@app.route('/toppers')
+def toppers_page():
+    return send_from_directory('webpages', 'toppers.html')
+
+@app.route('/toppers.css')
+def toppers_css():
+    return send_from_directory('webpages', 'toppers.css')
 
 
 @app.route('/media/<path:filename>')

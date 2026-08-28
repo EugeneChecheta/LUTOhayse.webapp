@@ -1,0 +1,361 @@
+-- =====================================================================
+-- ОБЪЕДИНЁННАЯ БАЗА ДАННЫХ "LUTO hayse"
+-- PostgreSQL
+-- =====================================================================
+
+-- Удаляем все таблицы (с каскадным удалением зависимостей)
+DROP TABLE IF EXISTS topper_order_item_layers CASCADE;
+DROP TABLE IF EXISTS topper_order_items CASCADE;
+DROP TABLE IF EXISTS topper_orders CASCADE;
+DROP TABLE IF EXISTS topper_extra_features CASCADE;
+DROP TABLE IF EXISTS topper_main_features CASCADE;
+DROP TABLE IF EXISTS topper_main_features_types CASCADE;
+DROP TABLE IF EXISTS topper_layer_prices CASCADE;
+DROP TABLE IF EXISTS topper_cover_prices CASCADE;
+DROP TABLE IF EXISTS topper_layers CASCADE;
+DROP TABLE IF EXISTS topper_covers CASCADE;
+DROP TABLE IF EXISTS topper_sizes CASCADE;
+DROP TABLE IF EXISTS toppers CASCADE;
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS flags_for_products CASCADE;
+DROP TABLE IF EXISTS materials_for_products CASCADE;
+DROP TABLE IF EXISTS product_main_features CASCADE;
+DROP TABLE IF EXISTS product_extra_features CASCADE;
+DROP TABLE IF EXISTS flags CASCADE;
+DROP TABLE IF EXISTS materials CASCADE;
+DROP TABLE IF EXISTS materials_type CASCADE;
+DROP TABLE IF EXISTS main_features_types CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS products_type CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- ==================== ПОЛЬЗОВАТЕЛИ ====================
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    phone VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(256) NOT NULL,
+    full_name VARCHAR(200),
+    email VARCHAR(200),
+    address TEXT,
+    contact_time VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==================== ПРОДУКТЫ (обычные товары) ====================
+CREATE TABLE products_type (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE products (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    products_type_id INTEGER NOT NULL,
+    min_cost INTEGER NULL,
+    CONSTRAINT fk_products_type
+        FOREIGN KEY (products_type_id)
+        REFERENCES products_type(id)
+        ON DELETE RESTRICT
+);
+
+CREATE TABLE flags (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE flags_for_products (
+    products_id INTEGER NOT NULL,
+    flags_id INTEGER NOT NULL,
+    PRIMARY KEY (products_id, flags_id),
+    CONSTRAINT fk_ffp_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_ffp_flag
+        FOREIGN KEY (flags_id)
+        REFERENCES flags(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE materials_type (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE materials (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    materials_type_id INTEGER NOT NULL,
+    CONSTRAINT fk_materials_type
+        FOREIGN KEY (materials_type_id)
+        REFERENCES materials_type(id)
+        ON DELETE RESTRICT
+);
+
+CREATE TABLE materials_for_products (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    products_id INTEGER NOT NULL,
+    materials_type_id INTEGER NOT NULL,
+    cost INTEGER NOT NULL CHECK (cost >= 0),
+    CONSTRAINT fk_mfp_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_mfp_material_type
+        FOREIGN KEY (materials_type_id)
+        REFERENCES materials_type(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT uq_product_material_type UNIQUE(products_id, materials_type_id)
+);
+
+CREATE TABLE main_features_types (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE product_main_features (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    products_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_pmf_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_pmf_feature
+        FOREIGN KEY (feature_id)
+        REFERENCES main_features_types(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_product_feature UNIQUE(products_id, feature_id)
+);
+
+CREATE TABLE product_extra_features (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    products_id INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_pef_product
+        FOREIGN KEY (products_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE
+);
+
+-- ==================== ЗАКАЗЫ (обычные товары) ====================
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_name VARCHAR(200) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(200),
+    address TEXT,
+    comment TEXT,
+    contact_time VARCHAR(100),
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'Ожидает подтверждения'
+);
+
+CREATE TABLE order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+    product_code VARCHAR(100) NOT NULL,
+    product_name VARCHAR(200) NOT NULL,
+    material_code VARCHAR(100) NOT NULL,
+    material_name VARCHAR(200) NOT NULL,
+    cost INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1
+);
+
+-- ==================== ТОПЕРЫ ====================
+CREATE TABLE toppers (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE topper_sizes (
+    id SERIAL PRIMARY KEY,
+    size VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE topper_layers (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT
+);
+
+CREATE TABLE topper_covers (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT
+);
+
+CREATE TABLE topper_layer_prices (
+    id SERIAL PRIMARY KEY,
+    layer_id INTEGER NOT NULL,
+    size_id INTEGER NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    CONSTRAINT fk_tlp_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES topper_layers(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_tlp_size
+        FOREIGN KEY (size_id)
+        REFERENCES topper_sizes(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_tlp_layer_size UNIQUE(layer_id, size_id)
+);
+
+CREATE TABLE topper_cover_prices (
+    id SERIAL PRIMARY KEY,
+    cover_id INTEGER NOT NULL,
+    size_id INTEGER NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    CONSTRAINT fk_tcp_cover
+        FOREIGN KEY (cover_id)
+        REFERENCES topper_covers(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_tcp_size
+        FOREIGN KEY (size_id)
+        REFERENCES topper_sizes(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_tcp_cover_size UNIQUE(cover_id, size_id)
+);
+
+CREATE TABLE topper_main_features_types (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE topper_main_features (
+    id SERIAL PRIMARY KEY,
+    topper_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_tmf_topper
+        FOREIGN KEY (topper_id)
+        REFERENCES toppers(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_tmf_feature
+        FOREIGN KEY (feature_id)
+        REFERENCES topper_main_features_types(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_tmf_topper_feature UNIQUE(topper_id, feature_id)
+);
+
+CREATE TABLE topper_extra_features (
+    id SERIAL PRIMARY KEY,
+    topper_id INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_tef_topper
+        FOREIGN KEY (topper_id)
+        REFERENCES toppers(id)
+        ON DELETE CASCADE
+);
+
+-- ==================== ЗАКАЗЫ ТОПЕРОВ ====================
+CREATE TABLE topper_orders (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL,
+    user_id INTEGER NULL,
+    user_name VARCHAR(200) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(200),
+    address TEXT,
+    comment TEXT,
+    contact_time VARCHAR(100),
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'Ожидает подтверждения',
+    CONSTRAINT fk_to_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+);
+
+CREATE TABLE topper_order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL,
+    topper_id INTEGER NOT NULL,
+    size_id INTEGER NOT NULL,
+    cover_id INTEGER NOT NULL,
+    total_cost INTEGER NOT NULL CHECK (total_cost >= 0),
+    quantity INTEGER DEFAULT 1 CHECK (quantity > 0),
+    CONSTRAINT fk_toi_order
+        FOREIGN KEY (order_id)
+        REFERENCES topper_orders(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_toi_topper
+        FOREIGN KEY (topper_id)
+        REFERENCES toppers(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_toi_size
+        FOREIGN KEY (size_id)
+        REFERENCES topper_sizes(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_toi_cover
+        FOREIGN KEY (cover_id)
+        REFERENCES topper_covers(id)
+        ON DELETE RESTRICT
+);
+
+CREATE TABLE topper_order_item_layers (
+    id SERIAL PRIMARY KEY,
+    order_item_id INTEGER NOT NULL,
+    layer_id INTEGER NOT NULL,
+    CONSTRAINT fk_toil_order_item
+        FOREIGN KEY (order_item_id)
+        REFERENCES topper_order_items(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_toil_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES topper_layers(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT uq_toil_item_layer UNIQUE(order_item_id, layer_id)
+);
+
+-- ==================== ИНДЕКСЫ ====================
+-- Обычные товары
+CREATE INDEX idx_products_code ON products(code);
+CREATE INDEX idx_products_type ON products(products_type_id);
+CREATE INDEX idx_materials_code ON materials(code);
+CREATE INDEX idx_flags_name ON flags(name);
+CREATE INDEX idx_materials_type_name ON materials_type(name);
+CREATE INDEX idx_mfp_product ON materials_for_products(products_id);
+CREATE INDEX idx_ffp_product ON flags_for_products(products_id);
+CREATE INDEX idx_main_features_types_name ON main_features_types(name);
+CREATE INDEX idx_pmf_product ON product_main_features(products_id);
+CREATE INDEX idx_pef_product ON product_extra_features(products_id);
+CREATE INDEX idx_orders_session ON orders(session_id);
+CREATE INDEX idx_orders_date ON orders(order_date);
+CREATE INDEX idx_orders_user ON orders(user_id);
+
+-- Топеры
+CREATE INDEX idx_toppers_code ON toppers(code);
+CREATE INDEX idx_topper_sizes_size ON topper_sizes(size);
+CREATE INDEX idx_topper_layers_code ON topper_layers(code);
+CREATE INDEX idx_topper_covers_code ON topper_covers(code);
+CREATE INDEX idx_tlp_layer ON topper_layer_prices(layer_id);
+CREATE INDEX idx_tlp_size ON topper_layer_prices(size_id);
+CREATE INDEX idx_tcp_cover ON topper_cover_prices(cover_id);
+CREATE INDEX idx_tcp_size ON topper_cover_prices(size_id);
+CREATE INDEX idx_tmf_topper ON topper_main_features(topper_id);
+CREATE INDEX idx_tmf_feature ON topper_main_features(feature_id);
+CREATE INDEX idx_tef_topper ON topper_extra_features(topper_id);
+CREATE INDEX idx_topper_main_features_types_name ON topper_main_features_types(name);
+CREATE INDEX idx_topper_orders_session ON topper_orders(session_id);
+CREATE INDEX idx_topper_orders_date ON topper_orders(order_date);
+CREATE INDEX idx_topper_orders_user ON topper_orders(user_id);
+CREATE INDEX idx_topper_order_items_order ON topper_order_items(order_id);
+CREATE INDEX idx_topper_order_items_topper ON topper_order_items(topper_id);
+CREATE INDEX idx_topper_order_items_size ON topper_order_items(size_id);
+CREATE INDEX idx_topper_order_items_cover ON topper_order_items(cover_id);
+CREATE INDEX idx_topper_order_item_layers_item ON topper_order_item_layers(order_item_id);
+CREATE INDEX idx_topper_order_item_layers_layer ON topper_order_item_layers(layer_id);

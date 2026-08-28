@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Конструктор топпера | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/toppers.css">
+
+    <!-- Дополнительные стили для компактного отображения размеров и "см" -->
+    <style>
+        .size-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .size-card {
+            padding: 8px 6px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f9f9f9;
+            font-size: 0.9rem;
+        }
+        .size-card:hover {
+            background: #f0f0f0;
+        }
+        .size-card.selected {
+            border-color: #628b35;
+            background: #e8f0e0;
+            box-shadow: 0 0 0 2px #628b35;
+        }
+        .size-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+            display: block;
+        }
+        .size-unit {
+            font-size: 0.65rem;
+            color: #888;
+            display: block;
+            margin-top: 2px;
+            text-transform: lowercase;
+        }
+        #step-size h2 {
+            margin-bottom: 8px;
+        }
+        .step-actions {
+            margin-top: 12px;
+        }
+        .btn {
+            padding: 6px 14px;
+            font-size: 0.9rem;
+        }
+        /* Стили для раскрывающегося блока подробностей слоя */
+        .layer-details {
+            margin-top: 6px;
+            padding: 8px 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            border-left: 3px solid #628b35;
+            display: none;
+        }
+        .layer-details.open {
+            display: block;
+        }
+        .layer-details-content {
+            font-size: 0.9rem;
+            color: #333;
+        }
+        .layer-details-content .description {
+            margin-bottom: 4px;
+        }
+        .layer-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 6px;
+            border-bottom: 1px solid #eee;
+            flex-wrap: wrap;
+        }
+        .layer-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .layer-name {
+            font-weight: 500;
+        }
+        .layer-price {
+            color: #628b35;
+            font-weight: 600;
+        }
+        .layer-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .btn-small {
+            padding: 3px 10px;
+            font-size: 0.8rem;
+        }
+        .btn-detail {
+            background: #e0e0e0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-detail:hover {
+            background: #ccc;
+        }
+        .btn-add {
+            background: #628b35;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-add:hover {
+            background: #4f702a;
+        }
+        .btn-remove {
+            background: #e3342f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-remove:hover {
+            background: #b91c1c;
+        }
+        .chosen-layer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .chosen-layer-name {
+            font-weight: 500;
+        }
+        .chosen-layer-price {
+            color: #628b35;
+            font-weight: 600;
+        }
+        .empty-message {
+            color: #888;
+            font-style: italic;
+            padding: 10px 0;
+        }
+        .mobile-toggle {
+            margin-top: 10px;
+            text-align: center;
+        }
+        /* Адаптив */
+        @media (max-width: 600px) {
+            .layer-item {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .layer-info {
+                justify-content: space-between;
+            }
+            .layer-actions {
+                justify-content: flex-end;
+                margin-top: 4px;
+            }
+        }
+    </style>
+
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=111271977', 'ym');
+        ym(111271977, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/111271977" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+</head>
+<body>
+
+<!-- Значок профиля -->
+<div class="profile-icon-wrapper" id="profileIcon">
+    <a href="/profile" class="profile-fixed-link">
+        <img src="/media/interface/profile_icon.svg" alt="Профиль">
+    </a>
+</div>
+
+<!-- Фиксированная корзина -->
+<div class="cart-icon-wrapper">
+    <a href="/cart" class="cart-fixed-link">
+        <img src="/media/interface/cart_icon.svg" alt="Корзина">
+        <span id="cart-count" class="cart-count-badge">0</span>
+    </a>
+</div>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="topper-container">
+    <h1>Конструктор топпера</h1>
+    <div class="topper-steps">
+        <!-- Шаг 1: выбор размера -->
+        <div id="step-size" class="step active">
+            <h2>Шаг 1. Выберите размер</h2>
+            <div class="size-grid" id="sizeGrid"></div>
+            <div class="step-actions">
+                <button class="btn btn-secondary" id="resetBtn">Сбросить</button>
+                <button class="btn btn-primary" id="confirmSizeBtn" disabled>Подтвердить размер</button>
+            </div>
+        </div>
+
+        <!-- Шаг 2: выбор слоёв -->
+        <div id="step-layers" class="step">
+            <h2>Шаг 2. Выберите слои</h2>
+            <div class="layers-layout">
+                <div class="layers-list-container">
+                    <h3>Доступные слои</h3>
+                    <div id="layersList" class="layers-list"></div>
+                </div>
+                <div class="layers-chosen-container">
+                    <h3>Выбранные слои</h3>
+                    <div id="chosenLayers" class="chosen-layers"></div>
+                    <div class="mobile-toggle">
+                        <button id="toggleLayersView" class="btn btn-secondary">Показать выбранные</button>
+                    </div>
+                </div>
+            </div>
+            <div class="step-actions">
+                <button class="btn btn-secondary" id="backFromLayers">Назад</button>
+                <button class="btn btn-secondary" id="resetBtn2">Сбросить</button>
+                <button class="btn btn-primary" id="confirmLayersBtn" disabled>Далее →</button>
+            </div>
+        </div>
+
+        <!-- Шаг 3: выбор чехла -->
+        <div id="step-cover" class="step">
+            <h2>Шаг 3. Выберите чехол</h2>
+            <div class="cover-grid" id="coverGrid"></div>
+            <div class="step-actions">
+                <button class="btn btn-secondary" id="backFromCover">Назад</button>
+                <button class="btn btn-secondary" id="resetBtn3">Сбросить</button>
+                <button class="btn btn-primary" id="addToCartBtn" disabled>Добавить в корзину</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Итоговая цена (всегда видна) -->
+    <div class="total-price-bar">
+        <span>Итоговая стоимость: </span>
+        <span id="totalPriceDisplay">0 ₽</span>
+    </div>
+</main>
+
+<!-- Модалка "Подробнее" (больше не используется, но оставляем на случай, если удалить нельзя) -->
+<div id="layerModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <span class="close" id="closeLayerModal">&times;</span>
+        <h3 id="layerModalTitle"></h3>
+        <p id="layerModalDescription"></p>
+    </div>
+</div>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div>
+    </div>
+</footer>
+
+<script>
+    // ===== Глобальные состояния =====
+    let state = {
+        step: 1,
+        size: null,
+        layers: [],
+        cover: null,
+        allSizes: [],
+        allLayers: [],
+        allCovers: []
+    };
+
+    // ===== DOM-ссылки =====
+    const stepSize = document.getElementById('step-size');
+    const stepLayers = document.getElementById('step-layers');
+    const stepCover = document.getElementById('step-cover');
+    const sizeGrid = document.getElementById('sizeGrid');
+    const confirmSizeBtn = document.getElementById('confirmSizeBtn');
+    const layersList = document.getElementById('layersList');
+    const chosenLayers = document.getElementById('chosenLayers');
+    const confirmLayersBtn = document.getElementById('confirmLayersBtn');
+    const backFromLayers = document.getElementById('backFromLayers');
+    const resetBtn2 = document.getElementById('resetBtn2');
+    const coverGrid = document.getElementById('coverGrid');
+    const addToCartBtn = document.getElementById('addToCartBtn');
+    const backFromCover = document.getElementById('backFromCover');
+    const resetBtn3 = document.getElementById('resetBtn3');
+    const resetBtn = document.getElementById('resetBtn');
+    const totalPriceDisplay = document.getElementById('totalPriceDisplay');
+    const toggleLayersView = document.getElementById('toggleLayersView');
+
+    function updateTotalPrice() {
+        let total = 0;
+        state.layers.forEach(l => total += (l.price || 0));
+        if (state.cover) total += (state.cover.price || 0);
+        totalPriceDisplay.textContent = total + ' ₽';
+    }
+
+    function showStep(step) {
+        stepSize.style.display = step === 1 ? 'block' : 'none';
+        stepLayers.style.display = step === 2 ? 'block' : 'none';
+        stepCover.style.display = step === 3 ? 'block' : 'none';
+        state.step = step;
+    }
+
+    async function loadSizes() {
+        try {
+            const res = await fetch('/api/topper/sizes');
+            if (!res.ok) throw new Error('Ошибка загрузки размеров');
+            state.allSizes = await res.json();
+            renderSizes();
+        } catch (err) {
+            console.error(err);
+            alert('Не удалось загрузить размеры');
+        }
+    }
+
+    async function loadLayersAndCovers(sizeId) {
+        try {
+            const [layersRes, coversRes] = await Promise.all([
+                fetch(`/api/topper/layers?size_id=${sizeId}`),
+                fetch(`/api/topper/covers?size_id=${sizeId}`)
+            ]);
+            if (!layersRes.ok || !coversRes.ok) throw new Error('Ошибка загрузки слоёв или чехлов');
+            state.allLayers = await layersRes.json();
+            state.allCovers = await coversRes.json();
+            renderLayersList();
+            renderCovers();
+            state.layers = [];
+            state.cover = null;
+            renderChosenLayers();
+            addToCartBtn.disabled = true;
+            document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+            confirmLayersBtn.disabled = true;
+            updateTotalPrice();
+        } catch (err) {
+            console.error(err);
+            alert('Не удалось загрузить данные для выбранного размера');
+        }
+    }
+
+    function renderSizes() {
+        sizeGrid.innerHTML = '';
+        state.allSizes.forEach(s => {
+            const card = document.createElement('div');
+            card.className = 'size-card';
+            card.dataset.id = s.id;
+            card.innerHTML = `
+                <span class="size-name">${s.name}</span>
+                <span class="size-unit">см</span>
+            `;
+            card.addEventListener('click', async () => {
+                document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                state.size = s;
+                confirmSizeBtn.disabled = false;
+                await loadLayersAndCovers(s.id);
+                updateTotalPrice();
+            });
+            sizeGrid.appendChild(card);
+        });
+    }
+
+    function renderLayersList() {
+        layersList.innerHTML = '';
+        state.allLayers.forEach(l => {
+            const div = document.createElement('div');
+            div.className = 'layer-item';
+            const color = l.color_text || '#000000';
+            div.innerHTML = `
+                <div class="layer-info">
+                    <span class="layer-name" style="color: ${color};">${l.name}</span>
+                    <span class="layer-price">${l.price} ₽</span>
+                </div>
+                <div class="layer-actions">
+                    <button class="btn btn-small btn-detail" data-id="${l.id}">Подробнее</button>
+                    <button class="btn btn-small btn-add" data-id="${l.id}">Добавить</button>
+                </div>
+                <div class="layer-details" id="details-${l.id}">
+                    <div class="layer-details-content">
+                        <div class="description"><strong>Описание:</strong> ${l.description || 'Описание отсутствует'}</div>
+                    </div>
+                </div>
+            `;
+            layersList.appendChild(div);
+        });
+
+        document.querySelectorAll('.btn-detail').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = parseInt(btn.dataset.id);
+                const detailsDiv = document.getElementById(`details-${id}`);
+                if (detailsDiv) {
+                    detailsDiv.classList.toggle('open');
+                    btn.textContent = detailsDiv.classList.contains('open') ? 'Скрыть' : 'Подробнее';
+                }
+            });
+        });
+
+        document.querySelectorAll('.btn-add').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = parseInt(btn.dataset.id);
+                const layer = state.allLayers.find(l => l.id === id);
+                if (layer) {
+                    state.layers.push({...layer});
+                    renderChosenLayers();
+                    updateTotalPrice();
+                    confirmLayersBtn.disabled = false;
+                }
+            });
+        });
+    }
+
+    function renderChosenLayers() {
+        chosenLayers.innerHTML = '';
+        if (state.layers.length === 0) {
+            chosenLayers.innerHTML = '<div class="empty-message">Слои не выбраны</div>';
+            confirmLayersBtn.disabled = true;
+            return;
+        }
+        state.layers.forEach((l, index) => {
+            const div = document.createElement('div');
+            div.className = 'chosen-layer';
+            const color = l.color_text || '#000000';
+            div.innerHTML = `
+                <span class="chosen-layer-name" style="color: ${color};">${l.name}</span>
+                <span class="chosen-layer-price">${l.price} ₽</span>
+                <button class="btn btn-small btn-remove" data-index="${index}">Убрать</button>
+            `;
+            chosenLayers.appendChild(div);
+        });
+        document.querySelectorAll('.btn-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index);
+                state.layers.splice(idx, 1);
+                renderChosenLayers();
+                updateTotalPrice();
+                confirmLayersBtn.disabled = (state.layers.length === 0);
+            });
+        });
+        confirmLayersBtn.disabled = false;
+    }
+
+    function renderCovers() {
+        coverGrid.innerHTML = '';
+        state.allCovers.forEach(c => {
+            const card = document.createElement('div');
+            card.className = 'cover-card';
+            card.dataset.id = c.id;
+            card.innerHTML = `
+                <div class="cover-name">${c.name}</div>
+                <div class="cover-price">${c.price} ₽</div>
+            `;
+            card.addEventListener('click', () => {
+                document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+                card.classList.add('selected');
+                state.cover = c;
+                addToCartBtn.disabled = false;
+                updateTotalPrice();
+            });
+            coverGrid.appendChild(card);
+        });
+    }
+
+    function goToStep(step) {
+        if (step === 1) {
+            if (state.step === 2) {
+                state.layers = [];
+                renderChosenLayers();
+                confirmLayersBtn.disabled = true;
+            }
+            if (state.step === 3) {
+                state.cover = null;
+                addToCartBtn.disabled = true;
+                document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+            }
+            showStep(1);
+        } else if (step === 2) {
+            if (!state.size) {
+                alert('Сначала выберите размер');
+                return;
+            }
+            if (state.step === 3) {
+                state.cover = null;
+                addToCartBtn.disabled = true;
+                document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+            }
+            showStep(2);
+            confirmLayersBtn.disabled = (state.layers.length === 0);
+        } else if (step === 3) {
+            if (state.layers.length === 0) {
+                alert('Добавьте хотя бы один слой');
+                return;
+            }
+            showStep(3);
+            if (state.cover) addToCartBtn.disabled = false;
+        }
+        updateTotalPrice();
+    }
+
+    function resetAll() {
+        state.size = null;
+        state.layers = [];
+        state.cover = null;
+        state.allLayers = [];
+        state.allCovers = [];
+        document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
+        document.querySelectorAll('.cover-card').forEach(c => c.classList.remove('selected'));
+        confirmSizeBtn.disabled = true;
+        confirmLayersBtn.disabled = true;
+        addToCartBtn.disabled = true;
+        renderChosenLayers();
+        renderLayersList();
+        renderCovers();
+        showStep(1);
+        updateTotalPrice();
+        loadSizes();
+    }
+
+    confirmSizeBtn.addEventListener('click', () => { if (state.size) goToStep(2); });
+    backFromLayers.addEventListener('click', () => goToStep(1));
+    confirmLayersBtn.addEventListener('click', () => goToStep(3));
+    backFromCover.addEventListener('click', () => goToStep(2));
+    resetBtn.addEventListener('click', resetAll);
+    resetBtn2.addEventListener('click', resetAll);
+    resetBtn3.addEventListener('click', resetAll);
+
+    addToCartBtn.addEventListener('click', async () => {
+        if (!state.size || state.layers.length === 0 || !state.cover) {
+            alert('Необходимо выбрать размер, хотя бы один слой и чехол');
+            return;
+        }
+        const payload = {
+            size_id: state.size.id,
+            layer_ids: state.layers.map(l => l.id),
+            cover_id: state.cover.id,
+            quantity: 1
+        };
+        try {
+            const resp = await fetch('/api/cart/add-topper', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (data.success) {
+                alert('Топпер добавлен в корзину!');
+                updateCartCount();
+            } else {
+                alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Не удалось добавить топпер в корзину');
+        }
+    });
+
+    let showChosen = false;
+    toggleLayersView.addEventListener('click', () => {
+        showChosen = !showChosen;
+        const listContainer = document.querySelector('.layers-list-container');
+        const chosenContainer = document.querySelector('.layers-chosen-container');
+        if (showChosen) {
+            listContainer.style.display = 'none';
+            chosenContainer.style.display = 'block';
+            toggleLayersView.textContent = 'Показать все слои';
+        } else {
+            listContainer.style.display = 'block';
+            chosenContainer.style.display = 'block';
+            toggleLayersView.textContent = 'Показать выбранные';
+        }
+    });
+
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            const cartCountSpan = document.getElementById('cart-count');
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
+        } catch (e) { console.error(e); }
+    }
+    updateCartCount();
+    setInterval(updateCartCount, 5000);
+
+    async function updateProfileIcon() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            const profileIcon = document.getElementById('profileIcon');
+            if (profileIcon) {
+                profileIcon.style.background = data.authenticated ? '#628b35' : '#e3342f';
+            }
+        } catch(e) { console.error(e); }
+    }
+    updateProfileIcon();
+
+    loadSizes().then(() => {
+        showStep(1);
+        updateTotalPrice();
+    });
+</script>
+</body>
+</html>

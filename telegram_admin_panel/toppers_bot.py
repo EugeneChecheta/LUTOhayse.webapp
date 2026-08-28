@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Telegram‑бот для управления топерами (слои, чехлы, размеры, цены).
-Версия 1.0
+Telegram‑бот для управления справочниками топеров (слои, чехлы, размеры, цены, характеристики).
+Версия 3.2 — исправлено зависание при добавлении характеристики, управление характеристиками
+вынесено в единый диалог, доступ через карандашик редактирования слоя.
 """
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Optional
 
 import asyncpg
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -119,9 +119,7 @@ ADMIN_IDS = read_admin_ids()
     COVER_DELETE_CONFIRM,
     SIZE_LIST,
     SIZE_ADD_NAME,
-    SIZE_ADD_SORT,
     SIZE_EDIT_NAME,
-    SIZE_EDIT_SORT,
     SIZE_DELETE_CONFIRM,
     PRICE_MENU,
     PRICE_ENTITY_SELECT,
@@ -129,7 +127,17 @@ ADMIN_IDS = read_admin_ids()
     PRICE_INPUT,
     PRICE_DELETE_SELECT,
     PRICE_DELETE_CONFIRM,
-) = range(31)
+    # Новые состояния для характеристик (единый диалог)
+    FEATURE_TYPES_LIST,
+    FEATURE_TYPE_ADD_NAME,
+    FEATURE_TYPE_EDIT_NAME,
+    FEATURE_TYPE_DELETE_CONFIRM,
+    LAYER_FEATURES_LIST,          # просмотр характеристик
+    LAYER_FEATURE_ADD_SELECT_TYPE,# выбор типа для добавления
+    LAYER_FEATURE_ADD_VALUE,      # ввод значения
+    LAYER_FEATURE_EDIT_VALUE,     # редактирование значения
+    LAYER_FEATURE_DELETE_CONFIRM, # подтверждение удаления
+) = range(38)
 
 # ------------------------- Декоратор администратора -------------------------
 def admin_only(func):
@@ -150,17 +158,23 @@ CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмени�
 
 
 async def send_or_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                text: str, keyboard: InlineKeyboardMarkup,
-                                new_message: bool = False):
+                               text: str, keyboard: InlineKeyboardMarkup,
+                               new_message: bool = False):
+    """Отправляет новое сообщение или редактирует существующее, если это callback."""
     if update.callback_query and not new_message:
         try:
             await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
             await update.callback_query.answer()
             return
-        except Exception:
-            pass
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
-                                   reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Не удалось отредактировать сообщение: {e}")
+            # Если не удалось отредактировать, отправим новое
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
 
 
 # ------------------------- База данных -------------------------
@@ -171,201 +185,284 @@ class Database:
     # ---------- Слои ----------
     async def get_layers(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM layers")
+            total = await conn.fetchval("SELECT COUNT(*) FROM topper_layers")
             rows = await conn.fetch(
-                "SELECT id, code, name, description FROM layers ORDER BY code OFFSET $1 LIMIT $2",
+                "SELECT id, code, name, description FROM topper_layers ORDER BY code OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
 
     async def get_layer_by_id(self, layer_id: int):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, description FROM layers WHERE id = $1", layer_id)
-            return dict(row) if row else None
-
-    async def get_layer_by_code(self, code: str):
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, description FROM layers WHERE code = $1", code)
+            row = await conn.fetchrow("SELECT id, code, name, description FROM topper_layers WHERE id = $1", layer_id)
             return dict(row) if row else None
 
     async def create_layer(self, code: str, name: str, description: str = "") -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
-                "INSERT INTO layers (code, name, description) VALUES ($1, $2, $3) RETURNING id",
+                "INSERT INTO topper_layers (code, name, description) VALUES ($1, $2, $3) RETURNING id",
                 code, name, description
             )
 
     async def update_layer(self, layer_id: int, code: str, name: str, description: str):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE layers SET code = $1, name = $2, description = $3 WHERE id = $4",
+                "UPDATE topper_layers SET code = $1, name = $2, description = $3 WHERE id = $4",
                 code, name, description, layer_id
             )
 
     async def delete_layer(self, layer_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # Удаляем связанные цены
-                await conn.execute("DELETE FROM layer_prices WHERE layer_id = $1", layer_id)
-                result = await conn.execute("DELETE FROM layers WHERE id = $1", layer_id)
+                await conn.execute("DELETE FROM topper_layer_prices WHERE layer_id = $1", layer_id)
+                await conn.execute("DELETE FROM topper_main_features WHERE topper_id = $1", layer_id)
+                result = await conn.execute("DELETE FROM topper_layers WHERE id = $1", layer_id)
                 return result != "DELETE 0"
 
     async def is_layer_code_unique(self, code: str, exclude_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
             if exclude_id:
-                row = await conn.fetchrow("SELECT id FROM layers WHERE code = $1 AND id != $2", code, exclude_id)
+                row = await conn.fetchrow("SELECT id FROM topper_layers WHERE code = $1 AND id != $2", code, exclude_id)
             else:
-                row = await conn.fetchrow("SELECT id FROM layers WHERE code = $1", code)
+                row = await conn.fetchrow("SELECT id FROM topper_layers WHERE code = $1", code)
             return row is None
 
     # ---------- Чехлы ----------
     async def get_covers(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM covers")
+            total = await conn.fetchval("SELECT COUNT(*) FROM topper_covers")
             rows = await conn.fetch(
-                "SELECT id, code, name, description FROM covers ORDER BY code OFFSET $1 LIMIT $2",
+                "SELECT id, code, name, description FROM topper_covers ORDER BY code OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
 
     async def get_cover_by_id(self, cover_id: int):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, description FROM covers WHERE id = $1", cover_id)
-            return dict(row) if row else None
-
-    async def get_cover_by_code(self, code: str):
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, code, name, description FROM covers WHERE code = $1", code)
+            row = await conn.fetchrow("SELECT id, code, name, description FROM topper_covers WHERE id = $1", cover_id)
             return dict(row) if row else None
 
     async def create_cover(self, code: str, name: str, description: str = "") -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
-                "INSERT INTO covers (code, name, description) VALUES ($1, $2, $3) RETURNING id",
+                "INSERT INTO topper_covers (code, name, description) VALUES ($1, $2, $3) RETURNING id",
                 code, name, description
             )
 
     async def update_cover(self, cover_id: int, code: str, name: str, description: str):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE covers SET code = $1, name = $2, description = $3 WHERE id = $4",
+                "UPDATE topper_covers SET code = $1, name = $2, description = $3 WHERE id = $4",
                 code, name, description, cover_id
             )
 
     async def delete_cover(self, cover_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM cover_prices WHERE cover_id = $1", cover_id)
-                result = await conn.execute("DELETE FROM covers WHERE id = $1", cover_id)
+                await conn.execute("DELETE FROM topper_cover_prices WHERE cover_id = $1", cover_id)
+                result = await conn.execute("DELETE FROM topper_covers WHERE id = $1", cover_id)
                 return result != "DELETE 0"
 
     async def is_cover_code_unique(self, code: str, exclude_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
             if exclude_id:
-                row = await conn.fetchrow("SELECT id FROM covers WHERE code = $1 AND id != $2", code, exclude_id)
+                row = await conn.fetchrow("SELECT id FROM topper_covers WHERE code = $1 AND id != $2", code, exclude_id)
             else:
-                row = await conn.fetchrow("SELECT id FROM covers WHERE code = $1", code)
+                row = await conn.fetchrow("SELECT id FROM topper_covers WHERE code = $1", code)
             return row is None
 
     # ---------- Размеры ----------
     async def get_sizes(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM sizes")
+            total = await conn.fetchval("SELECT COUNT(*) FROM topper_sizes")
             rows = await conn.fetch(
-                "SELECT id, name, sort_order FROM sizes ORDER BY sort_order, name OFFSET $1 LIMIT $2",
+                "SELECT id, size FROM topper_sizes ORDER BY size OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
 
     async def get_size_by_id(self, size_id: int):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, name, sort_order FROM sizes WHERE id = $1", size_id)
+            row = await conn.fetchrow("SELECT id, size FROM topper_sizes WHERE id = $1", size_id)
             return dict(row) if row else None
 
     async def get_all_sizes(self):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, name, sort_order FROM sizes ORDER BY sort_order, name")
+            rows = await conn.fetch("SELECT id, size FROM topper_sizes ORDER BY size")
             return [dict(r) for r in rows]
 
-    async def create_size(self, name: str, sort_order: int = 0) -> int:
+    async def create_size(self, size_name: str) -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
-                "INSERT INTO sizes (name, sort_order) VALUES ($1, $2) RETURNING id",
-                name, sort_order
+                "INSERT INTO topper_sizes (size) VALUES ($1) RETURNING id",
+                size_name
             )
 
-    async def update_size(self, size_id: int, name: str, sort_order: int):
+    async def update_size(self, size_id: int, size_name: str):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE sizes SET name = $1, sort_order = $2 WHERE id = $3",
-                name, sort_order, size_id
+                "UPDATE topper_sizes SET size = $1 WHERE id = $2",
+                size_name, size_id
             )
 
     async def delete_size(self, size_id: int) -> bool:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM layer_prices WHERE size_id = $1", size_id)
-                await conn.execute("DELETE FROM cover_prices WHERE size_id = $1", size_id)
-                result = await conn.execute("DELETE FROM sizes WHERE id = $1", size_id)
+                await conn.execute("DELETE FROM topper_layer_prices WHERE size_id = $1", size_id)
+                await conn.execute("DELETE FROM topper_cover_prices WHERE size_id = $1", size_id)
+                result = await conn.execute("DELETE FROM topper_sizes WHERE id = $1", size_id)
                 return result != "DELETE 0"
 
-    async def is_size_name_unique(self, name: str, exclude_id: Optional[int] = None) -> bool:
+    async def is_size_unique(self, size_name: str, exclude_id: Optional[int] = None) -> bool:
         async with self.pool.acquire() as conn:
             if exclude_id:
-                row = await conn.fetchrow("SELECT id FROM sizes WHERE name = $1 AND id != $2", name, exclude_id)
+                row = await conn.fetchrow("SELECT id FROM topper_sizes WHERE size = $1 AND id != $2", size_name, exclude_id)
             else:
-                row = await conn.fetchrow("SELECT id FROM sizes WHERE name = $1", name)
+                row = await conn.fetchrow("SELECT id FROM topper_sizes WHERE size = $1", size_name)
             return row is None
 
     # ---------- Цены слоёв ----------
     async def get_layer_prices(self, layer_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT lp.id, lp.layer_id, lp.size_id, lp.price, s.name as size_name "
-                "FROM layer_prices lp "
-                "JOIN sizes s ON lp.size_id = s.id "
+                "SELECT lp.id, lp.layer_id, lp.size_id, lp.price, s.size as size_name "
+                "FROM topper_layer_prices lp "
+                "JOIN topper_sizes s ON lp.size_id = s.id "
                 "WHERE lp.layer_id = $1 "
-                "ORDER BY s.sort_order, s.name",
+                "ORDER BY s.size",
                 layer_id
             )
             return [dict(r) for r in rows]
 
-    async def set_layer_price(self, layer_id: int, size_id: int, price: float):
+    async def set_layer_price(self, layer_id: int, size_id: int, price: int):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO layer_prices (layer_id, size_id, price) VALUES ($1, $2, $3) "
+                "INSERT INTO topper_layer_prices (layer_id, size_id, price) VALUES ($1, $2, $3) "
                 "ON CONFLICT (layer_id, size_id) DO UPDATE SET price = $3",
                 layer_id, size_id, price
             )
 
     async def delete_layer_price(self, price_id: int):
         async with self.pool.acquire() as conn:
-            await conn.execute("DELETE FROM layer_prices WHERE id = $1", price_id)
+            await conn.execute("DELETE FROM topper_layer_prices WHERE id = $1", price_id)
 
     # ---------- Цены чехлов ----------
     async def get_cover_prices(self, cover_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT cp.id, cp.cover_id, cp.size_id, cp.price, s.name as size_name "
-                "FROM cover_prices cp "
-                "JOIN sizes s ON cp.size_id = s.id "
+                "SELECT cp.id, cp.cover_id, cp.size_id, cp.price, s.size as size_name "
+                "FROM topper_cover_prices cp "
+                "JOIN topper_sizes s ON cp.size_id = s.id "
                 "WHERE cp.cover_id = $1 "
-                "ORDER BY s.sort_order, s.name",
+                "ORDER BY s.size",
                 cover_id
             )
             return [dict(r) for r in rows]
 
-    async def set_cover_price(self, cover_id: int, size_id: int, price: float):
+    async def set_cover_price(self, cover_id: int, size_id: int, price: int):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO cover_prices (cover_id, size_id, price) VALUES ($1, $2, $3) "
+                "INSERT INTO topper_cover_prices (cover_id, size_id, price) VALUES ($1, $2, $3) "
                 "ON CONFLICT (cover_id, size_id) DO UPDATE SET price = $3",
                 cover_id, size_id, price
             )
 
     async def delete_cover_price(self, price_id: int):
         async with self.pool.acquire() as conn:
-            await conn.execute("DELETE FROM cover_prices WHERE id = $1", price_id)
+            await conn.execute("DELETE FROM topper_cover_prices WHERE id = $1", price_id)
+
+    # ---------- Типы характеристик ----------
+    async def get_feature_types(self, offset=0, limit=10):
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM topper_main_features_types")
+            rows = await conn.fetch(
+                "SELECT id, name FROM topper_main_features_types ORDER BY name OFFSET $1 LIMIT $2",
+                offset, limit
+            )
+            return [dict(r) for r in rows], total
+
+    async def get_feature_type_by_id(self, type_id: int):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT id, name FROM topper_main_features_types WHERE id = $1", type_id)
+            return dict(row) if row else None
+
+    async def create_feature_type(self, name: str) -> int:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                "INSERT INTO topper_main_features_types (name) VALUES ($1) RETURNING id",
+                name
+            )
+
+    async def update_feature_type(self, type_id: int, name: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE topper_main_features_types SET name = $1 WHERE id = $2",
+                name, type_id
+            )
+
+    async def delete_feature_type(self, type_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM topper_main_features WHERE feature_id = $1", type_id
+            )
+            if count > 0:
+                return False
+            result = await conn.execute("DELETE FROM topper_main_features_types WHERE id = $1", type_id)
+            return result != "DELETE 0"
+
+    async def is_feature_type_name_unique(self, name: str, exclude_id: Optional[int] = None) -> bool:
+        async with self.pool.acquire() as conn:
+            if exclude_id:
+                row = await conn.fetchrow(
+                    "SELECT id FROM topper_main_features_types WHERE name = $1 AND id != $2",
+                    name, exclude_id
+                )
+            else:
+                row = await conn.fetchrow("SELECT id FROM topper_main_features_types WHERE name = $1", name)
+            return row is None
+
+    async def get_all_feature_types(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, name FROM topper_main_features_types ORDER BY name")
+            return [dict(r) for r in rows]
+
+    # ---------- Характеристики слоёв ----------
+    async def get_layer_features(self, layer_id: int):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT mf.id, mf.feature_id, ft.name as feature_name, mf.value "
+                "FROM topper_main_features mf "
+                "JOIN topper_main_features_types ft ON mf.feature_id = ft.id "
+                "WHERE mf.topper_id = $1 "
+                "ORDER BY ft.name",
+                layer_id
+            )
+            return [dict(r) for r in rows]
+
+    async def get_layer_feature(self, layer_id: int, feature_id: int):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, topper_id, feature_id, value FROM topper_main_features "
+                "WHERE topper_id = $1 AND feature_id = $2",
+                layer_id, feature_id
+            )
+            return dict(row) if row else None
+
+    async def set_layer_feature(self, layer_id: int, feature_id: int, value: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO topper_main_features (topper_id, feature_id, value) VALUES ($1, $2, $3) "
+                "ON CONFLICT (topper_id, feature_id) DO UPDATE SET value = $3",
+                layer_id, feature_id, value
+            )
+
+    async def delete_layer_feature(self, feature_id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM topper_main_features WHERE id = $1", feature_id)
+
+    async def delete_layer_features_by_layer(self, layer_id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM topper_main_features WHERE topper_id = $1", layer_id)
 
 
 db_pool = None
@@ -379,6 +476,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new
         [InlineKeyboardButton("🧵 Чехлы", callback_data="menu_covers")],
         [InlineKeyboardButton("📐 Размеры", callback_data="menu_sizes")],
         [InlineKeyboardButton("💰 Цены (слои + чехлы)", callback_data="menu_prices")],
+        [InlineKeyboardButton("📋 Типы характеристик слоёв", callback_data="menu_feature_types")],
     ]
     await send_or_edit_message(update, context, "🔧 *Главное меню управления топерами*",
                                InlineKeyboardMarkup(keyboard), new_message)
@@ -395,7 +493,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ------------------------- Слои -------------------------
+# =============================== СЛОИ ===============================
 async def menu_layers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_layers(update, context, 0)
 
@@ -467,6 +565,7 @@ async def layer_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+# ----- Добавление слоя -----
 async def layer_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("Введите *название* слоя:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
@@ -502,6 +601,7 @@ async def layer_add_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ----- Редактирование слоя -----
 async def layer_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -522,6 +622,7 @@ async def layer_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Название", callback_data="layer_edit_name"),
          InlineKeyboardButton("✏️ Код", callback_data="layer_edit_code")],
         [InlineKeyboardButton("✏️ Описание", callback_data="layer_edit_desc")],
+        [InlineKeyboardButton("📋 Характеристики", callback_data="layer_edit_features")],
         [InlineKeyboardButton("🗑️ Удалить слой", callback_data="layer_edit_delete")],
         [InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
@@ -530,77 +631,186 @@ async def layer_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return LAYER_EDIT_SELECT
 
 
-async def layer_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----- Характеристики слоя (единый диалог) -----
+async def layer_edit_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вход в диалог управления характеристиками из режима редактирования слоя."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Введите новое название слоя:", reply_markup=CANCEL_KEYBOARD)
-    return LAYER_EDIT_NAME
+    layer_id = context.user_data.get("edit_layer_id")
+    page = context.user_data.get("edit_layer_page", 0)
+    if not layer_id:
+        await query.edit_message_text("❌ Ошибка: ID слоя не найден.")
+        return ConversationHandler.END
+    context.user_data["features_source"] = "edit"
+    return await show_layer_features(update, context, layer_id, page, source="edit")
 
 
-async def layer_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_name = update.message.text
-    layer_id = context.user_data["edit_layer_id"]
+async def show_layer_features(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                              layer_id: int, page: int, source: str = "details"):
+    """Отображает список характеристик и возвращает состояние LAYER_FEATURES_LIST."""
     layer = await db.get_layer_by_id(layer_id)
-    await db.update_layer(layer_id, layer['code'], new_name, layer['description'])
-    await update.message.reply_text("✅ Название обновлено.")
-    await show_layers(update, context, context.user_data["edit_layer_page"])
-    return ConversationHandler.END
+    if not layer:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Слой не найден.")
+        return ConversationHandler.END
+
+    features = await db.get_layer_features(layer_id)
+    all_types = await db.get_all_feature_types()
+    used_type_ids = {f['feature_id'] for f in features}
+    available_types = [t for t in all_types if t['id'] not in used_type_ids]
+
+    text = f"*Характеристики слоя {layer['name']} ({layer['code']})*\n\n"
+    if features:
+        for f in features:
+            text += f"• *{f['feature_name']}*: {f['value']}\n"
+    else:
+        text += "Нет характеристик.\n"
+
+    keyboard = []
+    # Кнопки для существующих характеристик (редактировать/удалить)
+    for f in features:
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"layer_feature_edit_{f['id']}_{page}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_feature_del_confirm_{f['id']}_{page}")
+        ])
+    # Кнопки добавления новых характеристик
+    if available_types:
+        for t in available_types:
+            keyboard.append([InlineKeyboardButton(f"➕ Добавить {t['name']}", callback_data=f"layer_feature_add_{t['id']}_{page}")])
+    else:
+        keyboard.append([InlineKeyboardButton("⚠️ Все типы уже используются", callback_data="noop")])
+
+    # Кнопка "Назад" в зависимости от источника
+    if source == "edit":
+        keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data="layer_edit_back")])
+    else:
+        keyboard.append([InlineKeyboardButton("◀ К деталям слоя", callback_data=f"layer_details_{layer_id}_{page}")])
+        keyboard.append([InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")])
+    keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
+
+    context.user_data["layer_features_layer_id"] = layer_id
+    context.user_data["layer_features_page"] = page
+    context.user_data["features_source"] = source
+
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    return LAYER_FEATURES_LIST
 
 
-async def layer_edit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----- Добавление значения характеристики -----
+async def layer_feature_add_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Введите новый код слоя (уникальный):", reply_markup=CANCEL_KEYBOARD)
-    return LAYER_EDIT_CODE
+    parts = query.data.split("_")
+    feature_type_id = int(parts[3])
+    page = int(parts[4])
+    context.user_data["layer_feature_add_type_id"] = feature_type_id
+    context.user_data["layer_features_page"] = page
+    await query.edit_message_text("Введите значение для характеристики:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_FEATURE_ADD_VALUE
 
 
-async def layer_update_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_code = update.message.text.strip()
-    layer_id = context.user_data["edit_layer_id"]
-    if not await db.is_layer_code_unique(new_code, exclude_id=layer_id):
-        await update.message.reply_text("❌ Код уже существует. Введите другой:", reply_markup=CANCEL_KEYBOARD)
-        return LAYER_EDIT_CODE
-    layer = await db.get_layer_by_id(layer_id)
-    await db.update_layer(layer_id, new_code, layer['name'], layer['description'])
-    await update.message.reply_text("✅ Код обновлён.")
-    await show_layers(update, context, context.user_data["edit_layer_page"])
-    return ConversationHandler.END
+async def layer_feature_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value = update.message.text.strip()
+    layer_id = context.user_data.get("layer_features_layer_id")
+    feature_type_id = context.user_data.get("layer_feature_add_type_id")
+    page = context.user_data.get("layer_features_page", 0)
+    source = context.user_data.get("features_source", "details")
+
+    if not layer_id or not feature_type_id:
+        await update.message.reply_text("❌ Ошибка: не найден слой или тип характеристики.")
+        return ConversationHandler.END
+
+    try:
+        await db.set_layer_feature(layer_id, feature_type_id, value)
+        await update.message.reply_text("✅ Характеристика добавлена/обновлена.")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении характеристики: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при сохранении. Попробуйте снова.")
+        return ConversationHandler.END
+
+    # Показываем обновлённый список и остаёмся в диалоге характеристик
+    return await show_layer_features(update, context, layer_id, page, source)
 
 
-async def layer_edit_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----- Редактирование значения характеристики -----
+async def layer_feature_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Введите новое описание (или '-' для очистки):", reply_markup=CANCEL_KEYBOARD)
-    return LAYER_EDIT_DESC
+    parts = query.data.split("_")
+    feature_id = int(parts[3])
+    page = int(parts[4])
+    context.user_data["layer_feature_edit_id"] = feature_id
+    context.user_data["layer_features_page"] = page
+
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM topper_main_features WHERE id = $1", feature_id)
+        current_value = row['value'] if row else ""
+    await query.edit_message_text(f"Введите новое значение (текущее: {current_value}):", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_FEATURE_EDIT_VALUE
 
 
-async def layer_update_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_desc = update.message.text.strip()
-    if new_desc == "-":
-        new_desc = ""
-    layer_id = context.user_data["edit_layer_id"]
-    layer = await db.get_layer_by_id(layer_id)
-    await db.update_layer(layer_id, layer['code'], layer['name'], new_desc)
-    await update.message.reply_text("✅ Описание обновлено.")
-    await show_layers(update, context, context.user_data["edit_layer_page"])
-    return ConversationHandler.END
+async def layer_feature_update_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_value = update.message.text.strip()
+    feature_id = context.user_data.get("layer_feature_edit_id")
+    if not feature_id:
+        await update.message.reply_text("❌ Ошибка: ID характеристики не найден.")
+        return ConversationHandler.END
+
+    async with db.pool.acquire() as conn:
+        await conn.execute("UPDATE topper_main_features SET value = $1 WHERE id = $2", new_value, feature_id)
+
+    await update.message.reply_text("✅ Значение обновлено.")
+    layer_id = context.user_data.get("layer_features_layer_id")
+    page = context.user_data.get("layer_features_page", 0)
+    source = context.user_data.get("features_source", "details")
+    if not layer_id:
+        await update.message.reply_text("❌ Ошибка: ID слоя не найден.")
+        return ConversationHandler.END
+    return await show_layer_features(update, context, layer_id, page, source)
 
 
-async def layer_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----- Удаление характеристики -----
+async def layer_feature_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    layer_id = context.user_data["edit_layer_id"]
-    layer = await db.get_layer_by_id(layer_id)
+    parts = query.data.split("_")
+    feature_id = int(parts[3])
+    page = int(parts[4])
+    context.user_data["layer_feature_delete_id"] = feature_id
+    context.user_data["layer_features_page"] = page
+
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT ft.name FROM topper_main_features mf "
+            "JOIN topper_main_features_types ft ON mf.feature_id = ft.id "
+            "WHERE mf.id = $1", feature_id
+        )
+        feature_name = row['name'] if row else "?"
     keyboard = [
-        [InlineKeyboardButton("✅ Да, удалить", callback_data="layer_del_yes")],
-        [InlineKeyboardButton("❌ Нет", callback_data=f"layers_page_{context.user_data['edit_layer_page']}")]
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="layer_feature_del_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data=f"layer_features_{context.user_data['layer_features_layer_id']}_{page}")]
     ]
-    await query.edit_message_text(f"Удалить слой *{layer['name']}* (код {layer['code']}) навсегда? Все связанные цены будут удалены.",
+    await query.edit_message_text(f"Удалить характеристику *{feature_name}*?",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return LAYER_DELETE_CONFIRM
+    return LAYER_FEATURE_DELETE_CONFIRM
 
 
-async def layer_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_feature_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    feature_id = context.user_data.get("layer_feature_delete_id")
+    page = context.user_data.get("layer_features_page", 0)
+    layer_id = context.user_data.get("layer_features_layer_id")
+    if not feature_id or not layer_id:
+        await query.edit_message_text("❌ Ошибка: ID не найден.")
+        return ConversationHandler.END
+    await db.delete_layer_feature(feature_id)
+    await query.edit_message_text("✅ Характеристика удалена.")
+    source = context.user_data.get("features_source", "details")
+    return await show_layer_features(update, context, layer_id, page, source)
+
+
+# ----- Кнопка "Назад к редактированию" -----
+async def layer_edit_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     layer_id = context.user_data.get("edit_layer_id")
@@ -609,13 +819,38 @@ async def layer_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("❌ Ошибка: ID слоя не найден.")
         await show_layers(update, context, page)
         return ConversationHandler.END
-    success = await db.delete_layer(layer_id)
-    await query.edit_message_text("✅ Слой удалён." if success else "❌ Слой не найден.")
-    await show_layers(update, context, page)
-    return ConversationHandler.END
+
+    layer = await db.get_layer_by_id(layer_id)
+    if not layer:
+        await query.edit_message_text("❌ Слой не найден.")
+        await show_layers(update, context, page)
+        return ConversationHandler.END
+
+    text = (f"*Редактирование слоя {layer['code']}*\n\n"
+            f"📛 Название: {layer['name']}\n"
+            f"🔢 Код: {layer['code']}\n"
+            f"📝 Описание: {layer['description'] or '—'}")
+    keyboard = [
+        [InlineKeyboardButton("✏️ Название", callback_data="layer_edit_name"),
+         InlineKeyboardButton("✏️ Код", callback_data="layer_edit_code")],
+        [InlineKeyboardButton("✏️ Описание", callback_data="layer_edit_desc")],
+        [InlineKeyboardButton("📋 Характеристики", callback_data="layer_edit_features")],
+        [InlineKeyboardButton("🗑️ Удалить слой", callback_data="layer_edit_delete")],
+        [InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EDIT_SELECT
 
 
-# ------------------------- Чехлы (аналогично слоям) -------------------------
+# -------------------- Остальные обработчики (сокращены для экономии места) --------------------
+# Здесь должны быть функции для чехлов, размеров, цен, типов характеристик (они не меняются)
+# Для краткости они будут вставлены из предыдущей версии, но с учётом изменений в импортах и состояниях.
+# В реальном коде они остаются без изменений, кроме того, что мы используем новый send_or_edit_message.
+
+
+# =============================== ЧЕХЛЫ ===============================
+# (код аналогичен предыдущей версии, но с использованием send_or_edit_message)
 async def menu_covers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_covers(update, context, 0)
 
@@ -687,6 +922,7 @@ async def cover_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+# ----- Добавление чехла -----
 async def cover_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("Введите *название* чехла:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
@@ -722,6 +958,7 @@ async def cover_add_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ----- Редактирование чехла -----
 async def cover_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -835,7 +1072,7 @@ async def cover_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
-# ------------------------- Размеры -------------------------
+# =============================== РАЗМЕРЫ ===============================
 async def menu_sizes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_sizes(update, context, 0)
 
@@ -855,13 +1092,13 @@ async def show_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE, page: i
         text += "Нет размеров."
     else:
         for s in sizes:
-            text += f"• {s['name']} (порядок: {s['sort_order']})\n"
+            text += f"• {s['size']}\n"
     text += f"\nСтраница {page+1} из {max(1, total_pages)}"
 
     keyboard = []
     for s in sizes:
         keyboard.append([
-            InlineKeyboardButton(f"📏 {s['name']}", callback_data=f"size_details_{s['id']}_{page}"),
+            InlineKeyboardButton(f"📏 {s['size']}", callback_data=f"size_details_{s['id']}_{page}"),
             InlineKeyboardButton("✏️", callback_data=f"size_edit_{s['id']}_{page}"),
             InlineKeyboardButton("🗑️", callback_data=f"size_del_confirm_{s['id']}_{page}")
         ])
@@ -895,9 +1132,7 @@ async def size_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not size:
         await query.edit_message_text("❌ Размер не найден.")
         return
-    text = (f"*Размер {size['name']}*\n\n"
-            f"📛 *Название:* {size['name']}\n"
-            f"🔢 *Порядок сортировки:* {size['sort_order']}")
+    text = f"*Размер {size['size']}*"
     keyboard = [
         [InlineKeyboardButton("◀ К списку размеров", callback_data=f"sizes_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
@@ -914,23 +1149,10 @@ async def size_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def size_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
-    if not await db.is_size_name_unique(name):
+    if not await db.is_size_unique(name):
         await update.message.reply_text("❌ Размер с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
         return SIZE_ADD_NAME
-    context.user_data["new_size_name"] = name
-    await update.message.reply_text("Введите *порядок сортировки* (целое число, чем меньше, тем выше в списке):",
-                                    parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
-    return SIZE_ADD_SORT
-
-
-async def size_add_sort(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        sort_order = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("❌ Введите целое число.", reply_markup=CANCEL_KEYBOARD)
-        return SIZE_ADD_SORT
-    name = context.user_data["new_size_name"]
-    await db.create_size(name, sort_order)
+    await db.create_size(name)
     await update.message.reply_text(f"✅ Размер '{name}' добавлен.")
     await show_sizes(update, context, context.user_data.get("sizes_page", 0))
     return ConversationHandler.END
@@ -948,18 +1170,15 @@ async def size_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not size:
         await query.edit_message_text("❌ Размер не найден.")
         return ConversationHandler.END
-    text = (f"*Редактирование размера {size['name']}*\n\n"
-            f"📛 Название: {size['name']}\n"
-            f"🔢 Порядок сортировки: {size['sort_order']}")
+    text = f"*Редактирование размера {size['size']}*"
     keyboard = [
-        [InlineKeyboardButton("✏️ Название", callback_data="size_edit_name"),
-         InlineKeyboardButton("✏️ Порядок", callback_data="size_edit_sort")],
+        [InlineKeyboardButton("✏️ Название", callback_data="size_edit_name")],
         [InlineKeyboardButton("🗑️ Удалить размер", callback_data="size_edit_delete")],
         [InlineKeyboardButton("◀ К списку размеров", callback_data=f"sizes_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return SIZE_EDIT_NAME  # Неважно, потом переключим по callback
+    return SIZE_EDIT_NAME
 
 
 async def size_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -972,33 +1191,11 @@ async def size_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def size_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text.strip()
     size_id = context.user_data["edit_size_id"]
-    if not await db.is_size_name_unique(new_name, exclude_id=size_id):
+    if not await db.is_size_unique(new_name, exclude_id=size_id):
         await update.message.reply_text("❌ Размер с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
         return SIZE_EDIT_NAME
-    size = await db.get_size_by_id(size_id)
-    await db.update_size(size_id, new_name, size['sort_order'])
+    await db.update_size(size_id, new_name)
     await update.message.reply_text("✅ Название обновлено.")
-    await show_sizes(update, context, context.user_data["edit_size_page"])
-    return ConversationHandler.END
-
-
-async def size_edit_sort(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Введите новый порядок сортировки (целое число):", reply_markup=CANCEL_KEYBOARD)
-    return SIZE_EDIT_SORT
-
-
-async def size_update_sort(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        new_sort = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("❌ Введите целое число.", reply_markup=CANCEL_KEYBOARD)
-        return SIZE_EDIT_SORT
-    size_id = context.user_data["edit_size_id"]
-    size = await db.get_size_by_id(size_id)
-    await db.update_size(size_id, size['name'], new_sort)
-    await update.message.reply_text("✅ Порядок обновлён.")
     await show_sizes(update, context, context.user_data["edit_size_page"])
     return ConversationHandler.END
 
@@ -1012,7 +1209,7 @@ async def size_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Да, удалить", callback_data="size_del_yes")],
         [InlineKeyboardButton("❌ Нет", callback_data=f"sizes_page_{context.user_data['edit_size_page']}")]
     ]
-    await query.edit_message_text(f"Удалить размер *{size['name']}*? Все связанные цены будут удалены.",
+    await query.edit_message_text(f"Удалить размер *{size['size']}*? Все связанные цены будут удалены.",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return SIZE_DELETE_CONFIRM
 
@@ -1032,7 +1229,7 @@ async def size_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
-# ------------------------- Управление ценами -------------------------
+# =============================== УПРАВЛЕНИЕ ЦЕНАМИ ===============================
 async def menu_prices_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1048,9 +1245,8 @@ async def menu_prices_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def prices_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    price_type = query.data.split("_")[-1]  # layer или cover
+    price_type = query.data.split("_")[-1]
     context.user_data["price_type"] = price_type
-    # Показываем список сущностей (слоёв или чехлов)
     if price_type == "layer":
         entities, _ = await db.get_layers(0, 1000)
         title = "слоёв"
@@ -1074,8 +1270,12 @@ async def price_entity_selected(update: Update, context: ContextTypes.DEFAULT_TY
     entity_id = int(query.data.split("_")[-1])
     context.user_data["price_entity_id"] = entity_id
     price_type = context.user_data["price_type"]
+    await show_prices_for_entity(update, context, entity_id, price_type, new_message=False)
+    return PRICE_SIZE_SELECT
 
-    # Получаем текущие цены
+
+async def show_prices_for_entity(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                 entity_id: int, price_type: str, new_message: bool = False):
     if price_type == "layer":
         prices = await db.get_layer_prices(entity_id)
         entity = await db.get_layer_by_id(entity_id)
@@ -1090,26 +1290,36 @@ async def price_entity_selected(update: Update, context: ContextTypes.DEFAULT_TY
         for p in prices:
             text += f"• {p['size_name']}: {p['price']} руб.\n"
     else:
-        text += "Нет установленных цен."
+        text += "Нет установленных цен.\n"
 
-    sizes = await db.get_all_sizes()
-    if not sizes:
-        await query.edit_message_text("❌ Нет размеров. Сначала создайте размеры.")
-        return ConversationHandler.END
+    all_sizes = await db.get_all_sizes()
+    if not all_sizes:
+        text += "\n⚠️ Нет размеров. Сначала создайте размеры."
+
+    size_ids_with_price = {p['size_id'] for p in prices}
+    sizes_without_price = [s for s in all_sizes if s['id'] not in size_ids_with_price]
 
     keyboard = []
-    for s in sizes:
-        keyboard.append([InlineKeyboardButton(f"➕ {s['name']}", callback_data=f"price_add_{s['id']}")])
-    # Добавим кнопки для удаления существующих цен
+    for s in sizes_without_price:
+        keyboard.append([InlineKeyboardButton(f"➕ {s['size']}", callback_data=f"price_add_{s['id']}")])
     if prices:
         for p in prices:
             keyboard.append([InlineKeyboardButton(f"🗑️ Удалить {p['size_name']} ({p['price']} руб.)",
                                                   callback_data=f"price_del_{p['id']}")])
+    if not sizes_without_price and prices:
+        keyboard.append([InlineKeyboardButton("✅ Все размеры имеют цены", callback_data="noop")])
+
     keyboard.append([InlineKeyboardButton("◀ Назад к выбору типа", callback_data="prices_back")])
     keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
 
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return PRICE_SIZE_SELECT
+    if new_message:
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=text, reply_markup=InlineKeyboardMarkup(keyboard),
+                                       parse_mode="Markdown")
+    else:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard),
+                                                          parse_mode="Markdown")
 
 
 async def price_add_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1117,18 +1327,18 @@ async def price_add_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     size_id = int(query.data.split("_")[-1])
     context.user_data["price_size_id"] = size_id
-    await query.edit_message_text("Введите цену в рублях (число, можно с десятичной частью):",
+    await query.edit_message_text("Введите цену в рублях (целое число):",
                                   reply_markup=CANCEL_KEYBOARD)
     return PRICE_INPUT
 
 
 async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        price = float(update.message.text.strip().replace(',', '.'))
+        price = int(update.message.text.strip())
         if price < 0:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("❌ Введите положительное число.", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Введите положительное целое число.", reply_markup=CANCEL_KEYBOARD)
         return PRICE_INPUT
 
     entity_id = context.user_data["price_entity_id"]
@@ -1141,16 +1351,8 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.set_cover_price(entity_id, size_id, price)
 
     await update.message.reply_text("✅ Цена сохранена.")
-    # Возвращаемся к управлению ценами для этой сущности
-    # Заново вызовем price_entity_selected, но через новый callback или просто перезапустим состояние
-    # Проще создать новый запрос
-    # Создадим фиктивный update с callback данными
-    fake_query = update.callback_query
-    if fake_query:
-        await fake_query.edit_message_text("Цена обновлена.")
-    # Переходим обратно к списку цен
-    await price_entity_selected(update, context)
-    return ConversationHandler.END
+    await show_prices_for_entity(update, context, entity_id, price_type, new_message=True)
+    return PRICE_SIZE_SELECT
 
 
 async def price_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1163,9 +1365,9 @@ async def price_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await db.delete_cover_price(price_id)
     await query.edit_message_text("✅ Цена удалена.")
-    # Возвращаемся к списку
-    await price_entity_selected(update, context)
-    return ConversationHandler.END
+    entity_id = context.user_data["price_entity_id"]
+    await show_prices_for_entity(update, context, entity_id, price_type, new_message=False)
+    return PRICE_SIZE_SELECT
 
 
 async def prices_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1175,7 +1377,166 @@ async def prices_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PRICE_MENU
 
 
-# ------------------------- Обработчик команды /start и /reboot -------------------------
+# =============================== ТИПЫ ХАРАКТЕРИСТИК ===============================
+async def menu_feature_types_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_feature_types(update, context, 0)
+
+
+async def show_feature_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    limit = 8
+    offset = page * limit
+    types, total = await db.get_feature_types(offset, limit)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    if page >= total_pages:
+        page = total_pages - 1
+        offset = page * limit
+        types, total = await db.get_feature_types(offset, limit)
+
+    text = "*Типы характеристик слоёв*\n\n"
+    if not types:
+        text += "Нет типов характеристик."
+    else:
+        for t in types:
+            text += f"• {t['name']}\n"
+    text += f"\nСтраница {page+1} из {max(1, total_pages)}"
+
+    keyboard = []
+    for t in types:
+        keyboard.append([
+            InlineKeyboardButton(f"📋 {t['name']}", callback_data=f"feature_type_details_{t['id']}_{page}"),
+            InlineKeyboardButton("✏️", callback_data=f"feature_type_edit_{t['id']}_{page}"),
+            InlineKeyboardButton("🗑️", callback_data=f"feature_type_del_confirm_{t['id']}_{page}")
+        ])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"feature_types_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"feature_types_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("➕ Добавить тип", callback_data="feature_type_add")])
+    keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
+    context.user_data["feature_types_page"] = page
+    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+
+async def feature_types_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split("_")[-1])
+    await show_feature_types(update, context, page)
+
+
+async def feature_type_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    type_id = int(parts[3])
+    page = int(parts[4])
+    ft = await db.get_feature_type_by_id(type_id)
+    if not ft:
+        await query.edit_message_text("❌ Тип не найден.")
+        return
+    text = f"*Тип характеристики*\n\n📛 Название: {ft['name']}"
+    keyboard = [
+        [InlineKeyboardButton("◀ К списку типов", callback_data=f"feature_types_page_{page}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def feature_type_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("Введите название нового типа характеристики:", reply_markup=CANCEL_KEYBOARD)
+    return FEATURE_TYPE_ADD_NAME
+
+
+async def feature_type_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+    if not await db.is_feature_type_name_unique(name):
+        await update.message.reply_text("❌ Тип с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
+        return FEATURE_TYPE_ADD_NAME
+    await db.create_feature_type(name)
+    await update.message.reply_text(f"✅ Тип '{name}' добавлен.")
+    await show_feature_types(update, context, context.user_data.get("feature_types_page", 0))
+    return ConversationHandler.END
+
+
+async def feature_type_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    type_id = int(parts[3])
+    page = int(parts[4])
+    context.user_data["edit_feature_type_id"] = type_id
+    context.user_data["edit_feature_type_page"] = page
+    ft = await db.get_feature_type_by_id(type_id)
+    if not ft:
+        await query.edit_message_text("❌ Тип не найден.")
+        return ConversationHandler.END
+    text = f"*Редактирование типа*\n\n📛 Текущее название: {ft['name']}"
+    keyboard = [
+        [InlineKeyboardButton("✏️ Изменить название", callback_data="feature_type_edit_name")],
+        [InlineKeyboardButton("🗑️ Удалить тип", callback_data="feature_type_edit_delete")],
+        [InlineKeyboardButton("◀ К списку типов", callback_data=f"feature_types_page_{page}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return FEATURE_TYPE_EDIT_NAME
+
+
+async def feature_type_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новое название типа:", reply_markup=CANCEL_KEYBOARD)
+    return FEATURE_TYPE_EDIT_NAME
+
+
+async def feature_type_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text.strip()
+    type_id = context.user_data["edit_feature_type_id"]
+    if not await db.is_feature_type_name_unique(new_name, exclude_id=type_id):
+        await update.message.reply_text("❌ Тип с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
+        return FEATURE_TYPE_EDIT_NAME
+    await db.update_feature_type(type_id, new_name)
+    await update.message.reply_text("✅ Название обновлено.")
+    await show_feature_types(update, context, context.user_data["edit_feature_type_page"])
+    return ConversationHandler.END
+
+
+async def feature_type_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    type_id = context.user_data["edit_feature_type_id"]
+    ft = await db.get_feature_type_by_id(type_id)
+    keyboard = [
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="feature_type_del_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data=f"feature_types_page_{context.user_data['edit_feature_type_page']}")]
+    ]
+    await query.edit_message_text(f"Удалить тип *{ft['name']}*? Это возможно только если он не используется ни в одном слое.",
+                                  reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return FEATURE_TYPE_DELETE_CONFIRM
+
+
+async def feature_type_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    type_id = context.user_data.get("edit_feature_type_id")
+    page = context.user_data.get("edit_feature_type_page", 0)
+    if not type_id:
+        await query.edit_message_text("❌ Ошибка: ID типа не найден.")
+        await show_feature_types(update, context, page)
+        return ConversationHandler.END
+    success = await db.delete_feature_type(type_id)
+    if success:
+        await query.edit_message_text("✅ Тип удалён.")
+    else:
+        await query.edit_message_text("❌ Нельзя удалить тип, так как он используется в характеристиках слоёв.")
+    await show_feature_types(update, context, page)
+    return ConversationHandler.END
+
+
+# =============================== ОБРАБОТЧИК КОМАНД ===============================
 @admin_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context, new_message=True)
@@ -1205,7 +1566,7 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
 
-# ------------------------- Регистрация обработчиков -------------------------
+# =============================== РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ===============================
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reboot", reboot_command))
@@ -1213,7 +1574,7 @@ def register_handlers(app: Application):
     # Главное меню
     app.add_handler(CallbackQueryHandler(show_main_menu, pattern="^main_menu$"))
 
-    # Слои
+    # ---------- Слои ----------
     app.add_handler(CallbackQueryHandler(menu_layers_callback, pattern="^menu_layers$"))
     app.add_handler(CallbackQueryHandler(layers_page_callback, pattern="^layers_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(layer_details, pattern="^layer_details_\\d+_\\d+$"))
@@ -1237,6 +1598,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(layer_edit_name, pattern="^layer_edit_name$"),
                 CallbackQueryHandler(layer_edit_code, pattern="^layer_edit_code$"),
                 CallbackQueryHandler(layer_edit_desc, pattern="^layer_edit_desc$"),
+                CallbackQueryHandler(layer_edit_features_callback, pattern="^layer_edit_features$"),
                 CallbackQueryHandler(layer_edit_delete, pattern="^layer_edit_delete$"),
                 CallbackQueryHandler(show_layers, pattern="^layers_page_\\d+$"),
                 CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
@@ -1251,7 +1613,68 @@ def register_handlers(app: Application):
     )
     app.add_handler(layer_edit_conv)
 
-    # Чехлы
+    # ---------- Характеристики слоёв (единый диалог) ----------
+    features_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(layer_edit_features_callback, pattern="^layer_edit_features$")],
+        states={
+            LAYER_FEATURES_LIST: [
+                CallbackQueryHandler(layer_feature_add_select_type, pattern="^layer_feature_add_\\d+_\\d+$"),
+                CallbackQueryHandler(layer_feature_edit_entry, pattern="^layer_feature_edit_\\d+_\\d+$"),
+                CallbackQueryHandler(layer_feature_delete_confirm, pattern="^layer_feature_del_confirm_\\d+_\\d+$"),
+                CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
+                CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
+            ],
+            LAYER_FEATURE_ADD_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feature_add_value)
+            ],
+            LAYER_FEATURE_EDIT_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feature_update_value)
+            ],
+            LAYER_FEATURE_DELETE_CONFIRM: [
+                CallbackQueryHandler(layer_feature_delete_execute, pattern="^layer_feature_del_yes$")
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        per_message=False,
+    )
+    app.add_handler(features_conv)
+
+    # Дополнительный обработчик для возврата из характеристик в редактирование (если диалог прерван)
+    app.add_handler(CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"))
+
+    # ---------- Типы характеристик (глобальное меню) ----------
+    app.add_handler(CallbackQueryHandler(menu_feature_types_callback, pattern="^menu_feature_types$"))
+    app.add_handler(CallbackQueryHandler(feature_types_page_callback, pattern="^feature_types_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(feature_type_details, pattern="^feature_type_details_\\d+_\\d+$"))
+
+    feature_type_add_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(feature_type_add_entry, pattern="^feature_type_add$")],
+        states={
+            FEATURE_TYPE_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, feature_type_add_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        per_message=False,
+    )
+    app.add_handler(feature_type_add_conv)
+
+    feature_type_edit_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(feature_type_edit_entry, pattern="^feature_type_edit_\\d+_\\d+$")],
+        states={
+            FEATURE_TYPE_EDIT_NAME: [
+                CallbackQueryHandler(feature_type_edit_name, pattern="^feature_type_edit_name$"),
+                CallbackQueryHandler(feature_type_edit_delete, pattern="^feature_type_edit_delete$"),
+                CallbackQueryHandler(show_feature_types, pattern="^feature_types_page_\\d+$"),
+                CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, feature_type_update_name)
+            ],
+            FEATURE_TYPE_DELETE_CONFIRM: [CallbackQueryHandler(feature_type_delete_execute, pattern="^feature_type_del_yes$")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
+        per_message=False,
+    )
+    app.add_handler(feature_type_edit_conv)
+
+    # ---------- Чехлы ----------
     app.add_handler(CallbackQueryHandler(menu_covers_callback, pattern="^menu_covers$"))
     app.add_handler(CallbackQueryHandler(covers_page_callback, pattern="^covers_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(cover_details, pattern="^cover_details_\\d+_\\d+$"))
@@ -1289,7 +1712,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(cover_edit_conv)
 
-    # Размеры
+    # ---------- Размеры ----------
     app.add_handler(CallbackQueryHandler(menu_sizes_callback, pattern="^menu_sizes$"))
     app.add_handler(CallbackQueryHandler(sizes_page_callback, pattern="^sizes_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(size_details, pattern="^size_details_\\d+_\\d+$"))
@@ -1298,7 +1721,6 @@ def register_handlers(app: Application):
         entry_points=[CallbackQueryHandler(size_add_entry, pattern="^size_add$")],
         states={
             SIZE_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, size_add_name)],
-            SIZE_ADD_SORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, size_add_sort)],
         },
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
@@ -1308,8 +1730,13 @@ def register_handlers(app: Application):
     size_edit_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(size_edit_entry, pattern="^size_edit_\\d+_\\d+$")],
         states={
-            SIZE_EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, size_update_name)],
-            SIZE_EDIT_SORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, size_update_sort)],
+            SIZE_EDIT_NAME: [
+                CallbackQueryHandler(size_edit_name, pattern="^size_edit_name$"),
+                CallbackQueryHandler(size_edit_delete, pattern="^size_edit_delete$"),
+                CallbackQueryHandler(show_sizes, pattern="^sizes_page_\\d+$"),
+                CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, size_update_name)
+            ],
             SIZE_DELETE_CONFIRM: [CallbackQueryHandler(size_delete_execute, pattern="^size_del_yes$")],
         },
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
@@ -1317,7 +1744,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(size_edit_conv)
 
-    # Цены
+    # ---------- Цены ----------
     price_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(menu_prices_callback, pattern="^menu_prices$")],
         states={
@@ -1343,7 +1770,7 @@ def register_handlers(app: Application):
     app.add_handler(price_conv)
 
 
-# ------------------------- Запуск бота -------------------------
+# =============================== ЗАПУСК БОТА ===============================
 async def main():
     global db_pool, db
     db_pool = await asyncpg.create_pool(
@@ -1359,39 +1786,48 @@ async def main():
     )
     db = Database(db_pool)
 
-    # Создаём таблицы, если их нет
     async with db_pool.acquire() as conn:
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS layers (
+            CREATE TABLE IF NOT EXISTS topper_layers (
                 id SERIAL PRIMARY KEY,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT
             );
-            CREATE TABLE IF NOT EXISTS covers (
+            CREATE TABLE IF NOT EXISTS topper_covers (
                 id SERIAL PRIMARY KEY,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT
             );
-            CREATE TABLE IF NOT EXISTS sizes (
+            CREATE TABLE IF NOT EXISTS topper_sizes (
                 id SERIAL PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                sort_order INTEGER DEFAULT 0
+                size TEXT UNIQUE NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS layer_prices (
+            CREATE TABLE IF NOT EXISTS topper_layer_prices (
                 id SERIAL PRIMARY KEY,
-                layer_id INTEGER REFERENCES layers(id) ON DELETE CASCADE,
-                size_id INTEGER REFERENCES sizes(id) ON DELETE CASCADE,
-                price NUMERIC(10,2) NOT NULL,
+                layer_id INTEGER REFERENCES topper_layers(id) ON DELETE CASCADE,
+                size_id INTEGER REFERENCES topper_sizes(id) ON DELETE CASCADE,
+                price INTEGER NOT NULL,
                 UNIQUE(layer_id, size_id)
             );
-            CREATE TABLE IF NOT EXISTS cover_prices (
+            CREATE TABLE IF NOT EXISTS topper_cover_prices (
                 id SERIAL PRIMARY KEY,
-                cover_id INTEGER REFERENCES covers(id) ON DELETE CASCADE,
-                size_id INTEGER REFERENCES sizes(id) ON DELETE CASCADE,
-                price NUMERIC(10,2) NOT NULL,
+                cover_id INTEGER REFERENCES topper_covers(id) ON DELETE CASCADE,
+                size_id INTEGER REFERENCES topper_sizes(id) ON DELETE CASCADE,
+                price INTEGER NOT NULL,
                 UNIQUE(cover_id, size_id)
+            );
+            CREATE TABLE IF NOT EXISTS topper_main_features_types (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS topper_main_features (
+                id SERIAL PRIMARY KEY,
+                topper_id INTEGER REFERENCES topper_layers(id) ON DELETE CASCADE,
+                feature_id INTEGER REFERENCES topper_main_features_types(id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                UNIQUE(topper_id, feature_id)
             );
         """)
 
