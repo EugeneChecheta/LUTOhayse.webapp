@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Telegram‑бот для управления справочниками топеров (слои, чехлы, размеры, цены, характеристики).
-Версия 3.2 — исправлено зависание при добавлении характеристики, управление характеристиками
-вынесено в единый диалог, доступ через карандашик редактирования слоя.
+Telegram‑бот для управления справочниками топеров (слои, чехлы, размеры, цены, характеристики слоёв).
+Версия 10.0 — добавлена система характеристик для слоёв (основные и дополнительные).
+Полностью переписан на основе структуры products_materials_bot.py.
 """
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 import asyncpg
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -23,13 +23,12 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# ------------------------- Пути к файлам -------------------------
+# ------------------------- Конфигурация -------------------------
 BASE_DIR = Path(__file__).parent
 TOKEN_FILE = BASE_DIR / "token_toppers.txt"
 CONFIG_DB_FILE = BASE_DIR / "config_db.txt"
 ADMIN_FILE = BASE_DIR / "admin_ids.txt"
 
-# ------------------------- Чтение конфигураций -------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -127,17 +126,19 @@ ADMIN_IDS = read_admin_ids()
     PRICE_INPUT,
     PRICE_DELETE_SELECT,
     PRICE_DELETE_CONFIRM,
-    # Новые состояния для характеристик (единый диалог)
-    FEATURE_TYPES_LIST,
-    FEATURE_TYPE_ADD_NAME,
-    FEATURE_TYPE_EDIT_NAME,
-    FEATURE_TYPE_DELETE_CONFIRM,
-    LAYER_FEATURES_LIST,          # просмотр характеристик
-    LAYER_FEATURE_ADD_SELECT_TYPE,# выбор типа для добавления
-    LAYER_FEATURE_ADD_VALUE,      # ввод значения
-    LAYER_FEATURE_EDIT_VALUE,     # редактирование значения
-    LAYER_FEATURE_DELETE_CONFIRM, # подтверждение удаления
-) = range(38)
+    LAYER_MAIN_FEATURES,
+    LAYER_MAIN_FEATURE_EDIT,
+    LAYER_EXTRA_FEATURES,
+    LAYER_EXTRA_ADD_NAME,
+    LAYER_EXTRA_ADD_VALUE,
+    LAYER_EXTRA_EDIT_NAME,
+    LAYER_EXTRA_EDIT_VALUE,
+    LAYER_EXTRA_DELETE,
+    MAIN_FEATURE_TYPES_LIST,
+    MAIN_FEATURE_TYPE_ADD,
+    MAIN_FEATURE_TYPE_EDIT,
+    MAIN_FEATURE_TYPE_DELETE,
+) = range(41)
 
 # ------------------------- Декоратор администратора -------------------------
 def admin_only(func):
@@ -155,26 +156,6 @@ def admin_only(func):
 
 
 CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
-
-
-async def send_or_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               text: str, keyboard: InlineKeyboardMarkup,
-                               new_message: bool = False):
-    """Отправляет новое сообщение или редактирует существующее, если это callback."""
-    if update.callback_query and not new_message:
-        try:
-            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
-            await update.callback_query.answer()
-            return
-        except Exception as e:
-            logger.warning(f"Не удалось отредактировать сообщение: {e}")
-            # Если не удалось отредактировать, отправим новое
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=text,
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
 
 
 # ------------------------- База данных -------------------------
@@ -215,7 +196,9 @@ class Database:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("DELETE FROM topper_layer_prices WHERE layer_id = $1", layer_id)
-                await conn.execute("DELETE FROM topper_main_features WHERE topper_id = $1", layer_id)
+                # Удаляем связанные характеристики
+                await conn.execute("DELETE FROM topper_layer_main_features WHERE layer_id = $1", layer_id)
+                await conn.execute("DELETE FROM topper_layer_extra_features WHERE layer_id = $1", layer_id)
                 result = await conn.execute("DELETE FROM topper_layers WHERE id = $1", layer_id)
                 return result != "DELETE 0"
 
@@ -371,98 +354,82 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM topper_cover_prices WHERE id = $1", price_id)
 
-    # ---------- Типы характеристик ----------
-    async def get_feature_types(self, offset=0, limit=10):
+    # ---------- Основные характеристики слоёв (справочник) ----------
+    async def get_layer_main_feature_types(self, offset=0, limit=10):
         async with self.pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM topper_main_features_types")
+            total = await conn.fetchval("SELECT COUNT(*) FROM topper_layer_main_features_types")
             rows = await conn.fetch(
-                "SELECT id, name FROM topper_main_features_types ORDER BY name OFFSET $1 LIMIT $2",
+                "SELECT id, name FROM topper_layer_main_features_types ORDER BY name OFFSET $1 LIMIT $2",
                 offset, limit
             )
             return [dict(r) for r in rows], total
 
-    async def get_feature_type_by_id(self, type_id: int):
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, name FROM topper_main_features_types WHERE id = $1", type_id)
-            return dict(row) if row else None
-
-    async def create_feature_type(self, name: str) -> int:
+    async def create_layer_main_feature_type(self, name: str) -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
-                "INSERT INTO topper_main_features_types (name) VALUES ($1) RETURNING id",
+                "INSERT INTO topper_layer_main_features_types (name) VALUES ($1) RETURNING id",
                 name
             )
 
-    async def update_feature_type(self, type_id: int, name: str):
+    async def update_layer_main_feature_type(self, feat_id: int, new_name: str):
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE topper_main_features_types SET name = $1 WHERE id = $2",
-                name, type_id
-            )
+            await conn.execute("UPDATE topper_layer_main_features_types SET name = $1 WHERE id = $2", new_name, feat_id)
 
-    async def delete_feature_type(self, type_id: int) -> bool:
+    async def delete_layer_main_feature_type(self, feat_id: int):
         async with self.pool.acquire() as conn:
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM topper_main_features WHERE feature_id = $1", type_id
-            )
-            if count > 0:
-                return False
-            result = await conn.execute("DELETE FROM topper_main_features_types WHERE id = $1", type_id)
-            return result != "DELETE 0"
+            await conn.execute("DELETE FROM topper_layer_main_features_types WHERE id = $1", feat_id)
 
-    async def is_feature_type_name_unique(self, name: str, exclude_id: Optional[int] = None) -> bool:
-        async with self.pool.acquire() as conn:
-            if exclude_id:
-                row = await conn.fetchrow(
-                    "SELECT id FROM topper_main_features_types WHERE name = $1 AND id != $2",
-                    name, exclude_id
-                )
-            else:
-                row = await conn.fetchrow("SELECT id FROM topper_main_features_types WHERE name = $1", name)
-            return row is None
-
-    async def get_all_feature_types(self):
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, name FROM topper_main_features_types ORDER BY name")
-            return [dict(r) for r in rows]
-
-    # ---------- Характеристики слоёв ----------
-    async def get_layer_features(self, layer_id: int):
+    async def get_layer_main_features(self, layer_id: int):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT mf.id, mf.feature_id, ft.name as feature_name, mf.value "
-                "FROM topper_main_features mf "
-                "JOIN topper_main_features_types ft ON mf.feature_id = ft.id "
-                "WHERE mf.topper_id = $1 "
-                "ORDER BY ft.name",
+                "SELECT mft.id as feature_id, mft.name as feature_name, COALESCE(pmf.value, '') as value "
+                "FROM topper_layer_main_features_types mft "
+                "LEFT JOIN topper_layer_main_features pmf ON mft.id = pmf.feature_id AND pmf.layer_id = $1 "
+                "ORDER BY mft.name",
                 layer_id
             )
             return [dict(r) for r in rows]
 
-    async def get_layer_feature(self, layer_id: int, feature_id: int):
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT id, topper_id, feature_id, value FROM topper_main_features "
-                "WHERE topper_id = $1 AND feature_id = $2",
-                layer_id, feature_id
-            )
-            return dict(row) if row else None
-
-    async def set_layer_feature(self, layer_id: int, feature_id: int, value: str):
+    async def set_layer_main_feature(self, layer_id: int, feature_id: int, value: str):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO topper_main_features (topper_id, feature_id, value) VALUES ($1, $2, $3) "
-                "ON CONFLICT (topper_id, feature_id) DO UPDATE SET value = $3",
+                "INSERT INTO topper_layer_main_features (layer_id, feature_id, value) "
+                "VALUES ($1, $2, $3) "
+                "ON CONFLICT (layer_id, feature_id) DO UPDATE SET value = $3",
                 layer_id, feature_id, value
             )
 
-    async def delete_layer_feature(self, feature_id: int):
+    # ---------- Дополнительные характеристики слоёв ----------
+    async def get_layer_extra_features(self, layer_id: int):
         async with self.pool.acquire() as conn:
-            await conn.execute("DELETE FROM topper_main_features WHERE id = $1", feature_id)
+            rows = await conn.fetch(
+                "SELECT id, name, value FROM topper_layer_extra_features WHERE layer_id = $1 ORDER BY name",
+                layer_id
+            )
+            return [dict(r) for r in rows]
 
-    async def delete_layer_features_by_layer(self, layer_id: int):
+    async def add_layer_extra_feature(self, layer_id: int, name: str, value: str) -> int:
         async with self.pool.acquire() as conn:
-            await conn.execute("DELETE FROM topper_main_features WHERE topper_id = $1", layer_id)
+            return await conn.fetchval(
+                "INSERT INTO topper_layer_extra_features (layer_id, name, value) VALUES ($1, $2, $3) RETURNING id",
+                layer_id, name, value
+            )
+
+    async def update_layer_extra_feature(self, feat_id: int, name: str = None, value: str = None):
+        async with self.pool.acquire() as conn:
+            if name is not None and value is not None:
+                await conn.execute(
+                    "UPDATE topper_layer_extra_features SET name = $1, value = $2 WHERE id = $3",
+                    name, value, feat_id
+                )
+            elif name is not None:
+                await conn.execute("UPDATE topper_layer_extra_features SET name = $1 WHERE id = $2", name, feat_id)
+            elif value is not None:
+                await conn.execute("UPDATE topper_layer_extra_features SET value = $1 WHERE id = $2", value, feat_id)
+
+    async def delete_layer_extra_feature(self, feat_id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM topper_layer_extra_features WHERE id = $1", feat_id)
 
 
 db_pool = None
@@ -470,26 +437,30 @@ db = None
 
 
 # ------------------------- Вспомогательные функции -------------------------
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new_message: bool = False):
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🧩 Слои", callback_data="menu_layers")],
         [InlineKeyboardButton("🧵 Чехлы", callback_data="menu_covers")],
         [InlineKeyboardButton("📐 Размеры", callback_data="menu_sizes")],
         [InlineKeyboardButton("💰 Цены (слои + чехлы)", callback_data="menu_prices")],
-        [InlineKeyboardButton("📋 Типы характеристик слоёв", callback_data="menu_feature_types")],
+        [InlineKeyboardButton("📋 Характеристики слоёв", callback_data="menu_layer_features")],
     ]
-    await send_or_edit_message(update, context, "🔧 *Главное меню управления топерами*",
-                               InlineKeyboardMarkup(keyboard), new_message)
+    text = "🔧 *Главное меню управления топерами*"
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text("Операция отменена.")
-        await show_main_menu(update, context, new_message=True)
+        await show_main_menu(update, context)
     else:
         await update.message.reply_text("Операция отменена.")
-        await show_main_menu(update, context, new_message=True)
+        await show_main_menu(update, context)
     return ConversationHandler.END
 
 
@@ -534,7 +505,12 @@ async def show_layers(update: Update, context: ContextTypes.DEFAULT_TYPE, page: 
     keyboard.append([InlineKeyboardButton("➕ Добавить слой", callback_data="layer_add")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["layers_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def layers_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -622,7 +598,8 @@ async def layer_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Название", callback_data="layer_edit_name"),
          InlineKeyboardButton("✏️ Код", callback_data="layer_edit_code")],
         [InlineKeyboardButton("✏️ Описание", callback_data="layer_edit_desc")],
-        [InlineKeyboardButton("📋 Характеристики", callback_data="layer_edit_features")],
+        [InlineKeyboardButton("📋 Основные характеристики", callback_data="layer_main_features")],
+        [InlineKeyboardButton("➕ Доп. характеристики", callback_data="layer_extra_features")],
         [InlineKeyboardButton("🗑️ Удалить слой", callback_data="layer_edit_delete")],
         [InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
@@ -631,186 +608,77 @@ async def layer_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return LAYER_EDIT_SELECT
 
 
-# ----- Характеристики слоя (единый диалог) -----
-async def layer_edit_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Вход в диалог управления характеристиками из режима редактирования слоя."""
+async def layer_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    layer_id = context.user_data.get("edit_layer_id")
-    page = context.user_data.get("edit_layer_page", 0)
-    if not layer_id:
-        await query.edit_message_text("❌ Ошибка: ID слоя не найден.")
-        return ConversationHandler.END
-    context.user_data["features_source"] = "edit"
-    return await show_layer_features(update, context, layer_id, page, source="edit")
+    await query.edit_message_text("Введите новое название слоя:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EDIT_NAME
 
 
-async def show_layer_features(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                              layer_id: int, page: int, source: str = "details"):
-    """Отображает список характеристик и возвращает состояние LAYER_FEATURES_LIST."""
+async def layer_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text
+    layer_id = context.user_data["edit_layer_id"]
     layer = await db.get_layer_by_id(layer_id)
-    if not layer:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Слой не найден.")
-        return ConversationHandler.END
-
-    features = await db.get_layer_features(layer_id)
-    all_types = await db.get_all_feature_types()
-    used_type_ids = {f['feature_id'] for f in features}
-    available_types = [t for t in all_types if t['id'] not in used_type_ids]
-
-    text = f"*Характеристики слоя {layer['name']} ({layer['code']})*\n\n"
-    if features:
-        for f in features:
-            text += f"• *{f['feature_name']}*: {f['value']}\n"
-    else:
-        text += "Нет характеристик.\n"
-
-    keyboard = []
-    # Кнопки для существующих характеристик (редактировать/удалить)
-    for f in features:
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"layer_feature_edit_{f['id']}_{page}"),
-            InlineKeyboardButton("🗑️", callback_data=f"layer_feature_del_confirm_{f['id']}_{page}")
-        ])
-    # Кнопки добавления новых характеристик
-    if available_types:
-        for t in available_types:
-            keyboard.append([InlineKeyboardButton(f"➕ Добавить {t['name']}", callback_data=f"layer_feature_add_{t['id']}_{page}")])
-    else:
-        keyboard.append([InlineKeyboardButton("⚠️ Все типы уже используются", callback_data="noop")])
-
-    # Кнопка "Назад" в зависимости от источника
-    if source == "edit":
-        keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data="layer_edit_back")])
-    else:
-        keyboard.append([InlineKeyboardButton("◀ К деталям слоя", callback_data=f"layer_details_{layer_id}_{page}")])
-        keyboard.append([InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")])
-    keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
-
-    context.user_data["layer_features_layer_id"] = layer_id
-    context.user_data["layer_features_page"] = page
-    context.user_data["features_source"] = source
-
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
-    return LAYER_FEATURES_LIST
+    await db.update_layer(layer_id, layer['code'], new_name, layer['description'])
+    await update.message.reply_text("✅ Название обновлено.")
+    await show_layers(update, context, context.user_data["edit_layer_page"])
+    return ConversationHandler.END
 
 
-# ----- Добавление значения характеристики -----
-async def layer_feature_add_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_edit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_")
-    feature_type_id = int(parts[3])
-    page = int(parts[4])
-    context.user_data["layer_feature_add_type_id"] = feature_type_id
-    context.user_data["layer_features_page"] = page
-    await query.edit_message_text("Введите значение для характеристики:", reply_markup=CANCEL_KEYBOARD)
-    return LAYER_FEATURE_ADD_VALUE
+    await query.edit_message_text("Введите новый код слоя (уникальный):", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EDIT_CODE
 
 
-async def layer_feature_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    value = update.message.text.strip()
-    layer_id = context.user_data.get("layer_features_layer_id")
-    feature_type_id = context.user_data.get("layer_feature_add_type_id")
-    page = context.user_data.get("layer_features_page", 0)
-    source = context.user_data.get("features_source", "details")
-
-    if not layer_id or not feature_type_id:
-        await update.message.reply_text("❌ Ошибка: не найден слой или тип характеристики.")
-        return ConversationHandler.END
-
-    try:
-        await db.set_layer_feature(layer_id, feature_type_id, value)
-        await update.message.reply_text("✅ Характеристика добавлена/обновлена.")
-    except Exception as e:
-        logger.error(f"Ошибка при сохранении характеристики: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при сохранении. Попробуйте снова.")
-        return ConversationHandler.END
-
-    # Показываем обновлённый список и остаёмся в диалоге характеристик
-    return await show_layer_features(update, context, layer_id, page, source)
+async def layer_update_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_code = update.message.text.strip()
+    layer_id = context.user_data["edit_layer_id"]
+    if not await db.is_layer_code_unique(new_code, exclude_id=layer_id):
+        await update.message.reply_text("❌ Код уже существует. Введите другой:", reply_markup=CANCEL_KEYBOARD)
+        return LAYER_EDIT_CODE
+    layer = await db.get_layer_by_id(layer_id)
+    await db.update_layer(layer_id, new_code, layer['name'], layer['description'])
+    await update.message.reply_text("✅ Код обновлён.")
+    await show_layers(update, context, context.user_data["edit_layer_page"])
+    return ConversationHandler.END
 
 
-# ----- Редактирование значения характеристики -----
-async def layer_feature_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_edit_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_")
-    feature_id = int(parts[3])
-    page = int(parts[4])
-    context.user_data["layer_feature_edit_id"] = feature_id
-    context.user_data["layer_features_page"] = page
-
-    async with db.pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT value FROM topper_main_features WHERE id = $1", feature_id)
-        current_value = row['value'] if row else ""
-    await query.edit_message_text(f"Введите новое значение (текущее: {current_value}):", reply_markup=CANCEL_KEYBOARD)
-    return LAYER_FEATURE_EDIT_VALUE
+    await query.edit_message_text("Введите новое описание (или '-' для очистки):", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EDIT_DESC
 
 
-async def layer_feature_update_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_value = update.message.text.strip()
-    feature_id = context.user_data.get("layer_feature_edit_id")
-    if not feature_id:
-        await update.message.reply_text("❌ Ошибка: ID характеристики не найден.")
-        return ConversationHandler.END
-
-    async with db.pool.acquire() as conn:
-        await conn.execute("UPDATE topper_main_features SET value = $1 WHERE id = $2", new_value, feature_id)
-
-    await update.message.reply_text("✅ Значение обновлено.")
-    layer_id = context.user_data.get("layer_features_layer_id")
-    page = context.user_data.get("layer_features_page", 0)
-    source = context.user_data.get("features_source", "details")
-    if not layer_id:
-        await update.message.reply_text("❌ Ошибка: ID слоя не найден.")
-        return ConversationHandler.END
-    return await show_layer_features(update, context, layer_id, page, source)
+async def layer_update_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_desc = update.message.text.strip()
+    if new_desc == "-":
+        new_desc = ""
+    layer_id = context.user_data["edit_layer_id"]
+    layer = await db.get_layer_by_id(layer_id)
+    await db.update_layer(layer_id, layer['code'], layer['name'], new_desc)
+    await update.message.reply_text("✅ Описание обновлено.")
+    await show_layers(update, context, context.user_data["edit_layer_page"])
+    return ConversationHandler.END
 
 
-# ----- Удаление характеристики -----
-async def layer_feature_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_")
-    feature_id = int(parts[3])
-    page = int(parts[4])
-    context.user_data["layer_feature_delete_id"] = feature_id
-    context.user_data["layer_features_page"] = page
-
-    async with db.pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT ft.name FROM topper_main_features mf "
-            "JOIN topper_main_features_types ft ON mf.feature_id = ft.id "
-            "WHERE mf.id = $1", feature_id
-        )
-        feature_name = row['name'] if row else "?"
+    layer_id = context.user_data["edit_layer_id"]
+    layer = await db.get_layer_by_id(layer_id)
     keyboard = [
-        [InlineKeyboardButton("✅ Да, удалить", callback_data="layer_feature_del_yes")],
-        [InlineKeyboardButton("❌ Нет", callback_data=f"layer_features_{context.user_data['layer_features_layer_id']}_{page}")]
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="layer_del_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data=f"layers_page_{context.user_data['edit_layer_page']}")]
     ]
-    await query.edit_message_text(f"Удалить характеристику *{feature_name}*?",
+    await query.edit_message_text(f"Удалить слой *{layer['name']}* (код {layer['code']}) навсегда? Все связанные цены и характеристики будут удалены.",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return LAYER_FEATURE_DELETE_CONFIRM
+    return LAYER_DELETE_CONFIRM
 
 
-async def layer_feature_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    feature_id = context.user_data.get("layer_feature_delete_id")
-    page = context.user_data.get("layer_features_page", 0)
-    layer_id = context.user_data.get("layer_features_layer_id")
-    if not feature_id or not layer_id:
-        await query.edit_message_text("❌ Ошибка: ID не найден.")
-        return ConversationHandler.END
-    await db.delete_layer_feature(feature_id)
-    await query.edit_message_text("✅ Характеристика удалена.")
-    source = context.user_data.get("features_source", "details")
-    return await show_layer_features(update, context, layer_id, page, source)
-
-
-# ----- Кнопка "Назад к редактированию" -----
-async def layer_edit_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     layer_id = context.user_data.get("edit_layer_id")
@@ -819,38 +687,13 @@ async def layer_edit_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Ошибка: ID слоя не найден.")
         await show_layers(update, context, page)
         return ConversationHandler.END
-
-    layer = await db.get_layer_by_id(layer_id)
-    if not layer:
-        await query.edit_message_text("❌ Слой не найден.")
-        await show_layers(update, context, page)
-        return ConversationHandler.END
-
-    text = (f"*Редактирование слоя {layer['code']}*\n\n"
-            f"📛 Название: {layer['name']}\n"
-            f"🔢 Код: {layer['code']}\n"
-            f"📝 Описание: {layer['description'] or '—'}")
-    keyboard = [
-        [InlineKeyboardButton("✏️ Название", callback_data="layer_edit_name"),
-         InlineKeyboardButton("✏️ Код", callback_data="layer_edit_code")],
-        [InlineKeyboardButton("✏️ Описание", callback_data="layer_edit_desc")],
-        [InlineKeyboardButton("📋 Характеристики", callback_data="layer_edit_features")],
-        [InlineKeyboardButton("🗑️ Удалить слой", callback_data="layer_edit_delete")],
-        [InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
-    ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return LAYER_EDIT_SELECT
-
-
-# -------------------- Остальные обработчики (сокращены для экономии места) --------------------
-# Здесь должны быть функции для чехлов, размеров, цен, типов характеристик (они не меняются)
-# Для краткости они будут вставлены из предыдущей версии, но с учётом изменений в импортах и состояниях.
-# В реальном коде они остаются без изменений, кроме того, что мы используем новый send_or_edit_message.
+    success = await db.delete_layer(layer_id)
+    await query.edit_message_text("✅ Слой удалён." if success else "❌ Слой не найден.")
+    await show_layers(update, context, page)
+    return ConversationHandler.END
 
 
 # =============================== ЧЕХЛЫ ===============================
-# (код аналогичен предыдущей версии, но с использованием send_or_edit_message)
 async def menu_covers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_covers(update, context, 0)
 
@@ -891,7 +734,11 @@ async def show_covers(update: Update, context: ContextTypes.DEFAULT_TYPE, page: 
     keyboard.append([InlineKeyboardButton("➕ Добавить чехол", callback_data="cover_add")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["covers_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def covers_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1112,7 +959,11 @@ async def show_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE, page: i
     keyboard.append([InlineKeyboardButton("➕ Добавить размер", callback_data="size_add")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["sizes_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def sizes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1270,12 +1121,12 @@ async def price_entity_selected(update: Update, context: ContextTypes.DEFAULT_TY
     entity_id = int(query.data.split("_")[-1])
     context.user_data["price_entity_id"] = entity_id
     price_type = context.user_data["price_type"]
-    await show_prices_for_entity(update, context, entity_id, price_type, new_message=False)
+    await show_prices_for_entity(update, context, entity_id, price_type)
     return PRICE_SIZE_SELECT
 
 
 async def show_prices_for_entity(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                 entity_id: int, price_type: str, new_message: bool = False):
+                                 entity_id: int, price_type: str):
     if price_type == "layer":
         prices = await db.get_layer_prices(entity_id)
         entity = await db.get_layer_by_id(entity_id)
@@ -1312,14 +1163,11 @@ async def show_prices_for_entity(update: Update, context: ContextTypes.DEFAULT_T
     keyboard.append([InlineKeyboardButton("◀ Назад к выбору типа", callback_data="prices_back")])
     keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
 
-    if new_message:
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                       text=text, reply_markup=InlineKeyboardMarkup(keyboard),
-                                       parse_mode="Markdown")
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard),
+                                                      parse_mode="Markdown")
     else:
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard),
-                                                          parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def price_add_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1351,7 +1199,7 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.set_cover_price(entity_id, size_id, price)
 
     await update.message.reply_text("✅ Цена сохранена.")
-    await show_prices_for_entity(update, context, entity_id, price_type, new_message=True)
+    await show_prices_for_entity(update, context, entity_id, price_type)
     return PRICE_SIZE_SELECT
 
 
@@ -1366,7 +1214,7 @@ async def price_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.delete_cover_price(price_id)
     await query.edit_message_text("✅ Цена удалена.")
     entity_id = context.user_data["price_entity_id"]
-    await show_prices_for_entity(update, context, entity_id, price_type, new_message=False)
+    await show_prices_for_entity(update, context, entity_id, price_type)
     return PRICE_SIZE_SELECT
 
 
@@ -1377,169 +1225,394 @@ async def prices_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PRICE_MENU
 
 
-# =============================== ТИПЫ ХАРАКТЕРИСТИК ===============================
-async def menu_feature_types_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_feature_types(update, context, 0)
+# =============================== ХАРАКТЕРИСТИКИ СЛОЁВ ===============================
+# ---------- Основные характеристики (справочник) ----------
+async def menu_layer_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пункт главного меню для управления справочником основных характеристик слоёв."""
+    query = update.callback_query
+    await query.answer()
+    await show_main_feature_types(update, context, 0)
 
 
-async def show_feature_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+async def show_main_feature_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
     offset = page * limit
-    types, total = await db.get_feature_types(offset, limit)
+    features, total = await db.get_layer_main_feature_types(offset, limit)
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     if page >= total_pages:
         page = total_pages - 1
         offset = page * limit
-        types, total = await db.get_feature_types(offset, limit)
+        features, total = await db.get_layer_main_feature_types(offset, limit)
 
-    text = "*Типы характеристик слоёв*\n\n"
-    if not types:
-        text += "Нет типов характеристик."
+    text = "*Основные характеристики слоёв (справочник)*\n\n"
+    if not features:
+        text += "Нет характеристик."
     else:
-        for t in types:
-            text += f"• {t['name']}\n"
+        for f in features:
+            text += f"• {f['name']}\n"
     text += f"\nСтраница {page+1} из {max(1, total_pages)}"
 
     keyboard = []
-    for t in types:
+    for f in features:
         keyboard.append([
-            InlineKeyboardButton(f"📋 {t['name']}", callback_data=f"feature_type_details_{t['id']}_{page}"),
-            InlineKeyboardButton("✏️", callback_data=f"feature_type_edit_{t['id']}_{page}"),
-            InlineKeyboardButton("🗑️", callback_data=f"feature_type_del_confirm_{t['id']}_{page}")
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_feat_type_edit_{f['id']}_{page}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_feat_type_del_{f['id']}_{page}")
         ])
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"feature_types_page_{page-1}"))
+        nav.append(InlineKeyboardButton("◀ Назад", callback_data=f"layer_feat_types_page_{page-1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"feature_types_page_{page+1}"))
+        nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"layer_feat_types_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("➕ Добавить тип", callback_data="feature_type_add")])
+    keyboard.append([InlineKeyboardButton("➕ Добавить характеристику", callback_data="layer_feat_type_add")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
-    context.user_data["feature_types_page"] = page
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+
+    context.user_data["layer_feat_types_page"] = page
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
-async def feature_types_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_feat_types_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     page = int(query.data.split("_")[-1])
-    await show_feature_types(update, context, page)
+    await show_main_feature_types(update, context, page)
 
 
-async def feature_type_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    parts = query.data.split("_")
-    type_id = int(parts[3])
-    page = int(parts[4])
-    ft = await db.get_feature_type_by_id(type_id)
-    if not ft:
-        await query.edit_message_text("❌ Тип не найден.")
-        return
-    text = f"*Тип характеристики*\n\n📛 Название: {ft['name']}"
-    keyboard = [
-        [InlineKeyboardButton("◀ К списку типов", callback_data=f"feature_types_page_{page}")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
-    ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-
-async def feature_type_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_feat_type_add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.edit_message_text("Введите название нового типа характеристики:", reply_markup=CANCEL_KEYBOARD)
-    return FEATURE_TYPE_ADD_NAME
+    await update.callback_query.edit_message_text("Введите название основной характеристики для слоёв:",
+                                                  reply_markup=CANCEL_KEYBOARD)
+    return MAIN_FEATURE_TYPE_ADD
 
 
-async def feature_type_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_feat_type_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
-    if not await db.is_feature_type_name_unique(name):
-        await update.message.reply_text("❌ Тип с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
-        return FEATURE_TYPE_ADD_NAME
-    await db.create_feature_type(name)
-    await update.message.reply_text(f"✅ Тип '{name}' добавлен.")
-    await show_feature_types(update, context, context.user_data.get("feature_types_page", 0))
+    await db.create_layer_main_feature_type(name)
+    await update.message.reply_text("✅ Характеристика добавлена.")
+    await show_main_feature_types(update, context, context.user_data.get("layer_feat_types_page", 0))
     return ConversationHandler.END
 
 
-async def feature_type_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def layer_feat_type_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split("_")
-    type_id = int(parts[3])
-    page = int(parts[4])
-    context.user_data["edit_feature_type_id"] = type_id
-    context.user_data["edit_feature_type_page"] = page
-    ft = await db.get_feature_type_by_id(type_id)
-    if not ft:
-        await query.edit_message_text("❌ Тип не найден.")
-        return ConversationHandler.END
-    text = f"*Редактирование типа*\n\n📛 Текущее название: {ft['name']}"
+    feat_id = int(parts[4])
+    page = int(parts[5])
+    context.user_data["edit_layer_feat_type_id"] = feat_id
+    context.user_data["edit_layer_feat_type_page"] = page
+    await query.edit_message_text("Введите новое название характеристики:", reply_markup=CANCEL_KEYBOARD)
+    return MAIN_FEATURE_TYPE_EDIT
+
+
+async def layer_feat_type_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text.strip()
+    feat_id = context.user_data["edit_layer_feat_type_id"]
+    await db.update_layer_main_feature_type(feat_id, new_name)
+    await update.message.reply_text("✅ Название обновлено.")
+    await show_main_feature_types(update, context, context.user_data["edit_layer_feat_type_page"])
+    return ConversationHandler.END
+
+
+async def layer_feat_type_del_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    feat_id = int(parts[4])
+    page = int(parts[5])
+    context.user_data["del_layer_feat_type_id"] = feat_id
+    context.user_data["del_layer_feat_type_page"] = page
     keyboard = [
-        [InlineKeyboardButton("✏️ Изменить название", callback_data="feature_type_edit_name")],
-        [InlineKeyboardButton("🗑️ Удалить тип", callback_data="feature_type_edit_delete")],
-        [InlineKeyboardButton("◀ К списку типов", callback_data=f"feature_types_page_{page}")],
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="layer_feat_type_del_yes")],
+        [InlineKeyboardButton("❌ Нет", callback_data=f"layer_feat_types_page_{page}")]
+    ]
+    await query.edit_message_text("Удалить эту характеристику? Значения для всех слоёв будут удалены.",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
+    return MAIN_FEATURE_TYPE_DELETE
+
+
+async def layer_feat_type_del_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    feat_id = context.user_data["del_layer_feat_type_id"]
+    page = context.user_data["del_layer_feat_type_page"]
+    await db.delete_layer_main_feature_type(feat_id)
+    await query.edit_message_text("✅ Характеристика удалена.")
+    await show_main_feature_types(update, context, page)
+    return ConversationHandler.END
+
+
+# ---------- Основные характеристики слоя (для конкретного слоя) ----------
+async def layer_main_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вызывается из редактирования слоя для просмотра/редактирования основных характеристик."""
+    query = update.callback_query
+    await query.answer()
+    layer_id = context.user_data["edit_layer_id"]
+    if not layer_id:
+        await query.edit_message_text("❌ Ошибка: слой не выбран.")
+        return ConversationHandler.END
+    context.user_data["layer_main_feat_layer_id"] = layer_id
+    features = await db.get_layer_main_features(layer_id)
+    text = "*Основные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        value_display = f['value'][:40] + "…" if len(f['value']) > 40 else f['value']
+        text += f"• **{f['feature_name']}**: {value_display}\n"
+        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"layer_mainfeat_edit_{f['feature_id']}")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_MAIN_FEATURES
+
+
+async def layer_main_feature_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    feature_id = int(query.data.split("_")[-1])
+    context.user_data["layer_main_feat_feature_id"] = feature_id
+    await query.edit_message_text("Введите новое значение для этой характеристики:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_MAIN_FEATURE_EDIT
+
+
+async def layer_main_feature_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value = update.message.text
+    layer_id = context.user_data["layer_main_feat_layer_id"]
+    feature_id = context.user_data["layer_main_feat_feature_id"]
+    await db.set_layer_main_feature(layer_id, feature_id, value)
+    await update.message.reply_text("✅ Значение сохранено.")
+    # Возвращаемся к списку характеристик
+    features = await db.get_layer_main_features(layer_id)
+    text = "*Основные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        value_display = f['value'][:40] + "…" if len(f['value']) > 40 else f['value']
+        text += f"• **{f['feature_name']}**: {value_display}\n"
+        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"layer_mainfeat_edit_{f['feature_id']}")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_MAIN_FEATURES
+
+
+# ---------- Дополнительные характеристики слоя ----------
+async def layer_extra_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    layer_id = context.user_data["edit_layer_id"]
+    if not layer_id:
+        await query.edit_message_text("❌ Ошибка: слой не выбран.")
+        return ConversationHandler.END
+    context.user_data["layer_extra_layer_id"] = layer_id
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите название дополнительной характеристики:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EXTRA_ADD_NAME
+
+
+async def layer_extra_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text
+    context.user_data["layer_extra_new_name"] = name
+    await update.message.reply_text("Теперь введите значение:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EXTRA_ADD_VALUE
+
+
+async def layer_extra_save_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    value = update.message.text
+    name = context.user_data["layer_extra_new_name"]
+    layer_id = context.user_data["layer_extra_layer_id"]
+    await db.add_layer_extra_feature(layer_id, name, value)
+    await update.message.reply_text("✅ Характеристика добавлена.")
+    # Обновляем список
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    feat_id = int(query.data.split("_")[-1])
+    context.user_data["layer_extra_edit_id"] = feat_id
+    keyboard = [
+        [InlineKeyboardButton("✏️ Название", callback_data="layer_extra_edit_name")],
+        [InlineKeyboardButton("✏️ Значение", callback_data="layer_extra_edit_value")],
+        [InlineKeyboardButton("◀ Отмена", callback_data="layer_extra_cancel")],
+    ]
+    await query.edit_message_text("Что хотите отредактировать?", reply_markup=InlineKeyboardMarkup(keyboard))
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новое название:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EXTRA_EDIT_NAME
+
+
+async def layer_extra_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Введите новое значение:", reply_markup=CANCEL_KEYBOARD)
+    return LAYER_EXTRA_EDIT_VALUE
+
+
+async def layer_extra_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text
+    feat_id = context.user_data["layer_extra_edit_id"]
+    await db.update_layer_extra_feature(feat_id, name=new_name)
+    await update.message.reply_text("✅ Название обновлено.")
+    # Возврат к списку
+    layer_id = context.user_data["layer_extra_layer_id"]
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_update_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_value = update.message.text
+    feat_id = context.user_data["layer_extra_edit_id"]
+    await db.update_layer_extra_feature(feat_id, value=new_value)
+    await update.message.reply_text("✅ Значение обновлено.")
+    layer_id = context.user_data["layer_extra_layer_id"]
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    feat_id = int(query.data.split("_")[-1])
+    await db.delete_layer_extra_feature(feat_id)
+    await query.edit_message_text("✅ Характеристика удалена.")
+    layer_id = context.user_data["layer_extra_layer_id"]
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_extra_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    layer_id = context.user_data["layer_extra_layer_id"]
+    # Просто возвращаемся в меню доп. характеристик
+    features = await db.get_layer_extra_features(layer_id)
+    text = "*Дополнительные характеристики слоя*\n\n"
+    keyboard = []
+    for f in features:
+        text += f"• **{f['name']}**: {f['value']}\n"
+        keyboard.append([
+            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"layer_extra_edit_{f['id']}"),
+            InlineKeyboardButton("🗑️", callback_data=f"layer_extra_del_{f['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="layer_extra_add")])
+    keyboard.append([InlineKeyboardButton("◀ Назад к редактированию слоя", callback_data=f"layer_edit_back")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return LAYER_EXTRA_FEATURES
+
+
+async def layer_edit_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Возврат из меню характеристик в редактирование слоя."""
+    query = update.callback_query
+    await query.answer()
+    layer_id = context.user_data.get("edit_layer_id")
+    page = context.user_data.get("edit_layer_page", 0)
+    if layer_id:
+        await show_layer_edit(update, context, layer_id, page)
+    else:
+        await query.edit_message_text("❌ Ошибка: слой не найден.")
+    return ConversationHandler.END
+
+
+async def show_layer_edit(update, context, layer_id, page):
+    """Показать экран редактирования слоя (дублирует часть layer_edit_entry)."""
+    layer = await db.get_layer_by_id(layer_id)
+    if not layer:
+        await update.message.reply_text("❌ Слой не найден.")
+        return
+    text = (f"*Редактирование слоя {layer['code']}*\n\n"
+            f"📛 Название: {layer['name']}\n"
+            f"🔢 Код: {layer['code']}\n"
+            f"📝 Описание: {layer['description'] or '—'}")
+    keyboard = [
+        [InlineKeyboardButton("✏️ Название", callback_data="layer_edit_name"),
+         InlineKeyboardButton("✏️ Код", callback_data="layer_edit_code")],
+        [InlineKeyboardButton("✏️ Описание", callback_data="layer_edit_desc")],
+        [InlineKeyboardButton("📋 Основные характеристики", callback_data="layer_main_features")],
+        [InlineKeyboardButton("➕ Доп. характеристики", callback_data="layer_extra_features")],
+        [InlineKeyboardButton("🗑️ Удалить слой", callback_data="layer_edit_delete")],
+        [InlineKeyboardButton("◀ К списку слоёв", callback_data=f"layers_page_{page}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return FEATURE_TYPE_EDIT_NAME
-
-
-async def feature_type_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Введите новое название типа:", reply_markup=CANCEL_KEYBOARD)
-    return FEATURE_TYPE_EDIT_NAME
-
-
-async def feature_type_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_name = update.message.text.strip()
-    type_id = context.user_data["edit_feature_type_id"]
-    if not await db.is_feature_type_name_unique(new_name, exclude_id=type_id):
-        await update.message.reply_text("❌ Тип с таким названием уже существует. Введите другое:", reply_markup=CANCEL_KEYBOARD)
-        return FEATURE_TYPE_EDIT_NAME
-    await db.update_feature_type(type_id, new_name)
-    await update.message.reply_text("✅ Название обновлено.")
-    await show_feature_types(update, context, context.user_data["edit_feature_type_page"])
-    return ConversationHandler.END
-
-
-async def feature_type_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    type_id = context.user_data["edit_feature_type_id"]
-    ft = await db.get_feature_type_by_id(type_id)
-    keyboard = [
-        [InlineKeyboardButton("✅ Да, удалить", callback_data="feature_type_del_yes")],
-        [InlineKeyboardButton("❌ Нет", callback_data=f"feature_types_page_{context.user_data['edit_feature_type_page']}")]
-    ]
-    await query.edit_message_text(f"Удалить тип *{ft['name']}*? Это возможно только если он не используется ни в одном слое.",
-                                  reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return FEATURE_TYPE_DELETE_CONFIRM
-
-
-async def feature_type_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    type_id = context.user_data.get("edit_feature_type_id")
-    page = context.user_data.get("edit_feature_type_page", 0)
-    if not type_id:
-        await query.edit_message_text("❌ Ошибка: ID типа не найден.")
-        await show_feature_types(update, context, page)
-        return ConversationHandler.END
-    success = await db.delete_feature_type(type_id)
-    if success:
-        await query.edit_message_text("✅ Тип удалён.")
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
-        await query.edit_message_text("❌ Нельзя удалить тип, так как он используется в характеристиках слоёв.")
-    await show_feature_types(update, context, page)
-    return ConversationHandler.END
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 # =============================== ОБРАБОТЧИК КОМАНД ===============================
 @admin_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await show_main_menu(update, context, new_message=True)
+    await show_main_menu(update, context)
 
 
 @admin_only
@@ -1566,6 +1639,10 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
 
+async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+
+
 # =============================== РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ===============================
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
@@ -1573,6 +1650,7 @@ def register_handlers(app: Application):
 
     # Главное меню
     app.add_handler(CallbackQueryHandler(show_main_menu, pattern="^main_menu$"))
+    app.add_handler(CallbackQueryHandler(menu_layer_features_callback, pattern="^menu_layer_features$"))
 
     # ---------- Слои ----------
     app.add_handler(CallbackQueryHandler(menu_layers_callback, pattern="^menu_layers$"))
@@ -1598,8 +1676,10 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(layer_edit_name, pattern="^layer_edit_name$"),
                 CallbackQueryHandler(layer_edit_code, pattern="^layer_edit_code$"),
                 CallbackQueryHandler(layer_edit_desc, pattern="^layer_edit_desc$"),
-                CallbackQueryHandler(layer_edit_features_callback, pattern="^layer_edit_features$"),
+                CallbackQueryHandler(layer_main_features_menu, pattern="^layer_main_features$"),
+                CallbackQueryHandler(layer_extra_features_menu, pattern="^layer_extra_features$"),
                 CallbackQueryHandler(layer_edit_delete, pattern="^layer_edit_delete$"),
+                CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
                 CallbackQueryHandler(show_layers, pattern="^layers_page_\\d+$"),
                 CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
             ],
@@ -1607,72 +1687,56 @@ def register_handlers(app: Application):
             LAYER_EDIT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_update_code)],
             LAYER_EDIT_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_update_desc)],
             LAYER_DELETE_CONFIRM: [CallbackQueryHandler(layer_delete_execute, pattern="^layer_del_yes$")],
+            # Для основных характеристик
+            LAYER_MAIN_FEATURES: [
+                CallbackQueryHandler(layer_main_feature_edit, pattern="^layer_mainfeat_edit_\\d+$"),
+                CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
+            ],
+            LAYER_MAIN_FEATURE_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_main_feature_save)],
+            # Для дополнительных характеристик
+            LAYER_EXTRA_FEATURES: [
+                CallbackQueryHandler(layer_extra_add_name, pattern="^layer_extra_add$"),
+                CallbackQueryHandler(layer_extra_edit_entry, pattern="^layer_extra_edit_\\d+$"),
+                CallbackQueryHandler(layer_extra_delete, pattern="^layer_extra_del_\\d+$"),
+                CallbackQueryHandler(layer_extra_cancel, pattern="^layer_extra_cancel$"),
+                CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
+            ],
+            LAYER_EXTRA_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_extra_add_value)],
+            LAYER_EXTRA_ADD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_extra_save_new)],
+            LAYER_EXTRA_EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_extra_update_name)],
+            LAYER_EXTRA_EDIT_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_extra_update_value)],
         },
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(layer_edit_conv)
 
-    # ---------- Характеристики слоёв (единый диалог) ----------
-    features_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(layer_edit_features_callback, pattern="^layer_edit_features$")],
-        states={
-            LAYER_FEATURES_LIST: [
-                CallbackQueryHandler(layer_feature_add_select_type, pattern="^layer_feature_add_\\d+_\\d+$"),
-                CallbackQueryHandler(layer_feature_edit_entry, pattern="^layer_feature_edit_\\d+_\\d+$"),
-                CallbackQueryHandler(layer_feature_delete_confirm, pattern="^layer_feature_del_confirm_\\d+_\\d+$"),
-                CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
-                CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
-            ],
-            LAYER_FEATURE_ADD_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feature_add_value)
-            ],
-            LAYER_FEATURE_EDIT_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feature_update_value)
-            ],
-            LAYER_FEATURE_DELETE_CONFIRM: [
-                CallbackQueryHandler(layer_feature_delete_execute, pattern="^layer_feature_del_yes$")
-            ],
-        },
+    # ---------- Основные характеристики слоёв (справочник) ----------
+    app.add_handler(CallbackQueryHandler(layer_feat_types_page, pattern="^layer_feat_types_page_\\d+$"))
+
+    layer_feat_type_add_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(layer_feat_type_add_entry, pattern="^layer_feat_type_add$")],
+        states={MAIN_FEATURE_TYPE_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feat_type_add_name)]},
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
-    app.add_handler(features_conv)
+    app.add_handler(layer_feat_type_add_conv)
 
-    # Дополнительный обработчик для возврата из характеристик в редактирование (если диалог прерван)
-    app.add_handler(CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"))
-
-    # ---------- Типы характеристик (глобальное меню) ----------
-    app.add_handler(CallbackQueryHandler(menu_feature_types_callback, pattern="^menu_feature_types$"))
-    app.add_handler(CallbackQueryHandler(feature_types_page_callback, pattern="^feature_types_page_\\d+$"))
-    app.add_handler(CallbackQueryHandler(feature_type_details, pattern="^feature_type_details_\\d+_\\d+$"))
-
-    feature_type_add_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(feature_type_add_entry, pattern="^feature_type_add$")],
-        states={
-            FEATURE_TYPE_ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, feature_type_add_name)],
-        },
+    layer_feat_type_edit_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(layer_feat_type_edit_entry, pattern="^layer_feat_type_edit_\\d+_\\d+$")],
+        states={MAIN_FEATURE_TYPE_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_feat_type_edit_name)]},
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
-    app.add_handler(feature_type_add_conv)
+    app.add_handler(layer_feat_type_edit_conv)
 
-    feature_type_edit_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(feature_type_edit_entry, pattern="^feature_type_edit_\\d+_\\d+$")],
-        states={
-            FEATURE_TYPE_EDIT_NAME: [
-                CallbackQueryHandler(feature_type_edit_name, pattern="^feature_type_edit_name$"),
-                CallbackQueryHandler(feature_type_edit_delete, pattern="^feature_type_edit_delete$"),
-                CallbackQueryHandler(show_feature_types, pattern="^feature_types_page_\\d+$"),
-                CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, feature_type_update_name)
-            ],
-            FEATURE_TYPE_DELETE_CONFIRM: [CallbackQueryHandler(feature_type_delete_execute, pattern="^feature_type_del_yes$")],
-        },
+    layer_feat_type_del_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(layer_feat_type_del_confirm, pattern="^layer_feat_type_del_\\d+_\\d+$")],
+        states={MAIN_FEATURE_TYPE_DELETE: [CallbackQueryHandler(layer_feat_type_del_execute, pattern="^layer_feat_type_del_yes$")]},
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
-    app.add_handler(feature_type_edit_conv)
+    app.add_handler(layer_feat_type_del_conv)
 
     # ---------- Чехлы ----------
     app.add_handler(CallbackQueryHandler(menu_covers_callback, pattern="^menu_covers$"))
@@ -1761,6 +1825,7 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(price_delete, pattern="^price_del_\\d+$"),
                 CallbackQueryHandler(prices_back, pattern="^prices_back$"),
                 CallbackQueryHandler(show_main_menu, pattern="^main_menu$"),
+                CallbackQueryHandler(noop_callback, pattern="^noop$"),
             ],
             PRICE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, price_input)],
         },
@@ -1786,6 +1851,7 @@ async def main():
     )
     db = Database(db_pool)
 
+    # Создание/обновление таблиц (включая новые для характеристик слоёв)
     async with db_pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS topper_layers (
@@ -1818,18 +1884,26 @@ async def main():
                 price INTEGER NOT NULL,
                 UNIQUE(cover_id, size_id)
             );
-            CREATE TABLE IF NOT EXISTS topper_main_features_types (
+            -- Таблицы для характеристик слоёв
+            CREATE TABLE IF NOT EXISTS topper_layer_main_features_types (
                 id SERIAL PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS topper_main_features (
+            CREATE TABLE IF NOT EXISTS topper_layer_main_features (
                 id SERIAL PRIMARY KEY,
-                topper_id INTEGER REFERENCES topper_layers(id) ON DELETE CASCADE,
-                feature_id INTEGER REFERENCES topper_main_features_types(id) ON DELETE CASCADE,
+                layer_id INTEGER REFERENCES topper_layers(id) ON DELETE CASCADE,
+                feature_id INTEGER REFERENCES topper_layer_main_features_types(id) ON DELETE CASCADE,
                 value TEXT NOT NULL,
-                UNIQUE(topper_id, feature_id)
+                UNIQUE(layer_id, feature_id)
+            );
+            CREATE TABLE IF NOT EXISTS topper_layer_extra_features (
+                id SERIAL PRIMARY KEY,
+                layer_id INTEGER REFERENCES topper_layers(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                value TEXT NOT NULL
             );
         """)
+        logger.info("Таблицы созданы/проверены.")
 
     request = HTTPXRequest(
         connect_timeout=30.0,
@@ -1842,7 +1916,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот для управления топерами запущен.")
+    logging.info("Бот для управления топерами запущен (с характеристиками слоёв).")
     await application.updater.start_polling()
     await asyncio.Event().wait()
 

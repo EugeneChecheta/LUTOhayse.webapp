@@ -10,6 +10,10 @@ DROP TABLE IF EXISTS topper_orders CASCADE;
 DROP TABLE IF EXISTS topper_extra_features CASCADE;
 DROP TABLE IF EXISTS topper_main_features CASCADE;
 DROP TABLE IF EXISTS topper_main_features_types CASCADE;
+-- Новые таблицы для характеристик слоёв
+DROP TABLE IF EXISTS topper_layer_extra_features CASCADE;
+DROP TABLE IF EXISTS topper_layer_main_features CASCADE;
+DROP TABLE IF EXISTS topper_layer_main_features_types CASCADE;
 DROP TABLE IF EXISTS topper_layer_prices CASCADE;
 DROP TABLE IF EXISTS topper_cover_prices CASCADE;
 DROP TABLE IF EXISTS topper_layers CASCADE;
@@ -229,6 +233,40 @@ CREATE TABLE topper_cover_prices (
     CONSTRAINT uq_tcp_cover_size UNIQUE(cover_id, size_id)
 );
 
+-- ---------- Характеристики слоёв (добавлены в версии 10.0) ----------
+CREATE TABLE topper_layer_main_features_types (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE topper_layer_main_features (
+    id SERIAL PRIMARY KEY,
+    layer_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_tlmf_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES topper_layers(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_tlmf_feature
+        FOREIGN KEY (feature_id)
+        REFERENCES topper_layer_main_features_types(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_tlmf_layer_feature UNIQUE(layer_id, feature_id)
+);
+
+CREATE TABLE topper_layer_extra_features (
+    id SERIAL PRIMARY KEY,
+    layer_id INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_tlef_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES topper_layers(id)
+        ON DELETE CASCADE
+);
+
+-- ---------- Характеристики топеров (изделий) ----------
 CREATE TABLE topper_main_features_types (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE
@@ -346,10 +384,20 @@ CREATE INDEX idx_tlp_layer ON topper_layer_prices(layer_id);
 CREATE INDEX idx_tlp_size ON topper_layer_prices(size_id);
 CREATE INDEX idx_tcp_cover ON topper_cover_prices(cover_id);
 CREATE INDEX idx_tcp_size ON topper_cover_prices(size_id);
+
+-- Индексы для характеристик слоёв
+CREATE INDEX idx_tlmf_layer ON topper_layer_main_features(layer_id);
+CREATE INDEX idx_tlmf_feature ON topper_layer_main_features(feature_id);
+CREATE INDEX idx_tlef_layer ON topper_layer_extra_features(layer_id);
+CREATE INDEX idx_topper_layer_main_features_types_name ON topper_layer_main_features_types(name);
+
+-- Индексы для характеристик топеров (изделий)
 CREATE INDEX idx_tmf_topper ON topper_main_features(topper_id);
 CREATE INDEX idx_tmf_feature ON topper_main_features(feature_id);
 CREATE INDEX idx_tef_topper ON topper_extra_features(topper_id);
 CREATE INDEX idx_topper_main_features_types_name ON topper_main_features_types(name);
+
+-- Индексы для заказов топеров
 CREATE INDEX idx_topper_orders_session ON topper_orders(session_id);
 CREATE INDEX idx_topper_orders_date ON topper_orders(order_date);
 CREATE INDEX idx_topper_orders_user ON topper_orders(user_id);
