@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Конструктор матраца | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/mattress.css">
+    <style>
+        /* Дополнительные стили для шагов и слоёв */
+        .step { display: none; }
+        .step.active { display: block; }
+        .btn:disabled { opacity: 0.5; pointer-events: none; }
+        .layer-details { display: none; margin-top: 5px; padding: 8px; background: #f5f5f5; border-radius: 4px; }
+        .layer-details.open { display: block; }
+        .layer-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 6px; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+        .layer-info { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .layer-name { font-weight: 500; }
+        .layer-price { color: #628b35; font-weight: 600; }
+        .layer-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .btn-small { padding: 3px 10px; font-size: 0.8rem; border-radius: 4px; border: none; cursor: pointer; }
+        .btn-detail { background: #e0e0e0; }
+        .btn-add { background: #628b35; color: white; }
+        .btn-add:hover { background: #4f702a; }
+        .btn-remove { background: #e3342f; color: white; }
+        .btn-remove:hover { background: #b91c1c; }
+        .chosen-layer { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-bottom: 1px solid #eee; }
+        .chosen-layer-name { font-weight: 500; }
+        .chosen-layer-price { color: #628b35; font-weight: 600; }
+        .empty-message { color: #888; font-style: italic; padding: 10px 0; }
+        .size-grid, .cover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 10px; }
+        .size-card, .cover-card { padding: 8px 6px; border: 1px solid #ddd; border-radius: 6px; text-align: center; cursor: pointer; transition: all 0.2s; background: #f9f9f9; }
+        .size-card.selected, .cover-card.selected { border-color: #628b35; background: #e8f0e0; box-shadow: 0 0 0 2px #628b35; }
+        .size-name, .cover-name { font-weight: 600; display: block; }
+        .cover-price { font-weight: 600; color: #628b35; margin-top: 4px; }
+        .layers-layout { display: flex; gap: 30px; }
+        .layers-list-container, .layers-chosen-container { flex: 1; min-width: 0; }
+        .layers-list, .chosen-layers { max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 12px; padding: 10px; background: #fff; }
+        .layer-photo { max-width: 80px; max-height: 80px; border-radius: 4px; }
+        .layer-details-content { display: flex; flex-direction: column; gap: 4px; }
+        .detail-row { display: flex; gap: 8px; }
+        .detail-label { font-weight: 600; color: #555; }
+        .step-actions { display: flex; flex-wrap: wrap; gap: 15px; justify-content: flex-end; margin-top: 20px; }
+        .btn { padding: 8px 20px; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; }
+        .btn-primary { background: #628b35; color: white; }
+        .btn-primary:hover:not(:disabled) { background: #4f702a; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-secondary:hover { background: #5a6268; }
+        .total-price-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 14px 30px; box-shadow: 0 -2px 10px rgba(0,0,0,0.08); display: flex; justify-content: center; align-items: center; font-size: 22px; font-weight: 700; z-index: 999; border-top: 1px solid #ddd; }
+        .total-price-bar span:last-child { color: #628b35; margin-left: 10px; }
+        .detail-toggle { cursor: pointer; color: #628b35; font-weight: 500; }
+        .detail-panel { display: none; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 8px; }
+        .detail-panel.open { display: block; }
+        .type-selector { display: flex; gap: 20px; margin-bottom: 20px; }
+        .type-btn { padding: 10px 20px; border: 2px solid #ddd; border-radius: 30px; background: #fff; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        .type-btn.selected { border-color: #628b35; background: #e8f0e0; }
+        .height-input { margin-top: 10px; }
+        .height-input label { font-weight: 500; }
+        .height-input input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; width: 100px; }
+        @media (max-width: 768px) {
+            .layers-layout { flex-direction: column; }
+            .total-price-bar { font-size: 18px; padding: 10px 15px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Иконки профиля и корзины (как в toppers) -->
+    <div class="profile-icon-wrapper" id="profileIcon">
+        <a href="/profile" class="profile-fixed-link">
+            <img src="/media/interface/profile_icon.svg" alt="Профиль">
+        </a>
+    </div>
+    <div class="cart-icon-wrapper">
+        <a href="/cart" class="cart-fixed-link">
+            <img src="/media/interface/cart_icon.svg" alt="Корзина">
+            <span id="cart-count" class="cart-count-badge">0</span>
+        </a>
+    </div>
+
+    <header>
+        <section class="main__header">
+            <div class="header__container">
+                <div class="menu__body">
+                    <nav class="menu__body menu__body-main">
+                        <ul class="menu__list">
+                            <li class="menu__item site-logo">
+                                <h1 class="logo">
+                                    <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                                </h1>
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </section>
+    </header>
+
+    <main class="mattress-container">
+        <h1>Конструктор матраца</h1>
+        <div class="mattress-steps">
+            <!-- Шаг 1: Выбор типа -->
+            <div id="step-type" class="step active">
+                <h2>Шаг 1. Выберите тип матраца</h2>
+                <div class="type-selector">
+                    <button class="type-btn" data-type="new">Новый матрац</button>
+                    <button class="type-btn" data-type="old">Докупить слои к старому</button>
+                </div>
+                <div id="height-input-container" style="display:none;">
+                    <div class="height-input">
+                        <label>Введите высоту существующего матраца (см):</label>
+                        <input type="number" id="initialHeight" min="1" value="10">
+                    </div>
+                </div>
+                <div class="step-actions">
+                    <button class="btn btn-primary" id="confirmTypeBtn" disabled>Далее →</button>
+                </div>
+            </div>
+
+            <!-- Шаг 2: Выбор размера -->
+            <div id="step-size" class="step">
+                <h2>Шаг 2. Выберите размер</h2>
+                <div class="size-grid" id="sizeGrid"></div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" id="backFromSize">Назад</button>
+                    <button class="btn btn-primary" id="confirmSizeBtn" disabled>Подтвердить размер</button>
+                </div>
+            </div>
+
+            <!-- Шаг 3: Выбор слоёв -->
+            <div id="step-layers" class="step">
+                <h2>Шаг 3. Выберите слои</h2>
+                <div class="layers-layout">
+                    <div class="layers-list-container">
+                        <h3>Доступные слои</h3>
+                        <div id="layersList" class="layers-list"></div>
+                    </div>
+                    <div class="layers-chosen-container">
+                        <h3>Выбранные слои</h3>
+                        <div id="chosenLayers" class="chosen-layers"></div>
+                    </div>
+                </div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" id="backFromLayers">Назад</button>
+                    <button class="btn btn-primary" id="confirmLayersBtn" disabled>Далее →</button>
+                </div>
+            </div>
+
+            <!-- Шаг 4: Выбор чехла (совмещён с подтверждением) -->
+            <div id="step-cover" class="step">
+                <h2>Шаг 4. Выберите чехол</h2>
+                <div class="cover-grid" id="coverGrid"></div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" id="backFromCover">Назад</button>
+                    <button class="btn btn-primary" id="addToCartBtn" disabled>Добавить в корзину</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Итоговая цена и высота -->
+        <div class="total-price-bar">
+            <span>Итоговая стоимость: </span>
+            <span id="totalPriceDisplay">0 ₽</span>
+            <span style="margin-left: 20px; font-weight: 400; font-size: 16px;">Высота: <span id="totalHeightDisplay">0</span> см</span>
+            <span class="detail-toggle" id="detailToggle" style="margin-left: 20px; font-weight: 400; font-size: 14px;">Подробнее ▼</span>
+        </div>
+        <div class="detail-panel" id="detailPanel">
+            <div><strong>Цена:</strong> слои: <span id="detailLayersPrice">0</span> ₽, чехол: <span id="detailCoverPrice">0</span> ₽</div>
+            <div><strong>Высота:</strong> основа: <span id="detailInitialHeight">0</span> см, слои (по 5 см): <span id="detailLayersHeight">0</span> см</div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="footer-top">
+            <div class="footer-left">
+                <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+                <div class="phone-label">Звонок по России бесплатный</div>
+                <div class="phone-number">8 (999) 700-05-50</div>
+                <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                    Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+                </div>
+                <div style="margin-top: 12px;">
+                    <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                        <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                        ВКонтакте
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div>
+        </div>
+    </footer>
+
+    <script>
+        // Состояние
+        let state = {
+            step: 1,
+            type: null,         // 'new' или 'old'
+            initialHeight: 0,
+            size: null,
+            layers: [],
+            cover: null,
+            allSizes: [],
+            allLayers: [],
+            allCovers: []
+        };
+
+        // DOM элементы
+        const stepType = document.getElementById('step-type');
+        const stepSize = document.getElementById('step-size');
+        const stepLayers = document.getElementById('step-layers');
+        const stepCover = document.getElementById('step-cover');
+        const typeBtns = document.querySelectorAll('.type-btn');
+        const heightInputContainer = document.getElementById('height-input-container');
+        const initialHeightInput = document.getElementById('initialHeight');
+        const confirmTypeBtn = document.getElementById('confirmTypeBtn');
+        const sizeGrid = document.getElementById('sizeGrid');
+        const confirmSizeBtn = document.getElementById('confirmSizeBtn');
+        const backFromSize = document.getElementById('backFromSize');
+        const layersList = document.getElementById('layersList');
+        const chosenLayers = document.getElementById('chosenLayers');
+        const confirmLayersBtn = document.getElementById('confirmLayersBtn');
+        const backFromLayers = document.getElementById('backFromLayers');
+        const coverGrid = document.getElementById('coverGrid');
+        const addToCartBtn = document.getElementById('addToCartBtn');
+        const backFromCover = document.getElementById('backFromCover');
+        const totalPriceDisplay = document.getElementById('totalPriceDisplay');
+        const totalHeightDisplay = document.getElementById('totalHeightDisplay');
+        const detailToggle = document.getElementById('detailToggle');
+        const detailPanel = document.getElementById('detailPanel');
+        const detailLayersPrice = document.getElementById('detailLayersPrice');
+        const detailCoverPrice = document.getElementById('detailCoverPrice');
+        const detailInitialHeight = document.getElementById('detailInitialHeight');
+        const detailLayersHeight = document.getElementById('detailLayersHeight');
+
+        // Вспомогательные функции
+        function showStep(step) {
+            [stepType, stepSize, stepLayers, stepCover].forEach(el => el.classList.remove('active'));
+            if (step === 1) stepType.classList.add('active');
+            else if (step === 2) stepSize.classList.add('active');
+            else if (step === 3) stepLayers.classList.add('active');
+            else if (step === 4) stepCover.classList.add('active');
+            state.step = step;
+        }
+
+        function updateTotals() {
+            let totalPrice = 0;
+            let totalHeight = state.initialHeight;
+            state.layers.forEach(l => {
+                totalPrice += (l.price || 0);
+                totalHeight += 5;
+            });
+            if (state.cover) {
+                totalPrice += (state.cover.price || 0);
+            }
+            totalPriceDisplay.textContent = totalPrice + ' ₽';
+            totalHeightDisplay.textContent = totalHeight;
+
+            // Детали
+            let layersPrice = state.layers.reduce((sum, l) => sum + (l.price || 0), 0);
+            let coverPrice = state.cover ? state.cover.price : 0;
+            detailLayersPrice.textContent = layersPrice;
+            detailCoverPrice.textContent = coverPrice;
+            detailInitialHeight.textContent = state.initialHeight;
+            detailLayersHeight.textContent = state.layers.length * 5;
+        }
+
+        function renderSizes() {
+            sizeGrid.innerHTML = '';
+            state.allSizes.forEach(s => {
+                const card = document.createElement('div');
+                card.className = 'size-card';
+                card.dataset.id = s.id;
+                card.innerHTML = `<span class="size-name">${s.name}</span>`;
+                card.addEventListener('click', async () => {
+                    document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                    state.size = s;
+                    confirmSizeBtn.disabled = false;
+                    await loadLayersAndCovers(s.id);
+                    updateTotals();
+                });
+                sizeGrid.appendChild(card);
+            });
+        }
+
+        async function loadLayersAndCovers(sizeId) {
+            try {
+                const [layersRes, coversRes] = await Promise.all([
+                    fetch(`/api/mattress/layers?size_id=${sizeId}`),
+                    fetch(`/api/mattress/covers?size_id=${sizeId}`)
+                ]);
+                if (!layersRes.ok || !coversRes.ok) throw new Error('Ошибка загрузки');
+                state.allLayers = await layersRes.json();
+                state.allCovers = await coversRes.json();
+                renderLayersList();
+                renderCovers();
+                state.layers = [];
+                state.cover = null;
+                renderChosenLayers();
+                addToCartBtn.disabled = true;
+                confirmLayersBtn.disabled = true;
+                document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+                updateTotals();
+
+                // Автовыбор чехла, если только один
+                if (state.allCovers.length === 1) {
+                    state.cover = state.allCovers[0];
+                    document.querySelector('.cover-card')?.classList.add('selected');
+                    addToCartBtn.disabled = false;
+                    updateTotals();
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Не удалось загрузить данные для выбранного размера');
+            }
+        }
+
+        function renderLayersList() {
+            layersList.innerHTML = '';
+            state.allLayers.forEach(l => {
+                const div = document.createElement('div');
+                div.className = 'layer-item';
+                const color = l.color_text || '#000000';
+                const photoUrl = `/media/layers/${l.code}.webp`;
+                div.innerHTML = `
+                    <div class="layer-info">
+                        <img src="${photoUrl}" onerror="this.style.display='none'" class="layer-photo" alt="${l.name}">
+                        <div>
+                            <span class="layer-name" style="color: ${color};">${l.name}</span>
+                            <div style="font-size: 0.8rem; color: #888;">Код: ${l.code}</div>
+                            <div style="font-size: 0.9rem;">${l.description || ''}</div>
+                            <div style="font-size: 0.85rem; margin-top: 4px;">
+                                ${l.main_features.map(f => `<span><strong>${f.name}:</strong> ${f.value}</span>`).join(' | ')}
+                                ${l.extra_features.map(f => `<span><strong>${f.name}:</strong> ${f.value}</span>`).join(' | ')}
+                            </div>
+                        </div>
+                        <span class="layer-price">${l.price} ₽</span>
+                    </div>
+                    <div class="layer-actions">
+                        <button class="btn btn-small btn-add" data-id="${l.id}">Добавить</button>
+                    </div>
+                `;
+                layersList.appendChild(div);
+            });
+
+            document.querySelectorAll('.btn-add').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = parseInt(btn.dataset.id);
+                    const layer = state.allLayers.find(l => l.id === id);
+                    if (layer) {
+                        state.layers.push({...layer});
+                        renderChosenLayers();
+                        updateTotals();
+                        confirmLayersBtn.disabled = false;
+                    }
+                });
+            });
+        }
+
+        function renderChosenLayers() {
+            chosenLayers.innerHTML = '';
+            if (state.layers.length === 0) {
+                chosenLayers.innerHTML = '<div class="empty-message">Слои не выбраны</div>';
+                confirmLayersBtn.disabled = true;
+                return;
+            }
+            state.layers.forEach((l, index) => {
+                const div = document.createElement('div');
+                div.className = 'chosen-layer';
+                const color = l.color_text || '#000000';
+                div.innerHTML = `
+                    <span class="chosen-layer-name" style="color: ${color};">${l.name}</span>
+                    <span class="chosen-layer-price">${l.price} ₽</span>
+                    <button class="btn btn-small btn-remove" data-index="${index}">Убрать</button>
+                `;
+                chosenLayers.appendChild(div);
+            });
+
+            document.querySelectorAll('.btn-remove').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.index);
+                    state.layers.splice(idx, 1);
+                    renderChosenLayers();
+                    updateTotals();
+                    confirmLayersBtn.disabled = (state.layers.length === 0);
+                });
+            });
+            confirmLayersBtn.disabled = false;
+        }
+
+        function renderCovers() {
+            coverGrid.innerHTML = '';
+            state.allCovers.forEach(c => {
+                const card = document.createElement('div');
+                card.className = 'cover-card';
+                card.dataset.id = c.id;
+                const photoUrl = `/media/covers/${c.code}.webp`;
+                card.innerHTML = `
+                    <img src="${photoUrl}" onerror="this.style.display='none'" style="max-width:60px; max-height:60px; border-radius:4px; display:block; margin:0 auto 6px;">
+                    <span class="cover-name">${c.name}</span>
+                    <span class="cover-price">${c.price} ₽</span>
+                `;
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
+                    card.classList.add('selected');
+                    state.cover = c;
+                    addToCartBtn.disabled = false;
+                    updateTotals();
+                });
+                coverGrid.appendChild(card);
+            });
+        }
+
+        // Навигация
+        function goToStep(step) {
+            if (step === 1) {
+                // сброс до шага 1
+                state.size = null;
+                state.layers = [];
+                state.cover = null;
+                state.allLayers = [];
+                state.allCovers = [];
+                document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
+                document.querySelectorAll('.cover-card').forEach(c => c.classList.remove('selected'));
+                confirmSizeBtn.disabled = true;
+                confirmLayersBtn.disabled = true;
+                addToCartBtn.disabled = true;
+                renderChosenLayers();
+                renderLayersList();
+                renderCovers();
+                showStep(1);
+                updateTotals();
+            } else if (step === 2) {
+                if (!state.type) {
+                    alert('Сначала выберите тип матраца');
+                    return;
+                }
+                showStep(2);
+                // Загружаем размеры, если ещё не загружены
+                if (state.allSizes.length === 0) loadSizes();
+            } else if (step === 3) {
+                if (!state.size) {
+                    alert('Сначала выберите размер');
+                    return;
+                }
+                showStep(3);
+                confirmLayersBtn.disabled = (state.layers.length === 0);
+            } else if (step === 4) {
+                if (state.layers.length === 0) {
+                    alert('Добавьте хотя бы один слой');
+                    return;
+                }
+                showStep(4);
+                if (state.allCovers.length === 1 && !state.cover) {
+                    state.cover = state.allCovers[0];
+                    document.querySelector('.cover-card')?.classList.add('selected');
+                    addToCartBtn.disabled = false;
+                    updateTotals();
+                }
+            }
+            updateTotals();
+        }
+
+        async function loadSizes() {
+            try {
+                const res = await fetch('/api/mattress/sizes');
+                if (!res.ok) throw new Error('Ошибка загрузки размеров');
+                state.allSizes = await res.json();
+                renderSizes();
+            } catch (err) {
+                console.error(err);
+                alert('Не удалось загрузить размеры');
+            }
+        }
+
+        // Обработчики
+        typeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                typeBtns.forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                state.type = btn.dataset.type;
+                if (state.type === 'old') {
+                    heightInputContainer.style.display = 'block';
+                    state.initialHeight = parseInt(initialHeightInput.value) || 0;
+                } else {
+                    heightInputContainer.style.display = 'none';
+                    state.initialHeight = 0;
+                }
+                confirmTypeBtn.disabled = false;
+                updateTotals();
+            });
+        });
+
+        initialHeightInput.addEventListener('change', () => {
+            state.initialHeight = parseInt(initialHeightInput.value) || 0;
+            updateTotals();
+        });
+
+        confirmTypeBtn.addEventListener('click', () => goToStep(2));
+        backFromSize.addEventListener('click', () => goToStep(1));
+        confirmSizeBtn.addEventListener('click', () => goToStep(3));
+        backFromLayers.addEventListener('click', () => goToStep(2));
+        confirmLayersBtn.addEventListener('click', () => goToStep(4));
+        backFromCover.addEventListener('click', () => goToStep(3));
+
+        addToCartBtn.addEventListener('click', async () => {
+            if (!state.size || state.layers.length === 0 || !state.cover) {
+                alert('Необходимо выбрать размер, хотя бы один слой и чехол');
+                return;
+            }
+            const payload = {
+                size_id: state.size.id,
+                layer_ids: state.layers.map(l => l.id),
+                cover_id: state.cover.id,
+                initial_height: state.initialHeight,
+                is_new: state.type === 'new',
+                quantity: 1
+            };
+            try {
+                const resp = await fetch('/api/cart/add-mattress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    alert('Матрац добавлен в корзину!');
+                    updateCartCount();
+                } else {
+                    alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Не удалось добавить матрац в корзину');
+            }
+        });
+
+        detailToggle.addEventListener('click', () => {
+            detailPanel.classList.toggle('open');
+            detailToggle.textContent = detailPanel.classList.contains('open') ? 'Подробнее ▲' : 'Подробнее ▼';
+        });
+
+        // Обновление счётчика корзины
+        async function updateCartCount() {
+            try {
+                const resp = await fetch('/api/cart');
+                const data = await resp.json();
+                const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+                const cartCountSpan = document.getElementById('cart-count');
+                if (cartCountSpan) cartCountSpan.textContent = totalItems;
+            } catch (e) { console.error(e); }
+        }
+        updateCartCount();
+        setInterval(updateCartCount, 5000);
+
+        // Профиль
+        async function updateProfileIcon() {
+            try {
+                const resp = await fetch('/api/auth/me');
+                const data = await resp.json();
+                const profileIcon = document.getElementById('profileIcon');
+                if (profileIcon) {
+                    profileIcon.style.background = data.authenticated ? '#628b35' : '#e3342f';
+                }
+            } catch(e) { console.error(e); }
+        }
+        updateProfileIcon();
+
+        // Инициализация
+        loadSizes();
+        showStep(1);
+        updateTotals();
+    </script>
+</body>
+</html>

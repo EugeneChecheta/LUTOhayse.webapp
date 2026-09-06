@@ -1,0 +1,136 @@
+-- =====================================================================
+-- ДОБАВЛЕНИЕ ТАБЛИЦ ДЛЯ КОНСТРУКТОРА МАТРАЦЕВ
+-- PostgreSQL
+-- =====================================================================
+
+-- Удаляем новые таблицы (если существуют) в правильном порядке
+DROP TABLE IF EXISTS mattress_order_items CASCADE;
+DROP TABLE IF EXISTS mattress_orders CASCADE;
+DROP TABLE IF EXISTS mattress_cover_prices CASCADE;
+DROP TABLE IF EXISTS mattress_layers_prices CASCADE;
+DROP TABLE IF EXISTS mattress_cover CASCADE;
+DROP TABLE IF EXISTS mattress_layers CASCADE;
+DROP TABLE IF EXISTS mattress_sizes CASCADE;
+
+-- ==================== РАЗМЕРЫ МАТРАЦЕВ ====================
+CREATE TABLE mattress_sizes (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE          -- например '140x70'
+);
+
+-- ==================== СЛОИ МАТРАЦЕВ ====================
+CREATE TABLE mattress_layers (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT
+);
+
+-- ==================== ЧЕХЛЫ МАТРАЦЕВ ====================
+CREATE TABLE mattress_cover (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT
+);
+
+-- ==================== ЦЕНЫ СЛОЁВ В ЗАВИСИМОСТИ ОТ РАЗМЕРА ====================
+CREATE TABLE mattress_layers_prices (
+    id SERIAL PRIMARY KEY,
+    layer_id INTEGER NOT NULL,
+    size_id INTEGER NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    CONSTRAINT fk_mlp_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES mattress_layers(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_mlp_size
+        FOREIGN KEY (size_id)
+        REFERENCES mattress_sizes(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_mlp_layer_size UNIQUE (layer_id, size_id)
+);
+
+-- ==================== ЦЕНЫ ЧЕХЛОВ В ЗАВИСИМОСТИ ОТ РАЗМЕРА ====================
+CREATE TABLE mattress_cover_prices (
+    id SERIAL PRIMARY KEY,
+    cover_id INTEGER NOT NULL,
+    size_id INTEGER NOT NULL,
+    price INTEGER NOT NULL CHECK (price >= 0),
+    CONSTRAINT fk_mcp_cover
+        FOREIGN KEY (cover_id)
+        REFERENCES mattress_cover(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_mcp_size
+        FOREIGN KEY (size_id)
+        REFERENCES mattress_sizes(id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_mcp_cover_size UNIQUE (cover_id, size_id)
+);
+
+-- ==================== ЗАКАЗЫ МАТРАЦЕВ ====================
+CREATE TABLE mattress_orders (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL,
+    user_id INTEGER,
+    user_name VARCHAR(200) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(200),
+    address TEXT,
+    comment TEXT,
+    contact_time VARCHAR(100),
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'Ожидает подтверждения',
+    size_id INTEGER NOT NULL,
+    initial_height INTEGER DEFAULT 0,            -- 0 – матрац с нуля, иначе введённая пользователем высота
+    cover_id INTEGER NOT NULL,
+    cover_price INTEGER NOT NULL CHECK (cover_price >= 0),
+    CONSTRAINT fk_mo_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_mo_size
+        FOREIGN KEY (size_id)
+        REFERENCES mattress_sizes(id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_mo_cover
+        FOREIGN KEY (cover_id)
+        REFERENCES mattress_cover(id)
+        ON DELETE RESTRICT
+);
+
+-- ==================== ПОЗИЦИИ ЗАКАЗОВ МАТРАЦЕВ (СЛОИ) ====================
+CREATE TABLE mattress_order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL,
+    layer_id INTEGER NOT NULL,
+    layer_code VARCHAR(100) NOT NULL,
+    layer_name VARCHAR(200) NOT NULL,
+    quantity INTEGER DEFAULT 1 CHECK (quantity > 0),
+    price_per_unit INTEGER NOT NULL CHECK (price_per_unit >= 0),
+    total_price INTEGER NOT NULL CHECK (total_price >= 0),
+    CONSTRAINT fk_moi_order
+        FOREIGN KEY (order_id)
+        REFERENCES mattress_orders(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_moi_layer
+        FOREIGN KEY (layer_id)
+        REFERENCES mattress_layers(id)
+        ON DELETE RESTRICT
+);
+
+-- ==================== ИНДЕКСЫ ДЛЯ НОВЫХ ТАБЛИЦ ====================
+CREATE INDEX idx_mattress_layers_code ON mattress_layers(code);
+CREATE INDEX idx_mattress_cover_code ON mattress_cover(code);
+CREATE INDEX idx_mattress_sizes_name ON mattress_sizes(name);
+CREATE INDEX idx_mlp_layer ON mattress_layers_prices(layer_id);
+CREATE INDEX idx_mlp_size ON mattress_layers_prices(size_id);
+CREATE INDEX idx_mcp_cover ON mattress_cover_prices(cover_id);
+CREATE INDEX idx_mcp_size ON mattress_cover_prices(size_id);
+CREATE INDEX idx_mattress_orders_session ON mattress_orders(session_id);
+CREATE INDEX idx_mattress_orders_date ON mattress_orders(order_date);
+CREATE INDEX idx_mattress_orders_user ON mattress_orders(user_id);
+CREATE INDEX idx_mattress_orders_size ON mattress_orders(size_id);
+CREATE INDEX idx_mattress_orders_cover ON mattress_orders(cover_id);
+CREATE INDEX idx_moi_order ON mattress_order_items(order_id);
+CREATE INDEX idx_moi_layer ON mattress_order_items(layer_id);

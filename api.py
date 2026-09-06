@@ -1,3 +1,6 @@
+# api.py
+# Полностью переработанный файл API для поддержки конструктора матрацев
+
 import psycopg2
 import os
 from flask import Flask, jsonify, send_from_directory, abort, request, session, redirect
@@ -22,7 +25,6 @@ CORS(app, supports_credentials=True)
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
 
-
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
 def get_db_config():
     config_path = Path(__file__).parent / 'telegram_admin_panel' / 'config_db.txt'
@@ -34,9 +36,7 @@ def get_db_config():
                 config[k] = v
     return config
 
-
 DB_CONFIG = get_db_config()
-
 
 def get_db_connection():
     return psycopg2.connect(
@@ -46,7 +46,6 @@ def get_db_connection():
         user=DB_CONFIG['user'],
         password=DB_CONFIG['password']
     )
-
 
 # ----- Загрузка конфигурации бота для уведомлений о заказах -----
 ORDER_BOT_TOKEN = None
@@ -69,23 +68,34 @@ def load_order_bot_config():
 
 load_order_bot_config()
 
-
-def send_order_notification(order_id, user_name, phone, total_sum):
+def send_order_notification(order_id, user_name, phone, total_sum, order_type='product'):
     """Отправляет уведомление о новом заказе всем администраторам через Telegram бота (urllib)."""
     if not ORDER_BOT_TOKEN or not ORDER_ADMIN_IDS:
         app.logger.warning("Не настроен бот для уведомлений о заказах – сообщение не отправлено")
         return
 
-    text = (
-        f"🆕 *Новый заказ!*\n"
-        f"Номер: #{order_id}\n"
-        f"Клиент: {user_name}\n"
-        f"Телефон: {phone}\n"
-        f"Сумма: {total_sum} ₽"
-    )
+    if order_type == 'mattress':
+        text = (
+            f"🛏️ *Новый заказ матраца!*\n"
+            f"Номер: #{order_id}\n"
+            f"Клиент: {user_name}\n"
+            f"Телефон: {phone}\n"
+            f"Сумма: {total_sum} ₽"
+        )
+        callback = f"mattress_order_details_{order_id}"
+    else:
+        text = (
+            f"🆕 *Новый заказ!*\n"
+            f"Номер: #{order_id}\n"
+            f"Клиент: {user_name}\n"
+            f"Телефон: {phone}\n"
+            f"Сумма: {total_sum} ₽"
+        )
+        callback = f"order_details_{order_id}_0"
+
     keyboard = {
         "inline_keyboard": [[
-            {"text": "📋 Посмотреть заказ", "callback_data": f"order_details_{order_id}_0"}
+            {"text": "📋 Посмотреть заказ", "callback_data": callback}
         ]]
     }
     reply_markup = json.dumps(keyboard)
@@ -111,7 +121,6 @@ def send_order_notification(order_id, user_name, phone, total_sum):
 
     for admin_id in ORDER_ADMIN_IDS:
         threading.Thread(target=send_to_admin, args=(admin_id,)).start()
-
 
 # ----- Вспомогательная функция для создания таблиц, если их нет, и добавления недостающих колонок -----
 def init_db():
@@ -155,7 +164,8 @@ def init_db():
             material_code VARCHAR(100) NOT NULL,
             material_name VARCHAR(200) NOT NULL,
             cost INTEGER NOT NULL,
-            quantity INTEGER DEFAULT 1
+            quantity INTEGER DEFAULT 1,
+            extra_data TEXT
         );
     """)
 
@@ -266,15 +276,168 @@ def init_db():
     if cur.fetchone()[0] == 0:
         cur.execute("ALTER TABLE topper_covers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
 
+    # ========== НОВЫЕ ТАБЛИЦЫ ДЛЯ КОНСТРУКТОРА МАТРАЦЕВ ==========
+    # Размеры
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_sizes (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL UNIQUE
+        );
+    """)
+    # Слои
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_layers (
+            id SERIAL PRIMARY KEY,
+            code VARCHAR(100) NOT NULL UNIQUE,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            color_text VARCHAR(20) DEFAULT '#000000',
+            is_hidden BOOLEAN DEFAULT FALSE
+        );
+    """)
+    # Чехлы
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_cover (
+            id SERIAL PRIMARY KEY,
+            code VARCHAR(100) NOT NULL UNIQUE,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            is_hidden BOOLEAN DEFAULT FALSE
+        );
+    """)
+    # Цены слоёв
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_layers_prices (
+            id SERIAL PRIMARY KEY,
+            layer_id INTEGER NOT NULL,
+            size_id INTEGER NOT NULL,
+            price INTEGER NOT NULL CHECK (price >= 0),
+            CONSTRAINT fk_mlp_layer
+                FOREIGN KEY (layer_id)
+                REFERENCES mattress_layers(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_mlp_size
+                FOREIGN KEY (size_id)
+                REFERENCES mattress_sizes(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_mlp_layer_size UNIQUE (layer_id, size_id)
+        );
+    """)
+    # Цены чехлов
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_cover_prices (
+            id SERIAL PRIMARY KEY,
+            cover_id INTEGER NOT NULL,
+            size_id INTEGER NOT NULL,
+            price INTEGER NOT NULL CHECK (price >= 0),
+            CONSTRAINT fk_mcp_cover
+                FOREIGN KEY (cover_id)
+                REFERENCES mattress_cover(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_mcp_size
+                FOREIGN KEY (size_id)
+                REFERENCES mattress_sizes(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_mcp_cover_size UNIQUE (cover_id, size_id)
+        );
+    """)
+    # Типы основных характеристик слоёв
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_layer_main_features_types (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL UNIQUE
+        );
+    """)
+    # Основные характеристики слоёв
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_layer_main_features (
+            id SERIAL PRIMARY KEY,
+            layer_id INTEGER NOT NULL,
+            feature_id INTEGER NOT NULL,
+            value TEXT,
+            CONSTRAINT fk_mlmf_layer
+                FOREIGN KEY (layer_id)
+                REFERENCES mattress_layers(id)
+                ON DELETE CASCADE,
+            CONSTRAINT fk_mlmf_feature
+                FOREIGN KEY (feature_id)
+                REFERENCES mattress_layer_main_features_types(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_mlmf_layer_feature UNIQUE (layer_id, feature_id)
+        );
+    """)
+    # Дополнительные характеристики слоёв
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_layer_extra_features (
+            id SERIAL PRIMARY KEY,
+            layer_id INTEGER NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            value TEXT,
+            CONSTRAINT fk_mlef_layer
+                FOREIGN KEY (layer_id)
+                REFERENCES mattress_layers(id)
+                ON DELETE CASCADE,
+            CONSTRAINT uq_mlef_layer_name UNIQUE (layer_id, name)
+        );
+    """)
+    # Заказы матрацев
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_orders (
+            id SERIAL PRIMARY KEY,
+            session_id VARCHAR(100) NOT NULL,
+            user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            user_name VARCHAR(200) NOT NULL,
+            phone VARCHAR(50) NOT NULL,
+            email VARCHAR(200),
+            address TEXT,
+            comment TEXT,
+            contact_time VARCHAR(100),
+            order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status VARCHAR(50) DEFAULT 'Ожидает подтверждения',
+            size_id INTEGER NOT NULL REFERENCES mattress_sizes(id) ON DELETE RESTRICT,
+            initial_height INTEGER DEFAULT 0,
+            cover_id INTEGER NOT NULL REFERENCES mattress_cover(id) ON DELETE RESTRICT,
+            cover_price INTEGER NOT NULL CHECK (cover_price >= 0)
+        );
+    """)
+    # Позиции заказов матрацев (слои)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mattress_order_items (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES mattress_orders(id) ON DELETE CASCADE,
+            layer_id INTEGER NOT NULL REFERENCES mattress_layers(id) ON DELETE RESTRICT,
+            layer_code VARCHAR(100) NOT NULL,
+            layer_name VARCHAR(200) NOT NULL,
+            quantity INTEGER DEFAULT 1 CHECK (quantity > 0),
+            price_per_unit INTEGER NOT NULL CHECK (price_per_unit >= 0),
+            total_price INTEGER NOT NULL CHECK (total_price >= 0)
+        );
+    """)
+
+    # Индексы для новых таблиц
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_layers_code ON mattress_layers(code);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_cover_code ON mattress_cover(code);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_sizes_name ON mattress_sizes(name);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mlp_layer ON mattress_layers_prices(layer_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mlp_size ON mattress_layers_prices(size_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mcp_cover ON mattress_cover_prices(cover_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mcp_size ON mattress_cover_prices(size_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_orders_session ON mattress_orders(session_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_orders_date ON mattress_orders(order_date);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_orders_user ON mattress_orders(user_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_orders_size ON mattress_orders(size_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_orders_cover ON mattress_orders(cover_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_moi_order ON mattress_order_items(order_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_moi_layer ON mattress_order_items(layer_id);")
+
     conn.commit()
     cur.close()
     conn.close()
 
-
 init_db()  # Вызов при старте
 
+# ==================== СУЩЕСТВУЮЩИЕ API (без изменений) ====================
 
-# ----- API: список типов товаров (без изменений) -----
 @app.route('/api/types')
 def product_types():
     try:
@@ -289,8 +452,6 @@ def product_types():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
-# ----- API: список флагов (тегов) -----
 @app.route('/api/flags')
 def flags():
     try:
@@ -305,8 +466,6 @@ def flags():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
-# ----- API: список товаров с фильтрацией и пагинацией -----
 @app.route('/api/products')
 def products():
     try:
@@ -330,7 +489,6 @@ def products():
             )
         """
 
-        # Базовый запрос для получения данных
         base_query = f"""
             SELECT p.code, p.name, p.min_cost
             FROM products p
@@ -355,12 +513,10 @@ def products():
             params.append(flag_ids)
             params.append(len(flag_ids))
 
-        # Запрос для подсчёта общего количества
         count_query = f"SELECT COUNT(*) FROM ({base_query}) AS sub"
         cur.execute(count_query, params)
         total = cur.fetchone()[0]
 
-        # Запрос с пагинацией
         paginated_query = base_query + " ORDER BY p.id LIMIT %s OFFSET %s"
         params_paginated = params + [limit, (page - 1) * limit]
         cur.execute(paginated_query, params_paginated)
@@ -375,8 +531,6 @@ def products():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
-# ----- API: детальная информация о товаре по коду -----
 @app.route('/api/product/<code>')
 def product_details(code):
     try:
@@ -459,8 +613,6 @@ def product_details(code):
         app.logger.error(f"API /api/product/<code> error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
-# ----- API: список материалов -----
 @app.route('/api/materials')
 def get_materials():
     try:
@@ -495,17 +647,13 @@ def get_materials():
         app.logger.error(f"API /api/materials error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
 # ========= ГАЛЕРЕЯ =========
-
 GALLERY_DIR = Path(__file__).parent / 'media' / 'gallery'
 
 def get_gallery_projects(page=1, limit=10):
-    """Возвращает список проектов (папок) с пагинацией, отсортированных по дате (новые сверху)."""
     if not GALLERY_DIR.exists():
         return [], 0
     folders = [f for f in GALLERY_DIR.iterdir() if f.is_dir()]
-    # Сортируем по имени (дата) по убыванию
     folders.sort(key=lambda x: x.name, reverse=True)
     total = len(folders)
     start = (page - 1) * limit
@@ -513,13 +661,11 @@ def get_gallery_projects(page=1, limit=10):
     paginated = folders[start:end]
     projects = []
     for folder in paginated:
-        # Читаем описание
         desc_file = folder / 'description.txt'
         description = ''
         if desc_file.exists():
             with open(desc_file, 'r', encoding='utf-8') as f:
                 description = f.read().strip()
-        # Собираем изображения
         images = sorted(folder.glob('*.webp'))
         preview = f'/media/gallery/{folder.name}/{images[0].name}' if images else None
         projects.append({
@@ -530,7 +676,6 @@ def get_gallery_projects(page=1, limit=10):
             'date': folder.name
         })
     return projects, total
-
 
 @app.route('/api/gallery/projects')
 def gallery_projects():
@@ -547,7 +692,6 @@ def gallery_projects():
         'page': page,
         'limit': limit
     })
-
 
 @app.route('/api/gallery/project/<folder>')
 def gallery_project(folder):
@@ -567,9 +711,7 @@ def gallery_project(folder):
         'description': description
     })
 
-
 # ========= АВТЕНТИФИКАЦИЯ И ПРОФИЛЬ =========
-
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -600,7 +742,6 @@ def register():
     finally:
         cur.close()
         conn.close()
-
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -635,12 +776,10 @@ def login():
         cur.close()
         conn.close()
 
-
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
     session.pop('user_id', None)
     return jsonify({'success': True})
-
 
 @app.route('/api/auth/me')
 def get_current_user():
@@ -673,7 +812,6 @@ def get_current_user():
         cur.close()
         conn.close()
 
-
 @app.route('/api/auth/profile', methods=['PUT'])
 def update_profile():
     user_id = session.get('user_id')
@@ -702,8 +840,6 @@ def update_profile():
         cur.close()
         conn.close()
 
-
-# ========= СМЕНА ПАРОЛЯ =========
 @app.route('/api/auth/change-password', methods=['POST'])
 def change_password():
     app.logger.info("Запрос на смену пароля получен")
@@ -760,8 +896,7 @@ def change_password():
         cur.close()
         conn.close()
 
-
-# ========= ИСТОРИЯ ЗАКАЗОВ =========
+# ========= ИСТОРИЯ ЗАКАЗОВ (объединённая) =========
 @app.route('/api/orders/history')
 def order_history():
     user_id = session.get('user_id')
@@ -770,16 +905,34 @@ def order_history():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # Получаем заказы продуктов
         cur.execute("""
-            SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status
+            SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status, 'product' as type
             FROM orders
             WHERE user_id = %s
-            ORDER BY order_date DESC
         """, (user_id,))
-        orders = []
-        for row in cur.fetchall():
-            orders.append({
-                'id': row[0],
+        product_orders = cur.fetchall()
+
+        # Получаем заказы матрацев
+        cur.execute("""
+            SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status, 'mattress' as type
+            FROM mattress_orders
+            WHERE user_id = %s
+        """, (user_id,))
+        mattress_orders = cur.fetchall()
+
+        # Объединяем
+        all_orders = list(product_orders) + list(mattress_orders)
+        # Сортируем по дате (поле order_date - индекс 7)
+        all_orders.sort(key=lambda x: x[7], reverse=True)
+
+        result = []
+        for row in all_orders:
+            order_id = row[0]
+            order_type = row[9]
+            order_data = {
+                'id': order_id,
+                'type': order_type,
                 'user_name': row[1],
                 'phone': row[2],
                 'email': row[3],
@@ -788,34 +941,71 @@ def order_history():
                 'contact_time': row[6],
                 'order_date': row[7].isoformat(),
                 'status': row[8]
-            })
-        for order in orders:
-            cur.execute("""
-                SELECT product_code, product_name, material_name, cost, quantity, extra_data
-                FROM order_items
-                WHERE order_id = %s
-            """, (order['id'],))
-            items = []
-            for r in cur.fetchall():
-                item = {
-                    'product_code': r[0],
-                    'product_name': r[1],
-                    'material_name': r[2],
-                    'cost': r[3],
-                    'quantity': r[4]
-                }
-                if r[5] is not None:  # extra_data для топпера
-                    try:
-                        extra = json.loads(r[5])
-                        item['extra_data'] = extra
-                        # Отмечаем, что это топпер
-                        item['is_topper'] = True
-                    except:
-                        pass
-                items.append(item)
-            order['items'] = items
-            order['total'] = sum(it['cost'] * it['quantity'] for it in items)
-        return jsonify(orders)
+            }
+
+            if order_type == 'product':
+                cur.execute("""
+                    SELECT product_code, product_name, material_name, cost, quantity, extra_data
+                    FROM order_items
+                    WHERE order_id = %s
+                """, (order_id,))
+                items = []
+                for r in cur.fetchall():
+                    item = {
+                        'product_code': r[0],
+                        'product_name': r[1],
+                        'material_name': r[2],
+                        'cost': r[3],
+                        'quantity': r[4]
+                    }
+                    if r[5] is not None:
+                        try:
+                            extra = json.loads(r[5])
+                            item['extra_data'] = extra
+                            item['is_topper'] = True
+                        except:
+                            pass
+                    items.append(item)
+                order_data['items'] = items
+                order_data['total'] = sum(it['cost'] * it['quantity'] for it in items)
+
+            else:  # mattress
+                # Получаем детали заказа матраца
+                cur.execute("""
+                    SELECT size_id, initial_height, cover_id, cover_price
+                    FROM mattress_orders
+                    WHERE id = %s
+                """, (order_id,))
+                mattress_row = cur.fetchone()
+                if mattress_row:
+                    order_data['size_id'] = mattress_row[0]
+                    order_data['initial_height'] = mattress_row[1]
+                    order_data['cover_id'] = mattress_row[2]
+                    order_data['cover_price'] = mattress_row[3]
+
+                cur.execute("""
+                    SELECT layer_id, layer_code, layer_name, quantity, price_per_unit, total_price
+                    FROM mattress_order_items
+                    WHERE order_id = %s
+                """, (order_id,))
+                items = []
+                total = 0
+                for r in cur.fetchall():
+                    items.append({
+                        'layer_id': r[0],
+                        'layer_code': r[1],
+                        'layer_name': r[2],
+                        'quantity': r[3],
+                        'price_per_unit': r[4],
+                        'total_price': r[5]
+                    })
+                    total += r[5]
+                order_data['items'] = items
+                order_data['total'] = total + (order_data.get('cover_price', 0))
+
+            result.append(order_data)
+
+        return jsonify(result)
     except Exception as e:
         app.logger.error(f"Order history error: {e}")
         return jsonify({'error': 'Server error'}), 500
@@ -823,25 +1013,21 @@ def order_history():
         cur.close()
         conn.close()
 
-
 # ========= КОРЗИНА (сессия) =========
 def get_cart_session():
     if 'cart' not in session:
         session['cart'] = []
     return session['cart']
 
-
 def save_cart_session(cart):
     session['cart'] = cart
     session.modified = True
-
 
 @app.route('/api/cart', methods=['GET'])
 def get_cart():
     cart = get_cart_session()
     total = sum(item['cost'] * item.get('quantity', 1) for item in cart)
     return jsonify({'items': cart, 'total': total})
-
 
 @app.route('/api/cart/add', methods=['POST'])
 def add_to_cart():
@@ -856,14 +1042,14 @@ def add_to_cart():
 
     cart = get_cart_session()
     for item in cart:
-        if item['product_code'] == data['product_code'] and item['material_id'] == data['material_id']:
+        if item.get('type') == 'product' and item['product_code'] == data['product_code'] and item['material_id'] == data['material_id']:
             item['quantity'] = item.get('quantity', 1) + quantity
             save_cart_session(cart)
             return jsonify({'success': True, 'cart': cart})
 
     new_item = {
         'id': str(uuid.uuid4()),
-        'type': 'product',  # метка для отличия от топперов
+        'type': 'product',
         'product_code': data['product_code'],
         'product_name': data['product_name'],
         'material_id': data['material_id'],
@@ -875,7 +1061,6 @@ def add_to_cart():
     cart.append(new_item)
     save_cart_session(cart)
     return jsonify({'success': True, 'cart': cart})
-
 
 @app.route('/api/cart/update/<item_id>', methods=['PUT'])
 def update_cart_item(item_id):
@@ -898,7 +1083,6 @@ def update_cart_item(item_id):
             return jsonify({'success': True, 'cart': cart})
     return jsonify({'error': 'Item not found'}), 404
 
-
 @app.route('/api/cart/remove/<item_id>', methods=['DELETE'])
 def remove_from_cart(item_id):
     cart = get_cart_session()
@@ -906,18 +1090,14 @@ def remove_from_cart(item_id):
     save_cart_session(new_cart)
     return jsonify({'success': True, 'cart': new_cart})
 
-
 @app.route('/api/cart/clear', methods=['DELETE'])
 def clear_cart():
     save_cart_session([])
     return jsonify({'success': True})
 
-
-# ========= ТОППЕРЫ: справочники =========
-
+# ========= ТОППЕРЫ (старые) =========
 @app.route('/api/topper/sizes')
 def topper_sizes():
-    """Возвращает список размеров (только id и name). Цена размера отсутствует."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -950,17 +1130,14 @@ def topper_sizes():
         app.logger.error(f"API /topper/sizes error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
 @app.route('/api/topper/layers')
 def topper_layers():
-    """Возвращает список слоёв с ценами для указанного размера, исключая скрытые, с цветом текста и характеристиками слоя."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Получаем слои с ценами
         cur.execute("""
             SELECT l.id, l.name, l.description, p.price, l.color_text, l.is_hidden
             FROM topper_layers l
@@ -970,7 +1147,6 @@ def topper_layers():
         """, (size_id,))
         rows = cur.fetchall()
         layer_ids = [r[0] for r in rows]
-        # Получаем основные характеристики
         main_features = {}
         if layer_ids:
             cur.execute("""
@@ -981,7 +1157,6 @@ def topper_layers():
             """, (layer_ids,))
             for layer_id, fname, fvalue in cur.fetchall():
                 main_features.setdefault(layer_id, []).append({'name': fname, 'value': fvalue})
-        # Получаем дополнительные характеристики
         extra_features = {}
         if layer_ids:
             cur.execute("""
@@ -1011,10 +1186,8 @@ def topper_layers():
         app.logger.error(f"API /topper/layers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
 @app.route('/api/topper/covers')
 def topper_covers():
-    """Возвращает список чехлов с ценами для указанного размера, исключая скрытые."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
@@ -1042,8 +1215,6 @@ def topper_covers():
         app.logger.error(f"API /topper/covers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-
-# ========= ДОБАВЛЕНИЕ СОБРАННОГО ТОППЕРА В КОРЗИНУ =========
 @app.route('/api/cart/add-topper', methods=['POST'])
 def add_topper_to_cart():
     data = request.get_json()
@@ -1068,15 +1239,12 @@ def add_topper_to_cart():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Получаем размер (только имя)
         cur.execute("SELECT id, size FROM topper_sizes WHERE id = %s", (size_id,))
         size_row = cur.fetchone()
         if not size_row:
             return jsonify({'error': 'Размер не найден'}), 404
         size_name = size_row[1]
 
-        # Получаем информацию о слоях (имена и цены)
-        # Используем set для уникальности в запросе, но цены суммируем с учётом дубликатов
         unique_layer_ids = list(set(layer_ids))
         if unique_layer_ids:
             cur.execute("""
@@ -1097,7 +1265,6 @@ def add_topper_to_cart():
             total_layers_price = 0
             layers_names = []
 
-        # Получаем цену чехла
         cur.execute("""
             SELECT c.id, c.name, COALESCE(p.price, 0)
             FROM topper_covers c
@@ -1143,8 +1310,259 @@ def add_topper_to_cart():
         cur.close()
         conn.close()
 
+# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ =========
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
+@app.route('/api/mattress/sizes')
+def mattress_sizes():
+    """Возвращает список размеров матрацев."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM mattress_sizes ORDER BY id")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        result = []
+        for r in rows:
+            size_str = r[1]
+            width = None
+            length = None
+            if 'x' in size_str:
+                parts = size_str.split('x')
+                if len(parts) == 2:
+                    try:
+                        width = int(parts[0].strip())
+                        length = int(parts[1].strip())
+                    except:
+                        pass
+            result.append({
+                'id': r[0],
+                'name': size_str,
+                'width': width,
+                'length': length
+            })
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"API /mattress/sizes error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/mattress/layers')
+def mattress_layers():
+    """Возвращает слои матрацев для указанного размера с ценами и характеристиками."""
+    size_id = request.args.get('size_id', type=int)
+    if size_id is None:
+        return jsonify({'error': 'Параметр size_id обязателен'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Получаем слои с ценами
+        cur.execute("""
+            SELECT l.id, l.code, l.name, l.description, p.price, l.color_text, l.is_hidden
+            FROM mattress_layers l
+            JOIN mattress_layers_prices p ON l.id = p.layer_id
+            WHERE p.size_id = %s AND (l.is_hidden IS NULL OR l.is_hidden = false)
+            ORDER BY l.id
+        """, (size_id,))
+        rows = cur.fetchall()
+        layer_ids = [r[0] for r in rows]
+
+        # Основные характеристики
+        main_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT lmf.layer_id, tmft.name AS feature_name, lmf.value
+                FROM mattress_layer_main_features lmf
+                JOIN mattress_layer_main_features_types tmft ON lmf.feature_id = tmft.id
+                WHERE lmf.layer_id = ANY(%s)
+            """, (layer_ids,))
+            for layer_id, fname, fvalue in cur.fetchall():
+                main_features.setdefault(layer_id, []).append({'name': fname, 'value': fvalue})
+
+        # Дополнительные характеристики
+        extra_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT layer_id, name, value
+                FROM mattress_layer_extra_features
+                WHERE layer_id = ANY(%s)
+            """, (layer_ids,))
+            for layer_id, name, value in cur.fetchall():
+                extra_features.setdefault(layer_id, []).append({'name': name, 'value': value})
+
+        cur.close()
+        conn.close()
+
+        result = []
+        for r in rows:
+            layer_id = r[0]
+            result.append({
+                'id': layer_id,
+                'code': r[1],
+                'name': r[2],
+                'description': r[3] or '',
+                'price': r[4] or 0,
+                'color_text': r[5] if r[5] is not None else '#000000',
+                'is_hidden': r[6] if r[6] is not None else False,
+                'main_features': main_features.get(layer_id, []),
+                'extra_features': extra_features.get(layer_id, [])
+            })
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"API /mattress/layers error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/mattress/covers')
+def mattress_covers():
+    """Возвращает чехлы матрацев для указанного размера с ценами."""
+    size_id = request.args.get('size_id', type=int)
+    if size_id is None:
+        return jsonify({'error': 'Параметр size_id обязателен'}), 400
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.id, c.code, c.name, c.description, p.price, c.is_hidden
+            FROM mattress_cover c
+            JOIN mattress_cover_prices p ON c.id = p.cover_id
+            WHERE p.size_id = %s AND (c.is_hidden IS NULL OR c.is_hidden = false)
+            ORDER BY c.id
+        """, (size_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([{
+            'id': r[0],
+            'code': r[1],
+            'name': r[2],
+            'description': r[3] or '',
+            'price': r[4] or 0,
+            'is_hidden': r[5] if r[5] is not None else False
+        } for r in rows])
+    except Exception as e:
+        app.logger.error(f"API /mattress/covers error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/cart/add-mattress', methods=['POST'])
+def add_mattress_to_cart():
+    """Добавляет собранный матрац в корзину."""
+    data = request.get_json()
+    size_id = data.get('size_id')
+    layer_ids = data.get('layer_ids', [])
+    cover_id = data.get('cover_id')
+    initial_height = data.get('initial_height', 0)
+    is_new = data.get('is_new', True)  # если true, initial_height = 0
+    quantity = data.get('quantity', 1)
+
+    if not size_id or not layer_ids or cover_id is None:
+        return jsonify({'error': 'Необходимо указать размер, хотя бы один слой и чехол'}), 400
+
+    if not isinstance(layer_ids, list) or len(layer_ids) == 0:
+        return jsonify({'error': 'Выберите хотя бы один слой'}), 400
+
+    try:
+        initial_height = int(initial_height)
+        if initial_height < 0:
+            initial_height = 0
+    except:
+        initial_height = 0
+
+    try:
+        quantity = int(quantity)
+        if quantity < 1:
+            quantity = 1
+    except:
+        quantity = 1
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        # Получаем размер
+        cur.execute("SELECT id, name FROM mattress_sizes WHERE id = %s", (size_id,))
+        size_row = cur.fetchone()
+        if not size_row:
+            return jsonify({'error': 'Размер не найден'}), 404
+        size_name = size_row[1]
+
+        # Получаем информацию о слоях (цены)
+        unique_layer_ids = list(set(layer_ids))
+        if unique_layer_ids:
+            cur.execute("""
+                SELECT l.id, l.code, l.name, COALESCE(p.price, 0)
+                FROM mattress_layers l
+                LEFT JOIN mattress_layers_prices p ON l.id = p.layer_id AND p.size_id = %s
+                WHERE l.id = ANY(%s)
+            """, (size_id, unique_layer_ids))
+            layer_info = {row[0]: {'code': row[1], 'name': row[2], 'price': row[3]} for row in cur.fetchall()}
+            layers_codes = []
+            layers_names = []
+            total_layers_price = 0
+            for lid in layer_ids:
+                if lid not in layer_info:
+                    return jsonify({'error': f'Слой с id {lid} не найден или не имеет цены для данного размера'}), 404
+                layers_codes.append(layer_info[lid]['code'])
+                layers_names.append(layer_info[lid]['name'])
+                total_layers_price += layer_info[lid]['price']
+        else:
+            total_layers_price = 0
+            layers_codes = []
+            layers_names = []
+
+        # Получаем цену чехла
+        cur.execute("""
+            SELECT c.id, c.code, c.name, COALESCE(p.price, 0)
+            FROM mattress_cover c
+            LEFT JOIN mattress_cover_prices p ON c.id = p.cover_id AND p.size_id = %s
+            WHERE c.id = %s
+        """, (size_id, cover_id))
+        cover_row = cur.fetchone()
+        if not cover_row:
+            return jsonify({'error': 'Чехол не найден или не имеет цены для данного размера'}), 404
+        cover_price = cover_row[3] or 0
+        cover_code = cover_row[1]
+        cover_name = cover_row[2]
+
+        total_price = total_layers_price + cover_price
+        total_height = initial_height + len(layer_ids) * 5
+
+        cart = get_cart_session()
+        new_item = {
+            'id': str(uuid.uuid4()),
+            'type': 'mattress',
+            'product_code': 'MATTRESS',
+            'product_name': f'Собранный матрац ({size_name})',
+            'material_code': '',
+            'material_name': '',
+            'cost': total_price,
+            'quantity': quantity,
+            'extra_data': {
+                'size_id': size_id,
+                'size_name': size_name,
+                'initial_height': initial_height,
+                'is_new': is_new,
+                'layer_ids': layer_ids,
+                'layer_codes': layers_codes,
+                'layer_names': layers_names,
+                'layer_prices': [layer_info[lid]['price'] for lid in layer_ids],
+                'cover_id': cover_id,
+                'cover_code': cover_code,
+                'cover_name': cover_name,
+                'cover_price': cover_price,
+                'total_price': total_price,
+                'total_height': total_height
+            }
+        }
+        cart.append(new_item)
+        save_cart_session(cart)
+
+        return jsonify({'success': True, 'cart': cart})
+    except Exception as e:
+        app.logger.error(f"API /cart/add-mattress error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА (обновлённое) =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
@@ -1166,42 +1584,106 @@ def create_order():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            INSERT INTO orders (session_id, user_id, user_name, phone, email, address, comment, contact_time, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (session_id, user_id, data['user_name'], data['phone'], data.get('email', ''),
-              data.get('address', ''), data.get('comment', ''), data.get('contact_time', ''),
-              'Ожидает подтверждения'))
-        order_id = cur.fetchone()[0]
+        # Разделяем элементы корзины на обычные товары, топперы и матрацы
+        product_items = [item for item in cart if item.get('type') in ('product', 'topper')]
+        mattress_items = [item for item in cart if item.get('type') == 'mattress']
 
-        total_sum = 0
-        for item in cart:
-            item_total = item['cost'] * item.get('quantity', 1)
-            total_sum += item_total
+        # Создаём заказ для обычных товаров (если есть)
+        order_id = None
+        if product_items:
+            cur.execute("""
+                INSERT INTO orders (session_id, user_id, user_name, phone, email, address, comment, contact_time, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (session_id, user_id, data['user_name'], data['phone'], data.get('email', ''),
+                  data.get('address', ''), data.get('comment', ''), data.get('contact_time', ''),
+                  'Ожидает подтверждения'))
+            order_id = cur.fetchone()[0]
 
-            if item.get('type') == 'topper' and item.get('extra_data'):
-                extra_json = json.dumps(item['extra_data'])
+            total_sum = 0
+            for item in product_items:
+                item_total = item['cost'] * item.get('quantity', 1)
+                total_sum += item_total
+
+                if item.get('type') == 'topper' and item.get('extra_data'):
+                    extra_json = json.dumps(item['extra_data'])
+                    cur.execute("""
+                        INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity, extra_data)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (order_id, item['product_code'], item['product_name'],
+                          item.get('material_code', ''), item.get('material_name', ''),
+                          item['cost'], item.get('quantity', 1), extra_json))
+                else:
+                    cur.execute("""
+                        INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (order_id, item['product_code'], item['product_name'],
+                          item['material_code'], item['material_name'],
+                          item['cost'], item.get('quantity', 1)))
+            # Отправляем уведомление для обычного заказа
+            if order_id:
+                send_order_notification(order_id, data['user_name'], data['phone'], total_sum, order_type='product')
+
+        # Создаём заказы для матрацев (каждый матрац - отдельный заказ)
+        mattress_order_ids = []
+        for mattress_item in mattress_items:
+            extra = mattress_item.get('extra_data', {})
+            # Извлекаем данные
+            size_id = extra.get('size_id')
+            initial_height = extra.get('initial_height', 0)
+            cover_id = extra.get('cover_id')
+            cover_price = extra.get('cover_price', 0)
+            layer_ids = extra.get('layer_ids', [])
+            layer_codes = extra.get('layer_codes', [])
+            layer_names = extra.get('layer_names', [])
+            layer_prices = extra.get('layer_prices', [])
+
+            if not size_id or not cover_id or not layer_ids:
+                app.logger.error(f"Некорректные данные матраца в корзине: {extra}")
+                continue
+
+            # Вставляем заказ матраца
+            cur.execute("""
+                INSERT INTO mattress_orders
+                (session_id, user_id, user_name, phone, email, address, comment, contact_time, status,
+                 size_id, initial_height, cover_id, cover_price)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (session_id, user_id, data['user_name'], data['phone'], data.get('email', ''),
+                  data.get('address', ''), data.get('comment', ''), data.get('contact_time', ''),
+                  'Ожидает подтверждения', size_id, initial_height, cover_id, cover_price))
+            mattress_order_id = cur.fetchone()[0]
+            mattress_order_ids.append(mattress_order_id)
+
+            # Вставляем слои заказа
+            total_layers_price = 0
+            for idx, layer_id in enumerate(layer_ids):
+                price = layer_prices[idx] if idx < len(layer_prices) else 0
+                total_layers_price += price
                 cur.execute("""
-                    INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity, extra_data)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (order_id, item['product_code'], item['product_name'],
-                      item.get('material_code', ''), item.get('material_name', ''),
-                      item['cost'], item.get('quantity', 1), extra_json))
-            else:
-                cur.execute("""
-                    INSERT INTO order_items (order_id, product_code, product_name, material_code, material_name, cost, quantity)
+                    INSERT INTO mattress_order_items
+                    (order_id, layer_id, layer_code, layer_name, quantity, price_per_unit, total_price)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (order_id, item['product_code'], item['product_name'],
-                      item['material_code'], item['material_name'],
-                      item['cost'], item.get('quantity', 1)))
+                """, (mattress_order_id, layer_id, layer_codes[idx] if idx < len(layer_codes) else '',
+                      layer_names[idx] if idx < len(layer_names) else '', 1, price, price))
+
+            # Отправляем уведомление для заказа матраца
+            total_mattress_price = cover_price + total_layers_price
+            send_order_notification(mattress_order_id, data['user_name'], data['phone'], total_mattress_price, order_type='mattress')
 
         conn.commit()
-        send_order_notification(order_id, data['user_name'], data['phone'], total_sum)
+        # Очищаем корзину
         session.pop('cart', None)
         session.modified = True
 
-        return jsonify({'success': True, 'order_id': order_id})
+        # Возвращаем список id созданных заказов
+        response = {'success': True}
+        if order_id:
+            response['order_id'] = order_id
+        if mattress_order_ids:
+            response['mattress_order_ids'] = mattress_order_ids
+        return jsonify(response)
+
     except Exception as e:
         conn.rollback()
         app.logger.error(f"Order creation error: {e}")
@@ -1210,57 +1692,46 @@ def create_order():
         cur.close()
         conn.close()
 
-
 # ========= СТАТИЧЕСКИЕ МАРШРУТЫ =========
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
 
-
 @app.route('/index.css')
 def index_css():
     return send_from_directory('.', 'index.css')
-
 
 @app.route('/product/<code>')
 def product_page(code):
     return send_from_directory('webpages', 'product_card.html')
 
-
 @app.route('/cart')
 def cart_page():
     return send_from_directory('webpages', 'cart.html')
-
 
 @app.route('/catalog')
 def catalog_page():
     return send_from_directory('webpages', 'catalog.html')
 
-
 @app.route('/catalog.css')
 def catalog_css():
     return send_from_directory('webpages', 'catalog.css')
-
 
 @app.route('/product_card.css')
 def product_card_css():
     return send_from_directory('webpages', 'product_card.css')
 
-
 @app.route('/cart.css')
 def cart_css():
     return send_from_directory('webpages', 'cart.css')
-
 
 @app.route('/login')
 def login_page():
     return send_from_directory('webpages', 'login.html')
 
-
 @app.route('/register')
 def register_page():
     return send_from_directory('webpages', 'register.html')
-
 
 @app.route('/profile')
 def profile_page():
@@ -1268,16 +1739,13 @@ def profile_page():
         return redirect('/login?next=/profile')
     return send_from_directory('webpages', 'profile.html')
 
-
 @app.route('/gallery')
 def gallery_page():
     return send_from_directory('webpages', 'gallery.html')
 
-
 @app.route('/gallery.css')
 def gallery_css():
     return send_from_directory('webpages', 'gallery.css')
-
 
 @app.route('/toppers')
 def toppers_page():
@@ -1287,16 +1755,22 @@ def toppers_page():
 def toppers_css():
     return send_from_directory('webpages', 'toppers.css')
 
+# Новые маршруты для конструктора матрацев
+@app.route('/mattress')
+def mattress_page():
+    return send_from_directory('webpages', 'mattress.html')
+
+@app.route('/mattress.css')
+def mattress_css():
+    return send_from_directory('webpages', 'mattress.css')
 
 @app.route('/media/<path:filename>')
 def media_files(filename):
     return send_from_directory('media', filename)
 
-
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory('media/interface', 'favicon.png')
-
 
 if __name__ == '__main__':
     Path('webpages').mkdir(exist_ok=True)
@@ -1305,5 +1779,7 @@ if __name__ == '__main__':
     Path('media/interface').mkdir(parents=True, exist_ok=True)
     Path('media/index').mkdir(parents=True, exist_ok=True)
     Path('media/gallery').mkdir(parents=True, exist_ok=True)
+    Path('media/layers').mkdir(parents=True, exist_ok=True)
+    Path('media/covers').mkdir(parents=True, exist_ok=True)
     init_db()
     app.run(host='0.0.0.0', port=5000, debug=True)
