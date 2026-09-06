@@ -953,13 +953,14 @@ def topper_sizes():
 
 @app.route('/api/topper/layers')
 def topper_layers():
-    """Возвращает список слоёв с ценами для указанного размера, исключая скрытые, с цветом текста."""
+    """Возвращает список слоёв с ценами для указанного размера, исключая скрытые, с цветом текста и характеристиками слоя."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        # Получаем слои с ценами
         cur.execute("""
             SELECT l.id, l.name, l.description, p.price, l.color_text, l.is_hidden
             FROM topper_layers l
@@ -968,16 +969,44 @@ def topper_layers():
             ORDER BY l.id
         """, (size_id,))
         rows = cur.fetchall()
+        layer_ids = [r[0] for r in rows]
+        # Получаем основные характеристики
+        main_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT lmf.layer_id, tmft.name AS feature_name, lmf.value
+                FROM topper_layer_main_features lmf
+                JOIN topper_layer_main_features_types tmft ON lmf.feature_id = tmft.id
+                WHERE lmf.layer_id = ANY(%s)
+            """, (layer_ids,))
+            for layer_id, fname, fvalue in cur.fetchall():
+                main_features.setdefault(layer_id, []).append({'name': fname, 'value': fvalue})
+        # Получаем дополнительные характеристики
+        extra_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT layer_id, name, value
+                FROM topper_layer_extra_features
+                WHERE layer_id = ANY(%s)
+            """, (layer_ids,))
+            for layer_id, name, value in cur.fetchall():
+                extra_features.setdefault(layer_id, []).append({'name': name, 'value': value})
         cur.close()
         conn.close()
-        return jsonify([{
-            'id': r[0],
-            'name': r[1],
-            'description': r[2] or '',
-            'price': r[3] or 0,
-            'color_text': r[4] if r[4] is not None else '#000000',
-            'is_hidden': r[5] if r[5] is not None else False
-        } for r in rows])
+        result = []
+        for r in rows:
+            layer_id = r[0]
+            result.append({
+                'id': layer_id,
+                'name': r[1],
+                'description': r[2] or '',
+                'price': r[3] or 0,
+                'color_text': r[4] if r[4] is not None else '#000000',
+                'is_hidden': r[5] if r[5] is not None else False,
+                'main_features': main_features.get(layer_id, []),
+                'extra_features': extra_features.get(layer_id, [])
+            })
+        return jsonify(result)
     except Exception as e:
         app.logger.error(f"API /topper/layers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500

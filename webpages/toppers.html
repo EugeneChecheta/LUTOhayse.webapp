@@ -7,8 +7,42 @@
     <link rel="icon" type="image/png" href="/media/interface/favicon.png">
     <link rel="stylesheet" href="/toppers.css">
 
-    <!-- Дополнительные стили для компактного отображения размеров и "см" -->
+    <!-- Дополнительные стили (включая табы) -->
     <style>
+        /* ---- Табы для слоёв (мобильная версия) ---- */
+        .layer-tabs {
+            display: none;
+            gap: 8px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 6px;
+        }
+        .tab-btn {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            font-weight: 600;
+            color: #888;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: 0.2s;
+            font-size: 0.95rem;
+        }
+        .tab-btn.active {
+            color: #628b35;
+            border-bottom-color: #628b35;
+        }
+        .tab-btn:hover {
+            color: #333;
+        }
+        .tab-panel {
+            display: block;
+        }
+        .tab-panel.hidden {
+            display: none;
+        }
+
+        /* ---- Сетка размеров компактно ---- */
         .size-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -55,7 +89,8 @@
             padding: 6px 14px;
             font-size: 0.9rem;
         }
-        /* Стили для раскрывающегося блока подробностей слоя */
+
+        /* ---- Стили для слоёв ---- */
         .layer-details {
             margin-top: 6px;
             padding: 8px 10px;
@@ -152,11 +187,45 @@
             font-style: italic;
             padding: 10px 0;
         }
-        .mobile-toggle {
-            margin-top: 10px;
-            text-align: center;
+
+        /* ---- Адаптив: на мобилке показываем табы, скрываем одну панель ---- */
+        @media (max-width: 768px) {
+            .layer-tabs {
+                display: flex;
+            }
+            .layers-list-container,
+            .layers-chosen-container {
+                /* Обе панели управляются через .hidden */
+            }
+            /* По умолчанию на мобилке показываем доступные слои, выбранные скрыты */
+            .tab-panel[data-tab="chosen"] {
+                display: none;
+            }
+            .tab-panel[data-tab="chosen"].active {
+                display: block;
+            }
+            .tab-panel[data-tab="available"].active {
+                display: block;
+            }
+            /* Скрываем старый мобильный переключатель */
+            .mobile-toggle {
+                display: none !important;
+            }
         }
-        /* Адаптив */
+
+        @media (min-width: 769px) {
+            .layer-tabs {
+                display: none !important;
+            }
+            .tab-panel {
+                display: block !important;
+            }
+            .tab-panel.hidden {
+                display: block !important; /* отключаем скрытие на десктопе */
+            }
+        }
+
+        /* ---- Адаптив для карточек ---- */
         @media (max-width: 600px) {
             .layer-item {
                 flex-direction: column;
@@ -236,19 +305,24 @@
         <!-- Шаг 2: выбор слоёв -->
         <div id="step-layers" class="step">
             <h2>Шаг 2. Выберите слои</h2>
+
+            <!-- ТАБЫ (видны только на мобилке) -->
+            <div class="layer-tabs" id="layerTabs">
+                <button class="tab-btn active" data-tab="available">Доступные слои</button>
+                <button class="tab-btn" data-tab="chosen">Выбранные слои</button>
+            </div>
+
             <div class="layers-layout">
-                <div class="layers-list-container">
+                <div class="layers-list-container tab-panel" data-tab="available">
                     <h3>Доступные слои</h3>
                     <div id="layersList" class="layers-list"></div>
                 </div>
-                <div class="layers-chosen-container">
+                <div class="layers-chosen-container tab-panel" data-tab="chosen">
                     <h3>Выбранные слои</h3>
                     <div id="chosenLayers" class="chosen-layers"></div>
-                    <div class="mobile-toggle">
-                        <button id="toggleLayersView" class="btn btn-secondary">Показать выбранные</button>
-                    </div>
                 </div>
             </div>
+
             <div class="step-actions">
                 <button class="btn btn-secondary" id="backFromLayers">Назад</button>
                 <button class="btn btn-secondary" id="resetBtn2">Сбросить</button>
@@ -275,7 +349,7 @@
     </div>
 </main>
 
-<!-- Модалка "Подробнее" (больше не используется, но оставляем на случай, если удалить нельзя) -->
+<!-- Модалка "Подробнее" (оставлена для совместимости) -->
 <div id="layerModal" class="modal" style="display:none;">
     <div class="modal-content">
         <span class="close" id="closeLayerModal">&times;</span>
@@ -307,7 +381,9 @@
 </footer>
 
 <script>
-    // ===== Глобальные состояния =====
+    // ================================================================
+    // ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+    // ================================================================
     let state = {
         step: 1,
         size: null,
@@ -318,7 +394,9 @@
         allCovers: []
     };
 
-    // ===== DOM-ссылки =====
+    // ================================================================
+    // DOM-СВЯЗКИ
+    // ================================================================
     const stepSize = document.getElementById('step-size');
     const stepLayers = document.getElementById('step-layers');
     const stepCover = document.getElementById('step-cover');
@@ -335,8 +413,14 @@
     const resetBtn3 = document.getElementById('resetBtn3');
     const resetBtn = document.getElementById('resetBtn');
     const totalPriceDisplay = document.getElementById('totalPriceDisplay');
-    const toggleLayersView = document.getElementById('toggleLayersView');
 
+    // Элементы табов
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabPanels = document.querySelectorAll('.tab-panel');
+
+    // ================================================================
+    // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+    // ================================================================
     function updateTotalPrice() {
         let total = 0;
         state.layers.forEach(l => total += (l.price || 0));
@@ -351,6 +435,51 @@
         state.step = step;
     }
 
+    // ================================================================
+    // ИНИЦИАЛИЗАЦИЯ ТАБОВ (только для мобильной версии)
+    // ================================================================
+    function initTabs() {
+        // Убираем старые обработчики, чтобы не дублировать
+        tabBtns.forEach(btn => {
+            btn.removeEventListener('click', onTabClick);
+            btn.addEventListener('click', onTabClick);
+        });
+
+        // Принудительно показываем нужный таб в зависимости от наличия слоёв
+        const hasLayers = state.layers.length > 0;
+        const activeTab = hasLayers ? 'chosen' : 'available';
+        setActiveTab(activeTab);
+    }
+
+    function onTabClick(e) {
+        const tab = e.currentTarget.dataset.tab;
+        setActiveTab(tab);
+    }
+
+    function setActiveTab(tabId) {
+        // Переключаем классы у кнопок
+        tabBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabId);
+        });
+
+        // Переключаем видимость панелей
+        tabPanels.forEach(panel => {
+            const isActive = panel.dataset.tab === tabId;
+            // На мобилке используем display, на десктопе всегда показываем обе
+            if (window.innerWidth <= 768) {
+                panel.style.display = isActive ? 'block' : 'none';
+            } else {
+                panel.style.display = 'block'; // на десктопе обе видны
+            }
+        });
+
+        // Также обновляем класс для совместимости
+        tabPanels.forEach(p => p.classList.toggle('active', p.dataset.tab === tabId));
+    }
+
+    // ================================================================
+    // ЗАГРУЗКА ДАННЫХ С СЕРВЕРА
+    // ================================================================
     async function loadSizes() {
         try {
             const res = await fetch('/api/topper/sizes');
@@ -381,12 +510,17 @@
             document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
             confirmLayersBtn.disabled = true;
             updateTotalPrice();
+            // После загрузки данных обновляем табы
+            initTabs();
         } catch (err) {
             console.error(err);
             alert('Не удалось загрузить данные для выбранного размера');
         }
     }
 
+    // ================================================================
+    // ОТРИСОВКА КАРТОЧЕК РАЗМЕРОВ
+    // ================================================================
     function renderSizes() {
         sizeGrid.innerHTML = '';
         state.allSizes.forEach(s => {
@@ -409,6 +543,9 @@
         });
     }
 
+    // ================================================================
+    // ОТРИСОВКА СПИСКА ДОСТУПНЫХ СЛОЁВ
+    // ================================================================
     function renderLayersList() {
         layersList.innerHTML = '';
         state.allLayers.forEach(l => {
@@ -433,6 +570,7 @@
             layersList.appendChild(div);
         });
 
+        // Обработчики кнопок "Подробнее"
         document.querySelectorAll('.btn-detail').forEach(btn => {
             btn.addEventListener('click', () => {
                 const id = parseInt(btn.dataset.id);
@@ -444,6 +582,7 @@
             });
         });
 
+        // Обработчики кнопок "Добавить"
         document.querySelectorAll('.btn-add').forEach(btn => {
             btn.addEventListener('click', () => {
                 const id = parseInt(btn.dataset.id);
@@ -453,16 +592,29 @@
                     renderChosenLayers();
                     updateTotalPrice();
                     confirmLayersBtn.disabled = false;
+                    // После добавления слоя переключаем таб на "Выбранные" (на мобилке)
+                    if (window.innerWidth <= 768) {
+                        setActiveTab('chosen');
+                    }
+                    initTabs(); // обновляем состояние табов
                 }
             });
         });
     }
 
+    // ================================================================
+    // ОТРИСОВКА ВЫБРАННЫХ СЛОЁВ
+    // ================================================================
     function renderChosenLayers() {
         chosenLayers.innerHTML = '';
         if (state.layers.length === 0) {
             chosenLayers.innerHTML = '<div class="empty-message">Слои не выбраны</div>';
             confirmLayersBtn.disabled = true;
+            // Если слоев нет, переключаем таб на "Доступные" (на мобилке)
+            if (window.innerWidth <= 768) {
+                setActiveTab('available');
+            }
+            initTabs();
             return;
         }
         state.layers.forEach((l, index) => {
@@ -476,6 +628,7 @@
             `;
             chosenLayers.appendChild(div);
         });
+
         document.querySelectorAll('.btn-remove').forEach(btn => {
             btn.addEventListener('click', () => {
                 const idx = parseInt(btn.dataset.index);
@@ -483,11 +636,20 @@
                 renderChosenLayers();
                 updateTotalPrice();
                 confirmLayersBtn.disabled = (state.layers.length === 0);
+                // Если слои кончились, переключаем на "Доступные"
+                if (state.layers.length === 0 && window.innerWidth <= 768) {
+                    setActiveTab('available');
+                }
+                initTabs();
             });
         });
+
         confirmLayersBtn.disabled = false;
     }
 
+    // ================================================================
+    // ОТРИСОВКА ЧЕХЛОВ
+    // ================================================================
     function renderCovers() {
         coverGrid.innerHTML = '';
         state.allCovers.forEach(c => {
@@ -509,6 +671,9 @@
         });
     }
 
+    // ================================================================
+    // НАВИГАЦИЯ ПО ШАГАМ
+    // ================================================================
     function goToStep(step) {
         if (step === 1) {
             if (state.step === 2) {
@@ -534,6 +699,8 @@
             }
             showStep(2);
             confirmLayersBtn.disabled = (state.layers.length === 0);
+            // Обновляем табы при переходе
+            initTabs();
         } else if (step === 3) {
             if (state.layers.length === 0) {
                 alert('Добавьте хотя бы один слой');
@@ -545,6 +712,9 @@
         updateTotalPrice();
     }
 
+    // ================================================================
+    // СБРОС ВСЕГО
+    // ================================================================
     function resetAll() {
         state.size = null;
         state.layers = [];
@@ -562,8 +732,16 @@
         showStep(1);
         updateTotalPrice();
         loadSizes();
+        // После сброса табы вернутся к "Доступные"
+        setTimeout(() => {
+            if (window.innerWidth <= 768) setActiveTab('available');
+            initTabs();
+        }, 50);
     }
 
+    // ================================================================
+    // ОБРАБОТЧИКИ СОБЫТИЙ КНОПОК
+    // ================================================================
     confirmSizeBtn.addEventListener('click', () => { if (state.size) goToStep(2); });
     backFromLayers.addEventListener('click', () => goToStep(1));
     confirmLayersBtn.addEventListener('click', () => goToStep(3));
@@ -572,6 +750,9 @@
     resetBtn2.addEventListener('click', resetAll);
     resetBtn3.addEventListener('click', resetAll);
 
+    // ================================================================
+    // ДОБАВЛЕНИЕ В КОРЗИНУ
+    // ================================================================
     addToCartBtn.addEventListener('click', async () => {
         if (!state.size || state.layers.length === 0 || !state.cover) {
             alert('Необходимо выбрать размер, хотя бы один слой и чехол');
@@ -602,22 +783,9 @@
         }
     });
 
-    let showChosen = false;
-    toggleLayersView.addEventListener('click', () => {
-        showChosen = !showChosen;
-        const listContainer = document.querySelector('.layers-list-container');
-        const chosenContainer = document.querySelector('.layers-chosen-container');
-        if (showChosen) {
-            listContainer.style.display = 'none';
-            chosenContainer.style.display = 'block';
-            toggleLayersView.textContent = 'Показать все слои';
-        } else {
-            listContainer.style.display = 'block';
-            chosenContainer.style.display = 'block';
-            toggleLayersView.textContent = 'Показать выбранные';
-        }
-    });
-
+    // ================================================================
+    // ОБНОВЛЕНИЕ СЧЁТЧИКА КОРЗИНЫ
+    // ================================================================
     async function updateCartCount() {
         try {
             const resp = await fetch('/api/cart');
@@ -630,6 +798,9 @@
     updateCartCount();
     setInterval(updateCartCount, 5000);
 
+    // ================================================================
+    // ОБНОВЛЕНИЕ ИКОНКИ ПРОФИЛЯ
+    // ================================================================
     async function updateProfileIcon() {
         try {
             const resp = await fetch('/api/auth/me');
@@ -642,9 +813,31 @@
     }
     updateProfileIcon();
 
+    // ================================================================
+    // ЗАПУСК
+    // ================================================================
     loadSizes().then(() => {
         showStep(1);
         updateTotalPrice();
+        // Инициализируем табы после загрузки страницы
+        setTimeout(() => {
+            if (window.innerWidth <= 768) setActiveTab('available');
+            initTabs();
+        }, 100);
+    });
+
+    // При изменении размера окна перепроверяем видимость табов
+    window.addEventListener('resize', () => {
+        if (window.innerWidth <= 768) {
+            // Если на мобилке, показываем активный таб
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab) setActiveTab(activeTab.dataset.tab);
+            else setActiveTab('available');
+        } else {
+            // На десктопе показываем обе панели
+            tabPanels.forEach(p => p.style.display = 'block');
+        }
+        initTabs();
     });
 </script>
 </body>
