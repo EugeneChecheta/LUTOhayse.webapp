@@ -1,5 +1,6 @@
 # api.py
 # Полностью переработанный файл API для поддержки конструктора матрацев
+# (внесены изменения в эндпоинты /api/mattress/layers и /api/mattress/covers)
 
 import psycopg2
 import os
@@ -341,7 +342,7 @@ def init_db():
             CONSTRAINT uq_mcp_cover_size UNIQUE (cover_id, size_id)
         );
     """)
-    # Типы основных характеристик слоёв
+    # Типы основных характеристик слоёв (оставлены для совместимости с ботом, но сайт их не использует)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layer_main_features_types (
             id SERIAL PRIMARY KEY,
@@ -1310,7 +1311,9 @@ def add_topper_to_cart():
         cur.close()
         conn.close()
 
-# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ =========
+# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ (исправленные) =========
+# Убраны все упоминания color_text и is_hidden, а также дополнительные характеристики,
+# так как сайт использует только описание и цену.
 
 @app.route('/api/mattress/sizes')
 def mattress_sizes():
@@ -1348,63 +1351,33 @@ def mattress_sizes():
 
 @app.route('/api/mattress/layers')
 def mattress_layers():
-    """Возвращает слои матрацев для указанного размера с ценами и характеристиками."""
+    """Возвращает слои матрацев для указанного размера с ценами (0, если цена не установлена).
+    Характеристики не возвращаются, так как сайт использует только описание."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Получаем слои с ценами
+        # Простой запрос без учёта скрытости и цвета
         cur.execute("""
-            SELECT l.id, l.code, l.name, l.description, p.price, l.color_text, l.is_hidden
+            SELECT l.id, l.code, l.name, l.description, COALESCE(p.price, 0) as price
             FROM mattress_layers l
-            JOIN mattress_layers_prices p ON l.id = p.layer_id
-            WHERE p.size_id = %s AND (l.is_hidden IS NULL OR l.is_hidden = false)
+            LEFT JOIN mattress_layers_prices p ON l.id = p.layer_id AND p.size_id = %s
             ORDER BY l.id
         """, (size_id,))
         rows = cur.fetchall()
-        layer_ids = [r[0] for r in rows]
-
-        # Основные характеристики
-        main_features = {}
-        if layer_ids:
-            cur.execute("""
-                SELECT lmf.layer_id, tmft.name AS feature_name, lmf.value
-                FROM mattress_layer_main_features lmf
-                JOIN mattress_layer_main_features_types tmft ON lmf.feature_id = tmft.id
-                WHERE lmf.layer_id = ANY(%s)
-            """, (layer_ids,))
-            for layer_id, fname, fvalue in cur.fetchall():
-                main_features.setdefault(layer_id, []).append({'name': fname, 'value': fvalue})
-
-        # Дополнительные характеристики
-        extra_features = {}
-        if layer_ids:
-            cur.execute("""
-                SELECT layer_id, name, value
-                FROM mattress_layer_extra_features
-                WHERE layer_id = ANY(%s)
-            """, (layer_ids,))
-            for layer_id, name, value in cur.fetchall():
-                extra_features.setdefault(layer_id, []).append({'name': name, 'value': value})
-
         cur.close()
         conn.close()
 
         result = []
         for r in rows:
-            layer_id = r[0]
             result.append({
-                'id': layer_id,
+                'id': r[0],
                 'code': r[1],
                 'name': r[2],
                 'description': r[3] or '',
-                'price': r[4] or 0,
-                'color_text': r[5] if r[5] is not None else '#000000',
-                'is_hidden': r[6] if r[6] is not None else False,
-                'main_features': main_features.get(layer_id, []),
-                'extra_features': extra_features.get(layer_id, [])
+                'price': r[4] or 0
             })
         return jsonify(result)
     except Exception as e:
@@ -1413,7 +1386,7 @@ def mattress_layers():
 
 @app.route('/api/mattress/covers')
 def mattress_covers():
-    """Возвращает чехлы матрацев для указанного размера с ценами."""
+    """Возвращает чехлы матрацев для указанного размера с ценами (0, если цена не установлена)."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
@@ -1421,10 +1394,9 @@ def mattress_covers():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT c.id, c.code, c.name, c.description, p.price, c.is_hidden
+            SELECT c.id, c.code, c.name, c.description, COALESCE(p.price, 0) as price
             FROM mattress_cover c
-            JOIN mattress_cover_prices p ON c.id = p.cover_id
-            WHERE p.size_id = %s AND (c.is_hidden IS NULL OR c.is_hidden = false)
+            LEFT JOIN mattress_cover_prices p ON c.id = p.cover_id AND p.size_id = %s
             ORDER BY c.id
         """, (size_id,))
         rows = cur.fetchall()
@@ -1435,8 +1407,7 @@ def mattress_covers():
             'code': r[1],
             'name': r[2],
             'description': r[3] or '',
-            'price': r[4] or 0,
-            'is_hidden': r[5] if r[5] is not None else False
+            'price': r[4] or 0
         } for r in rows])
     except Exception as e:
         app.logger.error(f"API /mattress/covers error: {e}")
@@ -1498,7 +1469,7 @@ def add_mattress_to_cart():
             total_layers_price = 0
             for lid in layer_ids:
                 if lid not in layer_info:
-                    return jsonify({'error': f'Слой с id {lid} не найден или не имеет цены для данного размера'}), 404
+                    return jsonify({'error': f'Слой с id {lid} не найден'}), 404
                 layers_codes.append(layer_info[lid]['code'])
                 layers_names.append(layer_info[lid]['name'])
                 total_layers_price += layer_info[lid]['price']
@@ -1516,7 +1487,7 @@ def add_mattress_to_cart():
         """, (size_id, cover_id))
         cover_row = cur.fetchone()
         if not cover_row:
-            return jsonify({'error': 'Чехол не найден или не имеет цены для данного размера'}), 404
+            return jsonify({'error': 'Чехол не найден'}), 404
         cover_price = cover_row[3] or 0
         cover_code = cover_row[1]
         cover_name = cover_row[2]
