@@ -99,7 +99,12 @@
     <!-- Модальное окно для зума -->
     <div id="zoomModal" class="zoom-modal">
         <span class="zoom-close">&times;</span>
+        <button class="zoom-nav zoom-prev" id="zoomPrev" type="button" aria-label="Предыдущее фото">&#10094;</button>
         <img class="zoom-modal-content" id="zoomImage" src="" alt="Увеличенное изображение">
+        <button class="zoom-nav zoom-next" id="zoomNext" type="button" aria-label="Следующее фото">&#10095;</button>
+        <div class="zoom-counter">
+            <span id="zoomCounterCurrent">1</span> / <span id="zoomCounterTotal">1</span>
+        </div>
     </div>
 
     <footer>
@@ -134,25 +139,122 @@
         const zoomModal = document.getElementById('zoomModal');
         const zoomImage = document.getElementById('zoomImage');
         const zoomClose = document.querySelector('.zoom-close');
+        const zoomPrevBtn = document.getElementById('zoomPrev');
+        const zoomNextBtn = document.getElementById('zoomNext');
+        const zoomCounterCurrent = document.getElementById('zoomCounterCurrent');
+        const zoomCounterTotal = document.getElementById('zoomCounterTotal');
+
+        let zoomImages = [];
+        let zoomIndex = 0;
+
+        function getGalleryImageSrcs() {
+            return Array.from(document.querySelectorAll('#slider .slide img'))
+                .map(img => img.src)
+                .filter(Boolean);
+        }
 
         function openZoom(src) {
-            zoomImage.src = src;
+            const galleryImgs = getGalleryImageSrcs();
+            // Ищем соответствие либо по полному URL, либо по окончанию пути
+            let idx = galleryImgs.findIndex(g => g === src || g.endsWith(src) || src.endsWith(g));
+            if (idx !== -1) {
+                zoomImages = galleryImgs;
+                zoomIndex = idx;
+            } else {
+                zoomImages = [src];
+                zoomIndex = 0;
+            }
+            renderZoomImage();
             zoomModal.style.display = 'flex';
             document.body.style.overflow = 'hidden';
+        }
+
+        function renderZoomImage() {
+            if (!zoomImages.length) return;
+            zoomImage.src = zoomImages[zoomIndex];
+            const total = zoomImages.length;
+            const showNav = total > 1;
+            zoomPrevBtn.style.display = showNav ? 'flex' : 'none';
+            zoomNextBtn.style.display = showNav ? 'flex' : 'none';
+            const counter = document.querySelector('.zoom-counter');
+            if (counter) counter.style.display = showNav ? 'block' : 'none';
+            if (zoomCounterCurrent) zoomCounterCurrent.textContent = zoomIndex + 1;
+            if (zoomCounterTotal) zoomCounterTotal.textContent = total;
+        }
+
+        function showNextZoomImage() {
+            if (zoomImages.length < 2) return;
+            zoomIndex = (zoomIndex + 1) % zoomImages.length;
+            renderZoomImage();
+        }
+
+        function showPrevZoomImage() {
+            if (zoomImages.length < 2) return;
+            zoomIndex = (zoomIndex - 1 + zoomImages.length) % zoomImages.length;
+            renderZoomImage();
         }
 
         function closeZoom() {
             zoomModal.style.display = 'none';
             document.body.style.overflow = '';
+            zoomImage.src = '';
+            zoomImages = [];
+            zoomIndex = 0;
         }
 
         zoomClose.addEventListener('click', closeZoom);
+        zoomPrevBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showPrevZoomImage();
+        });
+        zoomNextBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showNextZoomImage();
+        });
         zoomModal.addEventListener('click', function(e) {
             if (e.target === zoomModal) closeZoom();
         });
+
+        // Клавиатура: стрелки + Escape
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && zoomModal.style.display === 'flex') closeZoom();
+            if (zoomModal.style.display !== 'flex') return;
+            if (e.key === 'Escape') closeZoom();
+            else if (e.key === 'ArrowRight') showNextZoomImage();
+            else if (e.key === 'ArrowLeft') showPrevZoomImage();
         });
+
+        // Свайп на мобильных в зум-модалке
+        let zoomTouchStartX = 0;
+        let zoomTouchStartY = 0;
+        let zoomTouchMoved = false;
+
+        zoomModal.addEventListener('touchstart', function(e) {
+            if (e.touches.length !== 1) return;
+            zoomTouchStartX = e.touches[0].clientX;
+            zoomTouchStartY = e.touches[0].clientY;
+            zoomTouchMoved = false;
+        }, { passive: true });
+
+        zoomModal.addEventListener('touchmove', function(e) {
+            if (e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - zoomTouchStartX;
+            const dy = e.touches[0].clientY - zoomTouchStartY;
+            if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+                zoomTouchMoved = true;
+            }
+        }, { passive: true });
+
+        zoomModal.addEventListener('touchend', function(e) {
+            if (e.changedTouches.length !== 1) return;
+            const dx = e.changedTouches[0].clientX - zoomTouchStartX;
+            const dy = e.changedTouches[0].clientY - zoomTouchStartY;
+            if (!zoomTouchMoved) return;
+            // Только горизонтальный свайп
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+                if (dx < 0) showNextZoomImage();
+                else showPrevZoomImage();
+            }
+        }, { passive: true });
 
         // ---- Корзина ----
         async function updateCartCount() {
@@ -198,9 +300,9 @@
             if (photos.size) {
                 sizeImg.src = photos.size;
                 sizeImg.style.display = 'block';
-                sizeImg.addEventListener('click', function() {
-                    openZoom(photos.size);
-                });
+                sizeImg.onclick = function() {
+                    openZoom(sizeImg.src);
+                };
             } else {
                 sizeImg.style.display = 'none';
             }
@@ -253,7 +355,6 @@
 
             // Клик по галерее – зум (делегирование)
             const gallery = document.getElementById('gallerySection');
-            // Удаляем старый обработчик, чтобы не дублировать
             gallery.removeEventListener('click', galleryZoomHandler);
             gallery.addEventListener('click', galleryZoomHandler);
 
@@ -276,7 +377,7 @@
                 const row = tbody.insertRow();
                 const cellName = row.insertCell(0);
                 const cellValue = row.insertCell(1);
-                cellName.textContent = isExtra ? f.name : f.name;
+                cellName.textContent = f.name;
                 cellValue.textContent = f.value || '—';
             });
             table.appendChild(tbody);

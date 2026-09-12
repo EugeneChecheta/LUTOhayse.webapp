@@ -392,7 +392,6 @@ body {
     height: 100%;
     object-fit: contain;
     display: block;
-    /* Убрано pointer-events: none, чтобы изображения были кликабельны для зума */
     cursor: pointer;
 }
 .slider-dots {
@@ -428,56 +427,102 @@ body {
 .material-modal-content {
     background-color: #fff;
     margin: 5% auto;
-    padding: 20px;
+    padding: 24px 28px;
     width: 90%;
     max-width: 1200px;
     border-radius: 20px;
     position: relative;
 }
+.material-modal-content h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    padding-right: 40px;
+}
 .close-modal {
     position: absolute;
-    right: 25px;
-    top: 15px;
-    font-size: 28px;
-    font-weight: bold;
+    right: 20px;
+    top: 16px;
+    font-size: 30px;
+    font-weight: 700;
     cursor: pointer;
     color: #aaa;
+    line-height: 1;
+    transition: color 0.2s;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
 }
-.close-modal:hover { color: black; }
+.close-modal:hover {
+    color: #000;
+    background: #f2f2f2;
+}
 
+/* === Табы: горизонтальный скролл вместо кривого переноса === */
 .tabs {
     display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin: 20px 0 20px;
-    border-bottom: 1px solid #ddd;
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin: 18px 0;
     padding-bottom: 10px;
+    border-bottom: 1px solid #ddd;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: #ccc transparent;
+    align-items: center;
+}
+.tabs::-webkit-scrollbar {
+    height: 5px;
+}
+.tabs::-webkit-scrollbar-track {
+    background: transparent;
+}
+.tabs::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
 }
 .tab {
     cursor: pointer;
     font-weight: 600;
-    font-size: 18px;
-    padding: 8px 16px;
+    font-size: 16px;
+    padding: 8px 18px;
     color: #333;
     border-radius: 30px;
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
+    white-space: nowrap;
+    background: #f2f2f2;
+    user-select: none;
 }
 .tab.active {
     background: #628b35;
-    color: white;
+    color: #fff;
 }
 .tab:hover:not(.active) {
-    background: #e9e5e5;
+    background: #e3e3e3;
 }
 
+/* === Сетка материалов === */
 .materials-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 20px;
-    margin-top: 20px;
-    max-height: 70vh;
+    gap: 18px;
+    margin-top: 6px;
+    max-height: 68vh;
     overflow-y: auto;
-    padding: 10px;
+    padding: 4px 4px 8px;
+}
+.materials-container::-webkit-scrollbar {
+    width: 8px;
+}
+.materials-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 4px;
 }
 .material-card {
     background: #f9f9f9;
@@ -485,8 +530,11 @@ body {
     padding: 12px;
     text-align: center;
     cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 .material-card:hover {
     transform: translateY(-4px);
@@ -499,28 +547,18 @@ body {
     object-fit: cover;
     border-radius: 12px;
     margin-bottom: 10px;
+    background: #eee;
 }
 .material-name {
     font-weight: 600;
     font-size: 14px;
     margin-bottom: 5px;
+    line-height: 1.3;
 }
 .material-code {
     font-size: 12px;
     color: #777;
-}
-@media (max-width: 768px) {
-    .materials-container {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 12px;
-    }
-    .material-card img {
-        height: 100px;
-    }
-    .tab {
-        font-size: 14px;
-        padding: 6px 12px;
-    }
+    margin-top: auto;
 }
 
 /* ===== МОДАЛЬНОЕ ОКНО ДЛЯ ЗУМА ===== */
@@ -532,33 +570,97 @@ body {
     top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.9);
-    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.92);
+    overflow: hidden;
     justify-content: center;
     align-items: center;
 }
 .zoom-modal-content {
     display: block;
-    max-width: 95%;
-    max-height: 90vh;
+    max-width: 88%;
+    max-height: 88vh;
     object-fit: contain;
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    margin: 20px auto;
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
 }
 .zoom-close {
     position: absolute;
     top: 20px;
-    right: 35px;
+    right: 28px;
     color: #fff;
-    font-size: 40px;
-    font-weight: bold;
+    font-size: 32px;
+    font-weight: 700;
     cursor: pointer;
-    transition: 0.3s;
-    z-index: 2001;
+    transition: background 0.2s, color 0.2s;
+    z-index: 2002;
+    line-height: 1;
+    background: rgba(0,0,0,0.4);
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
 }
 .zoom-close:hover {
-    color: #bbb;
+    color: #fff;
+    background: rgba(0,0,0,0.75);
+}
+
+/* === Кнопки навигации в зум-модалке === */
+.zoom-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, transform 0.2s;
+    z-index: 2002;
+    user-select: none;
+    padding: 0;
+    line-height: 1;
+}
+.zoom-nav:hover {
+    background: rgba(255,255,255,0.35);
+    transform: translateY(-50%) scale(1.06);
+}
+.zoom-prev { left: 24px; }
+.zoom-next { right: 24px; }
+
+/* === Счётчик 1 / N === */
+.zoom-counter {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    background: rgba(0,0,0,0.5);
+    padding: 6px 16px;
+    border-radius: 20px;
+    display: none;
+    z-index: 2002;
+    user-select: none;
+    letter-spacing: 0.5px;
+}
+
+/* === На тач-устройствах стрелки скрываем — там свайп === */
+@media (hover: none) and (pointer: coarse) {
+    .zoom-nav { display: none !important; }
 }
 
 /* ===== ФУТЕР ===== */
@@ -640,11 +742,13 @@ footer {
         min-height: 30vh;
         height: 45vh;
     }
+
+    /* ===== ХАРАКТЕРИСТИКИ: сплошной текст, без внутренней прокрутки ===== */
     .size-schema-block {
         order: 3;
         flex: 0 0 auto;
-        max-height: 30vh;
-        overflow-y: auto;
+        max-height: none;
+        overflow: visible;
         padding: 8px;
     }
 
@@ -701,6 +805,30 @@ footer {
     .footer-left .logo {
         font-size: 20px;
     }
+
+    /* Модалка материалов на планшетах */
+    .material-modal-content {
+        margin: 3% auto;
+        width: 94%;
+        padding: 18px;
+        border-radius: 16px;
+    }
+    .tabs {
+        gap: 8px;
+        margin: 14px 0;
+    }
+    .tab {
+        font-size: 14px;
+        padding: 7px 14px;
+    }
+    .materials-container {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 14px;
+        max-height: 65vh;
+    }
+    .material-card img {
+        height: 110px;
+    }
 }
 
 @media (max-width: 480px) {
@@ -719,10 +847,14 @@ footer {
         min-height: 25vh;
         flex: 0 0 35vh;
     }
+
+    /* ===== ХАРАКТЕРИСТИКИ: сплошной текст, без внутренней прокрутки ===== */
     .size-schema-block {
-        max-height: 25vh;
+        max-height: none;
+        overflow: visible;
         padding: 5px;
     }
+
     .dimensions-img {
         max-height: 15vh;
         margin-bottom: 8px;
@@ -766,5 +898,70 @@ footer {
     .footer-bottom {
         font-size: 10px;
         padding-top: 6px;
+    }
+
+    /* Модалка материалов на телефонах */
+    .material-modal-content {
+        margin: 2% auto;
+        width: 96%;
+        padding: 14px;
+        border-radius: 14px;
+    }
+    .material-modal-content h2 {
+        font-size: 17px;
+        padding-right: 34px;
+    }
+    .close-modal {
+        right: 10px;
+        top: 8px;
+        font-size: 26px;
+        width: 32px;
+        height: 32px;
+    }
+    .tabs {
+        gap: 6px;
+        margin: 12px 0;
+        padding-bottom: 8px;
+    }
+    .tab {
+        font-size: 13px;
+        padding: 6px 12px;
+    }
+    .materials-container {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 10px;
+        max-height: 62vh;
+    }
+    .material-card {
+        padding: 8px;
+        border-radius: 12px;
+    }
+    .material-card img {
+        height: 100px;
+        margin-bottom: 6px;
+    }
+    .material-name {
+        font-size: 13px;
+    }
+    .material-code {
+        font-size: 11px;
+    }
+
+    /* Зум на мобилке */
+    .zoom-modal-content {
+        max-width: 96%;
+        max-height: 82vh;
+    }
+    .zoom-close {
+        top: 10px;
+        right: 12px;
+        width: 40px;
+        height: 40px;
+        font-size: 26px;
+    }
+    .zoom-counter {
+        bottom: 14px;
+        font-size: 12px;
+        padding: 4px 12px;
     }
 }
