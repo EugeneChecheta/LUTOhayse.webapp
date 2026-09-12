@@ -7,199 +7,478 @@
     <link rel="icon" type="image/png" href="/media/interface/favicon.png">
     <link rel="stylesheet" href="/mattress.css">
     <style>
-        /* Базовые стили (дополняют mattress.css) */
+        /* Базовые стили шагов */
         .step { display: none; }
         .step.active { display: block; }
         .btn:disabled { opacity: 0.5; pointer-events: none; }
 
-        .layer-item, .chosen-layer, .cover-item {
+        /* ===== Шаг 1: Тип матраца ===== */
+        .type-selector {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 8px;
-            border-bottom: 1px solid #eee;
-            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 18px;
         }
-        .layer-info, .cover-info {
-            flex: 1;
-            min-width: 150px;
-        }
-        .layer-name, .cover-name {
-            font-weight: 600;
-            display: block;
-        }
-        .layer-price, .cover-price {
-            color: #628b35;
-            font-weight: 700;
-        }
-        .layer-desc, .cover-desc {
-            font-size: 0.9rem;
-            color: #555;
-            margin-top: 3px;
-        }
-        .layer-actions, .cover-actions {
-            display: flex;
-            gap: 8px;
-            margin-left: 10px;
-        }
-        .btn-small {
-            padding: 4px 12px;
-            font-size: 0.8rem;
-            border-radius: 4px;
-            border: none;
+        .type-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 22px 18px;
+            border: 2px solid #ddd;
+            border-radius: 14px;
+            background: #fff;
             cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 16px;
+            line-height: 1.3;
+            color: #222;
+            text-align: center;
+            min-height: 88px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.15s;
         }
-        .btn-add {
-            background: #628b35;
-            color: white;
+        .type-btn:hover {
+            border-color: #a8c288;
+            box-shadow: 0 4px 14px rgba(98, 139, 53, 0.12);
         }
-        .btn-add:hover { background: #4f702a; }
-        .btn-remove {
-            background: #e3342f;
-            color: white;
+        .type-btn.selected {
+            border-color: #628b35;
+            background: #eef5e6;
+            box-shadow: 0 0 0 3px rgba(98, 139, 53, 0.18);
         }
-        .btn-remove:hover { background: #b91c1c; }
+        .type-hint {
+            padding: 16px 20px;
+            background: #f3f8ec;
+            border-left: 4px solid #628b35;
+            border-radius: 10px;
+            color: #4a5568;
+            font-size: 15px;
+            line-height: 1.55;
+            min-height: 84px;
+            display: flex;
+            align-items: center;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .type-hint.neutral {
+            background: #f5f5f5;
+            border-left-color: #bbb;
+            color: #777;
+            font-style: italic;
+        }
+        .height-input-container {
+            margin-top: 15px;
+            padding: 14px 18px;
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 10px;
+        }
+        .height-input label { font-weight: 500; font-size: 14px; color: #444; }
+        .height-input input {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            width: 110px;
+            margin-left: 10px;
+            font-family: inherit;
+            font-size: 15px;
+        }
 
-        .size-grid, .cover-grid {
+        /* ===== Шаг 2: Размеры ===== */
+        .size-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
             margin: 15px 0;
         }
-        .size-card, .cover-card {
-            padding: 12px 8px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
+        .size-card {
+            padding: 16px 10px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
             text-align: center;
             cursor: pointer;
             transition: 0.2s;
-            background: #f9f9f9;
+            background: #fafafa;
+            font-weight: 600;
         }
-        .size-card.selected, .cover-card.selected {
+        .size-card:hover { border-color: #a8c288; }
+        .size-card.selected {
             border-color: #628b35;
-            background: #e8f0e0;
-            box-shadow: 0 0 0 2px #628b35;
+            background: #eef5e6;
+            box-shadow: 0 0 0 3px rgba(98, 139, 53, 0.18);
         }
-        .size-name, .cover-name { font-weight: 600; }
-        .cover-price { font-weight: 600; color: #628b35; margin-top: 4px; }
 
+        /* ===== Шаг 3: Слои ===== */
         .layers-layout {
             display: flex;
-            gap: 30px;
+            gap: 24px;
             flex-wrap: wrap;
         }
         .layers-list-container, .layers-chosen-container {
-            flex: 1;
+            flex: 1 1 320px;
             min-width: 280px;
         }
         .layers-list, .chosen-layers {
-            max-height: 400px;
+            max-height: 520px;
             overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 12px;
-            padding: 10px;
+            border: 1px solid #e4e4e4;
+            border-radius: 14px;
+            padding: 12px;
             background: #fff;
         }
         .empty-message {
-            color: #888;
+            color: #999;
             font-style: italic;
-            padding: 15px 0;
+            padding: 18px 6px;
             text-align: center;
         }
 
+        /* Карточка слоя с фото и характеристиками */
+        .layer-item {
+            display: flex;
+            gap: 14px;
+            padding: 14px 10px;
+            border-bottom: 1px solid #eee;
+            align-items: flex-start;
+        }
+        .layer-item:last-child { border-bottom: none; }
+
+        .layer-photo-wrap {
+            flex: 0 0 84px;
+            width: 84px;
+            height: 84px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #f3f3f3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #bbb;
+            font-size: 22px;
+            user-select: none;
+        }
+        .layer-photo-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .layer-photo-placeholder::before {
+            content: "🛏";
+        }
+
+        .layer-content {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .layer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .layer-name {
+            font-weight: 700;
+            font-size: 16px;
+            color: #222;
+        }
+        .layer-price {
+            color: #628b35;
+            font-weight: 700;
+            font-size: 16px;
+            white-space: nowrap;
+        }
+        .layer-desc {
+            font-size: 13.5px;
+            color: #666;
+            margin-top: 4px;
+            line-height: 1.45;
+        }
+
+        .layer-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .feature-tag {
+            display: inline-block;
+            background: #f1f6ea;
+            color: #46631f;
+            border: 1px solid #dfeccd;
+            border-radius: 20px;
+            padding: 3px 10px;
+            font-size: 12px;
+            line-height: 1.35;
+            white-space: nowrap;
+        }
+        .feature-tag b { font-weight: 600; }
+
+        .layer-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn-small {
+            padding: 6px 16px;
+            font-size: 13px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+        }
+        .btn-add { background: #628b35; color: white; }
+        .btn-add:hover { background: #4f702a; }
+        .btn-remove { background: #e3342f; color: white; }
+        .btn-remove:hover { background: #b91c1c; }
+
+        /* Выбранный слой */
+        .chosen-layer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 8px;
+            border-bottom: 1px solid #eee;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .chosen-layer:last-child { border-bottom: none; }
+        .chosen-layer .layer-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+        .chosen-layer .layer-name { font-size: 15px; }
+        .chosen-layer .layer-price { font-size: 14px; }
+
+        /* Мобильные вкладки для шага 3 */
+        .mobile-tabs {
+            display: none;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .tab-btn {
+            flex: 1 1 0;
+            padding: 11px 8px;
+            border: 2px solid #ddd;
+            background: #fff;
+            border-radius: 10px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 14px;
+            color: #444;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .tab-btn.active {
+            border-color: #628b35;
+            background: #eef5e6;
+            color: #46631f;
+        }
+        .tab-badge {
+            display: inline-block;
+            min-width: 20px;
+            padding: 0 6px;
+            margin-left: 6px;
+            border-radius: 10px;
+            background: #628b35;
+            color: #fff;
+            font-size: 11.5px;
+            line-height: 18px;
+            font-weight: 700;
+            vertical-align: middle;
+        }
+
+        /* ===== Шаг 4: Чехлы ===== */
+        .cover-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+            margin: 15px 0;
+        }
+        .cover-card {
+            padding: 14px;
+            border: 2px solid #ddd;
+            border-radius: 12px;
+            text-align: center;
+            cursor: pointer;
+            background: #fafafa;
+            transition: 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+        .cover-card:hover { border-color: #a8c288; }
+        .cover-card.selected {
+            border-color: #628b35;
+            background: #eef5e6;
+            box-shadow: 0 0 0 3px rgba(98, 139, 53, 0.18);
+        }
+        .cover-thumb {
+            width: 84px;
+            height: 84px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #bbb;
+            font-size: 22px;
+        }
+        .cover-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .cover-name { font-weight: 700; font-size: 15px; color: #222; }
+        .cover-desc { font-size: 13px; color: #666; line-height: 1.4; }
+        .cover-price { font-weight: 700; color: #628b35; margin-top: 2px; }
+
+        /* ===== Кнопки навигации ===== */
         .step-actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 15px;
+            gap: 12px;
             justify-content: flex-end;
             margin-top: 25px;
         }
         .btn {
-            padding: 8px 24px;
+            padding: 11px 28px;
             border: none;
             border-radius: 30px;
+            font-family: inherit;
             font-weight: 600;
+            font-size: 15px;
             cursor: pointer;
+            transition: 0.2s;
         }
-        .btn-primary {
-            background: #628b35;
-            color: white;
-        }
+        .btn-primary { background: #628b35; color: white; }
         .btn-primary:hover:not(:disabled) { background: #4f702a; }
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
+        .btn-secondary { background: #6c757d; color: white; }
         .btn-secondary:hover { background: #5a6268; }
 
-        .total-price-bar {
+        /* ===== Нижняя фиксированная панель ===== */
+        .bottom-panel {
             position: fixed;
-            bottom: 0;
             left: 0;
             right: 0;
+            bottom: 0;
+            z-index: 999;
             background: #fff;
-            padding: 14px 30px;
-            box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+            box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.08);
+            border-top: 1px solid #e4e4e4;
+            transition: box-shadow 0.2s;
+        }
+        .detail-panel {
+            max-height: 0;
+            overflow: hidden;
+            padding: 0 30px;
+            background: #f6f8f2;
+            border-bottom: 1px solid #e4e4e4;
+            transition: max-height 0.35s ease, padding 0.35s ease;
+            color: #444;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .detail-panel.open {
+            max-height: 320px;
+            padding: 16px 30px 18px;
+            overflow-y: auto;
+        }
+        .detail-panel .detail-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 22px;
+            margin-bottom: 6px;
+        }
+        .detail-panel .detail-row:last-child { margin-bottom: 0; }
+        .detail-panel .detail-label {
+            color: #777;
+            font-weight: 500;
+        }
+        .detail-panel .detail-value {
+            color: #222;
+            font-weight: 600;
+        }
+        .detail-panel .detail-accent { color: #628b35; font-weight: 700; }
+
+        .total-price-bar {
+            padding: 12px 30px;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 22px;
+            gap: 18px;
+            font-size: 20px;
             font-weight: 700;
-            z-index: 999;
-            border-top: 1px solid #ddd;
             flex-wrap: wrap;
-            gap: 10px;
+            background: #fff;
         }
-        .total-price-bar span:last-child { color: #628b35; }
+        .total-price-bar .total-label { font-weight: 500; color: #555; font-size: 16px; }
+        .total-price-bar #totalPriceDisplay { color: #628b35; font-size: 24px; }
+        .total-price-bar .height-info {
+            font-size: 15px;
+            font-weight: 500;
+            color: #555;
+        }
+        .total-price-bar .height-info span { color: #222; font-weight: 700; }
         .detail-toggle {
             cursor: pointer;
             color: #628b35;
-            font-weight: 400;
-            font-size: 14px;
-            margin-left: 15px;
-        }
-        .detail-panel {
-            display: none;
-            margin-top: 10px;
-            padding: 12px;
-            background: #f9f9f9;
-            border-radius: 8px;
-            font-size: 0.95rem;
-        }
-        .detail-panel.open { display: block; }
-
-        .type-selector {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        .type-btn {
-            padding: 10px 25px;
-            border: 2px solid #ddd;
-            border-radius: 30px;
-            background: #fff;
-            cursor: pointer;
             font-weight: 600;
-            transition: 0.2s;
+            font-size: 14px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: #eef5e6;
+            user-select: none;
+            transition: background 0.2s;
         }
-        .type-btn.selected {
-            border-color: #628b35;
-            background: #e8f0e0;
-        }
-        .height-input {
-            margin-top: 10px;
-        }
-        .height-input label { font-weight: 500; }
-        .height-input input {
-            padding: 6px 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 100px;
-        }
+        .detail-toggle:hover { background: #dfeccd; }
 
+        /* ===== Адаптив ===== */
         @media (max-width: 768px) {
-            .layers-layout { flex-direction: column; }
-            .total-price-bar { font-size: 18px; padding: 10px 15px; }
+            .type-selector { flex-direction: column; gap: 12px; }
+            .type-btn { min-height: 64px; padding: 18px 14px; font-size: 15px; }
+            .type-hint { font-size: 14px; padding: 14px 16px; min-height: 0; }
+
+            .layers-layout { flex-direction: column; gap: 14px; }
+            .layers-list, .chosen-layers { max-height: 60vh; }
+            .mobile-tabs { display: flex; }
+
+            /* Скрываем неактивную вкладку на мобильных */
+            .layers-layout.tab-available .layers-chosen-container { display: none; }
+            .layers-layout.tab-chosen .layers-list-container { display: none; }
+
+            .layer-photo-wrap { flex: 0 0 68px; width: 68px; height: 68px; }
+            .layer-name { font-size: 15px; }
+            .layer-price { font-size: 15px; }
+            .feature-tag { font-size: 11.5px; padding: 2px 9px; }
+
+            .total-price-bar {
+                font-size: 16px;
+                padding: 10px 14px;
+                gap: 10px;
+            }
+            .total-price-bar #totalPriceDisplay { font-size: 20px; }
+            .total-price-bar .total-label { font-size: 13px; }
+            .total-price-bar .height-info { font-size: 13px; }
+            .detail-panel.open {
+                max-height: 45vh;
+                padding: 14px 16px;
+                font-size: 13px;
+            }
+            .detail-toggle { font-size: 13px; padding: 5px 10px; }
+
+            .step-actions { justify-content: stretch; }
+            .step-actions .btn { flex: 1 1 45%; }
+        }
+        @media (max-width: 480px) {
+            .layer-item { gap: 10px; padding: 12px 6px; }
+            .layer-photo-wrap { flex: 0 0 56px; width: 56px; height: 56px; }
+            .cover-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+            .size-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
         }
     </style>
 </head>
@@ -241,17 +520,24 @@
 
             <!-- Шаг 1: Тип -->
             <div id="step-type" class="step active">
-                <h2>Шаг 1. Выберите тип матраца</h2>
+                <h2>Шаг 1. Выберите тип сборки</h2>
+
                 <div class="type-selector">
-                    <button class="type-btn" data-type="new">Новый матрац</button>
-                    <button class="type-btn" data-type="old">Докупить слои к старому</button>
+                    <button type="button" class="type-btn" data-type="new">Новый матрац</button>
+                    <button type="button" class="type-btn" data-type="old">Добавить слои к старому</button>
                 </div>
-                <div id="height-input-container" style="display:none;">
+
+                <div class="type-hint neutral" id="typeHint">
+                    Пожалуйста, выберите один из вариантов выше, чтобы продолжить сборку. Подсказка появится здесь.
+                </div>
+
+                <div class="height-input-container" id="height-input-container" style="display:none;">
                     <div class="height-input">
-                        <label>Введите высоту существующего матраца (см):</label>
+                        <label for="initialHeight">Введите высоту существующего матраца (см):</label>
                         <input type="number" id="initialHeight" min="1" value="10">
                     </div>
                 </div>
+
                 <div class="step-actions">
                     <button class="btn btn-primary" id="confirmTypeBtn" disabled>Далее →</button>
                 </div>
@@ -270,7 +556,18 @@
             <!-- Шаг 3: Слои -->
             <div id="step-layers" class="step">
                 <h2>Шаг 3. Выберите слои</h2>
-                <div class="layers-layout">
+
+                <!-- Мобильные вкладки -->
+                <div class="mobile-tabs" id="mobileTabs">
+                    <button type="button" class="tab-btn active" data-tab="available">
+                        Доступные слои
+                    </button>
+                    <button type="button" class="tab-btn" data-tab="chosen">
+                        Выбранные слои<span class="tab-badge" id="chosenCountBadge">0</span>
+                    </button>
+                </div>
+
+                <div class="layers-layout tab-available" id="layersLayout">
                     <div class="layers-list-container">
                         <h3>Доступные слои</h3>
                         <div id="layersList" class="layers-list"></div>
@@ -280,6 +577,7 @@
                         <div id="chosenLayers" class="chosen-layers"></div>
                     </div>
                 </div>
+
                 <div class="step-actions">
                     <button class="btn btn-secondary" id="backFromLayers">Назад</button>
                     <button class="btn btn-primary" id="confirmLayersBtn" disabled>Далее →</button>
@@ -295,18 +593,6 @@
                     <button class="btn btn-primary" id="addToCartBtn" disabled>Добавить в корзину</button>
                 </div>
             </div>
-        </div>
-
-        <!-- Итоговая цена и высота -->
-        <div class="total-price-bar">
-            <span>Итоговая стоимость: </span>
-            <span id="totalPriceDisplay">0 ₽</span>
-            <span style="margin-left: 20px; font-weight: 400; font-size: 16px;">Высота: <span id="totalHeightDisplay">0</span> см</span>
-            <span class="detail-toggle" id="detailToggle">Подробнее ▼</span>
-        </div>
-        <div class="detail-panel" id="detailPanel">
-            <div><strong>Цена:</strong> слои: <span id="detailLayersPrice">0</span> ₽, чехол: <span id="detailCoverPrice">0</span> ₽</div>
-            <div><strong>Высота:</strong> основа: <span id="detailInitialHeight">0</span> см, слои (по 5 см): <span id="detailLayersHeight">0</span> см</div>
         </div>
     </main>
 
@@ -332,6 +618,38 @@
         </div>
     </footer>
 
+    <!-- Нижняя фиксированная панель -->
+    <div class="bottom-panel" id="bottomPanel">
+        <div class="detail-panel" id="detailPanel">
+            <div class="detail-row">
+                <span class="detail-label">Стоимость слоёв:</span>
+                <span class="detail-value"><span id="detailLayersPrice">0</span> ₽</span>
+                <span class="detail-label">Стоимость чехла:</span>
+                <span class="detail-value"><span id="detailCoverPrice">0</span> ₽</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Высота основы:</span>
+                <span class="detail-value"><span id="detailInitialHeight">0</span> см</span>
+                <span class="detail-label">Высота слоёв (по 5 см):</span>
+                <span class="detail-value"><span id="detailLayersHeight">0</span> см</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Итоговая высота:</span>
+                <span class="detail-value detail-accent"><span id="detailTotalHeight">0</span> см</span>
+            </div>
+            <div class="detail-row" id="detailLayersListRow" style="display:none;">
+                <span class="detail-label">Выбранные слои:</span>
+                <span class="detail-value" id="detailLayersList">—</span>
+            </div>
+        </div>
+        <div class="total-price-bar">
+            <span class="total-label">Итоговая стоимость:</span>
+            <span id="totalPriceDisplay">0 ₽</span>
+            <span class="height-info">Высота: <span id="totalHeightDisplay">0</span> см</span>
+            <span class="detail-toggle" id="detailToggle">Подробнее ▼</span>
+        </div>
+    </div>
+
     <script>
         (function() {
             'use strict';
@@ -342,11 +660,19 @@
                 type: null,               // 'new' или 'old'
                 initialHeight: 0,
                 size: null,
-                layers: [],               // выбранные слои (копии объектов)
+                layers: [],               // выбранные слои
                 cover: null,
                 allSizes: [],
                 allLayers: [],
-                allCovers: []
+                allCovers: [],
+                mobileTab: 'available'    // 'available' | 'chosen'
+            };
+
+            // ========== ТЕКСТЫ ПОДСКАЗОК ДЛЯ ШАГА 1 ==========
+            const TYPE_HINTS = {
+                neutral: 'Пожалуйста, выберите один из вариантов выше, чтобы продолжить сборку. Подсказка появится здесь.',
+                new: 'Соберите новый матрац с нуля — подберите размер, наполнители и чехол с учётом ваших предпочтений и особенностей сна. Мы изготовим его специально для вас и обеспечим максимальный комфорт на долгие годы.',
+                old: 'Дайте вторую жизнь любимому матрацу: докупите несколько дополнительных слоёв для комфорта и получите новый чехол, который идеально подойдёт и вашему старому матрацу, и новым слоям вместе. Экономия без потери качества.'
             };
 
             // ========== DOM ==========
@@ -356,6 +682,7 @@
             const stepLayers = $('step-layers');
             const stepCover = $('step-cover');
             const typeBtns = document.querySelectorAll('.type-btn');
+            const typeHint = $('typeHint');
             const heightInputContainer = $('height-input-container');
             const initialHeightInput = $('initialHeight');
             const confirmTypeBtn = $('confirmTypeBtn');
@@ -377,6 +704,12 @@
             const detailCoverPrice = $('detailCoverPrice');
             const detailInitialHeight = $('detailInitialHeight');
             const detailLayersHeight = $('detailLayersHeight');
+            const detailTotalHeight = $('detailTotalHeight');
+            const detailLayersListRow = $('detailLayersListRow');
+            const detailLayersList = $('detailLayersList');
+            const layersLayout = $('layersLayout');
+            const mobileTabs = $('mobileTabs');
+            const chosenCountBadge = $('chosenCountBadge');
 
             // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
             function showStep(step) {
@@ -386,6 +719,16 @@
                 else if (step === 3) stepLayers.classList.add('active');
                 else if (step === 4) stepCover.classList.add('active');
                 state.step = step;
+            }
+
+            function escapeHtml(str) {
+                if (str === null || str === undefined) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
             }
 
             function updateTotals() {
@@ -403,10 +746,33 @@
 
                 const layersPrice = state.layers.reduce((sum, l) => sum + (l.price || 0), 0);
                 const coverPrice = state.cover ? state.cover.price : 0;
+
                 detailLayersPrice.textContent = layersPrice;
                 detailCoverPrice.textContent = coverPrice;
                 detailInitialHeight.textContent = state.initialHeight || 0;
                 detailLayersHeight.textContent = state.layers.length * 5;
+                detailTotalHeight.textContent = totalHeight;
+
+                // Обновляем бейдж количества выбранных слоёв
+                if (chosenCountBadge) chosenCountBadge.textContent = state.layers.length;
+
+                // Список выбранных слоёв в панели "Подробнее"
+                if (state.layers.length > 0) {
+                    detailLayersListRow.style.display = '';
+                    detailLayersList.textContent = state.layers.map(l => l.name).join(', ');
+                } else {
+                    detailLayersListRow.style.display = 'none';
+                    detailLayersList.textContent = '—';
+                }
+            }
+
+            function setMobileTab(tab) {
+                state.mobileTab = tab;
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.tab === tab);
+                });
+                layersLayout.classList.remove('tab-available', 'tab-chosen');
+                layersLayout.classList.add('tab-' + tab);
             }
 
             // ========== ЗАГРУЗКА РАЗМЕРОВ ==========
@@ -432,7 +798,8 @@
                     const card = document.createElement('div');
                     card.className = 'size-card';
                     card.dataset.id = s.id;
-                    card.innerHTML = `<span class="size-name">${s.name}</span>`;
+                    if (state.size && state.size.id === s.id) card.classList.add('selected');
+                    card.innerHTML = `<span class="size-name">${escapeHtml(s.name)}</span>`;
                     card.addEventListener('click', async () => {
                         document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
                         card.classList.add('selected');
@@ -468,6 +835,7 @@
                     // Сброс выбранных слоёв и чехла при смене размера
                     state.layers = [];
                     state.cover = null;
+                    setMobileTab('available');
                     renderLayersList();
                     renderChosenLayers();
                     renderCovers();
@@ -498,14 +866,50 @@
                 state.allLayers.forEach(l => {
                     const div = document.createElement('div');
                     div.className = 'layer-item';
+
+                    // Фото слоя
+                    let photoHtml;
+                    if (l.photo_url) {
+                        photoHtml = `<img src="${escapeHtml(l.photo_url)}" alt="${escapeHtml(l.name)}" loading="lazy">`;
+                    } else {
+                        photoHtml = `<span class="layer-photo-placeholder"></span>`;
+                    }
+
+                    // Характеристики: основные и дополнительные
+                    let featuresHtml = '';
+                    const allFeatures = [];
+                    if (Array.isArray(l.main_features)) {
+                        l.main_features.forEach(f => {
+                            if (f && f.name) {
+                                allFeatures.push({ name: f.name, value: f.value || '', main: true });
+                            }
+                        });
+                    }
+                    if (Array.isArray(l.extra_features)) {
+                        l.extra_features.forEach(f => {
+                            if (f && f.name) {
+                                allFeatures.push({ name: f.name, value: f.value || '', main: false });
+                            }
+                        });
+                    }
+                    if (allFeatures.length) {
+                        featuresHtml = '<div class="layer-features">' + allFeatures.map(f =>
+                            `<span class="feature-tag"><b>${escapeHtml(f.name)}:</b> ${escapeHtml(f.value)}</span>`
+                        ).join('') + '</div>';
+                    }
+
                     div.innerHTML = `
-                        <div class="layer-info">
-                            <span class="layer-name">${l.name}</span>
-                            ${l.description ? `<div class="layer-desc">${l.description}</div>` : ''}
-                            <span class="layer-price">${l.price} ₽</span>
-                        </div>
-                        <div class="layer-actions">
-                            <button class="btn-small btn-add" data-id="${l.id}">Добавить</button>
+                        <div class="layer-photo-wrap">${photoHtml}</div>
+                        <div class="layer-content">
+                            <div class="layer-header">
+                                <span class="layer-name">${escapeHtml(l.name)}</span>
+                                <span class="layer-price">${l.price} ₽</span>
+                            </div>
+                            ${l.description ? `<div class="layer-desc">${escapeHtml(l.description)}</div>` : ''}
+                            ${featuresHtml}
+                            <div class="layer-actions">
+                                <button type="button" class="btn-small btn-add" data-id="${l.id}">Добавить</button>
+                            </div>
                         </div>
                     `;
                     layersList.appendChild(div);
@@ -533,6 +937,7 @@
                 if (!state.layers.length) {
                     chosenLayers.innerHTML = '<div class="empty-message">Слои не выбраны</div>';
                     confirmLayersBtn.disabled = true;
+                    if (chosenCountBadge) chosenCountBadge.textContent = '0';
                     return;
                 }
                 state.layers.forEach((l, index) => {
@@ -540,11 +945,11 @@
                     div.className = 'chosen-layer';
                     div.innerHTML = `
                         <div class="layer-info">
-                            <span class="layer-name">${l.name}</span>
+                            <span class="layer-name">${escapeHtml(l.name)}</span>
                             <span class="layer-price">${l.price} ₽</span>
                         </div>
                         <div class="layer-actions">
-                            <button class="btn-small btn-remove" data-index="${index}">Убрать</button>
+                            <button type="button" class="btn-small btn-remove" data-index="${index}">Убрать</button>
                         </div>
                     `;
                     chosenLayers.appendChild(div);
@@ -560,6 +965,7 @@
                     });
                 });
                 confirmLayersBtn.disabled = false;
+                if (chosenCountBadge) chosenCountBadge.textContent = state.layers.length;
             }
 
             // ========== ОТОБРАЖЕНИЕ ЧЕХЛОВ ==========
@@ -573,9 +979,16 @@
                     const card = document.createElement('div');
                     card.className = 'cover-card';
                     card.dataset.id = c.id;
+                    if (state.cover && state.cover.id === c.id) card.classList.add('selected');
+
+                    const photoHtml = c.photo_url
+                        ? `<div class="cover-thumb"><img src="${escapeHtml(c.photo_url)}" alt="${escapeHtml(c.name)}" loading="lazy"></div>`
+                        : `<div class="cover-thumb">🧵</div>`;
+
                     card.innerHTML = `
-                        <span class="cover-name">${c.name}</span>
-                        ${c.description ? `<div class="cover-desc">${c.description}</div>` : ''}
+                        ${photoHtml}
+                        <span class="cover-name">${escapeHtml(c.name)}</span>
+                        ${c.description ? `<div class="cover-desc">${escapeHtml(c.description)}</div>` : ''}
                         <span class="cover-price">${c.price} ₽</span>
                     `;
                     card.addEventListener('click', () => {
@@ -606,6 +1019,7 @@
                     renderLayersList();
                     renderChosenLayers();
                     renderCovers();
+                    setMobileTab('available');
                     showStep(1);
                     updateTotals();
                 } else if (step === 2) {
@@ -628,7 +1042,6 @@
                         return;
                     }
                     showStep(4);
-                    // Если чехол ещё не выбран и есть только один – автовыбор уже сделан в loadLayersAndCovers
                     if (state.allCovers.length === 1 && !state.cover) {
                         state.cover = state.allCovers[0];
                         const card = document.querySelector('.cover-card');
@@ -647,6 +1060,15 @@
                     typeBtns.forEach(b => b.classList.remove('selected'));
                     btn.classList.add('selected');
                     state.type = btn.dataset.type;
+
+                    // Обновляем подсказку
+                    typeHint.classList.remove('neutral');
+                    if (state.type === 'new') {
+                        typeHint.textContent = TYPE_HINTS.new;
+                    } else if (state.type === 'old') {
+                        typeHint.textContent = TYPE_HINTS.old;
+                    }
+
                     if (state.type === 'old') {
                         heightInputContainer.style.display = 'block';
                         state.initialHeight = parseInt(initialHeightInput.value) || 0;
@@ -663,6 +1085,10 @@
                 state.initialHeight = parseInt(initialHeightInput.value) || 0;
                 updateTotals();
             });
+            initialHeightInput.addEventListener('input', () => {
+                state.initialHeight = parseInt(initialHeightInput.value) || 0;
+                updateTotals();
+            });
 
             confirmTypeBtn.addEventListener('click', () => goToStep(2));
             backFromSize.addEventListener('click', () => goToStep(1));
@@ -670,6 +1096,13 @@
             backFromLayers.addEventListener('click', () => goToStep(2));
             confirmLayersBtn.addEventListener('click', () => goToStep(4));
             backFromCover.addEventListener('click', () => goToStep(3));
+
+            // Мобильные вкладки
+            mobileTabs.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setMobileTab(btn.dataset.tab);
+                });
+            });
 
             // Добавление в корзину
             addToCartBtn.addEventListener('click', async () => {
@@ -704,10 +1137,10 @@
                 }
             });
 
-            // Детали
+            // Детали (Подробнее)
             detailToggle.addEventListener('click', () => {
-                detailPanel.classList.toggle('open');
-                detailToggle.textContent = detailPanel.classList.contains('open') ? 'Подробнее ▲' : 'Подробнее ▼';
+                const isOpen = detailPanel.classList.toggle('open');
+                detailToggle.textContent = isOpen ? 'Подробнее ▲' : 'Подробнее ▼';
             });
 
             // ========== СЧЁТЧИК КОРЗИНЫ ==========
@@ -724,6 +1157,7 @@
             setInterval(updateCartCount, 5000);
 
             // ========== ИНИЦИАЛИЗАЦИЯ ==========
+            setMobileTab('available');
             loadSizes();
             showStep(1);
             updateTotals();

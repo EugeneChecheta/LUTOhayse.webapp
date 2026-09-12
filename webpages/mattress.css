@@ -182,12 +182,24 @@ body {
 .mattress-container {
     max-width: 1200px;
     margin: 30px auto;
-    padding: 0 20px 80px;
+    /* Нижний отступ учитывает фиксированную панель с учётом открытия "Подробнее" */
+    padding: 0 20px 160px;
 }
 .mattress-container h1 {
     text-align: center;
     margin-bottom: 30px;
     font-size: 32px;
+}
+.mattress-container h2 {
+    margin-bottom: 16px;
+    font-size: 22px;
+    color: #222;
+}
+.mattress-container h3 {
+    margin-bottom: 10px;
+    font-size: 17px;
+    color: #333;
+    font-weight: 600;
 }
 
 /* Footer */
@@ -196,6 +208,8 @@ footer {
     border-top: 1px solid var(--gray-border);
     padding: 40px 20px 20px;
     margin-top: 40px;
+    /* Отступ снизу, чтобы footer не перекрывался фиксированной панелью */
+    padding-bottom: 100px;
 }
 .footer-top {
     max-width: 1200px;
@@ -216,4 +230,8 @@ footer {
 }
 @media (max-width: 768px) {
     .footer-top { flex-direction: column; align-items: center; text-align: center; gap: 30px; }
+    .mattress-container { padding-bottom: 180px; }
+    .mattress-container h1 { font-size: 24px; }
+    .mattress-container h2 { font-size: 18px; }
+    .mattress-container h3 { font-size: 15px; }
 }

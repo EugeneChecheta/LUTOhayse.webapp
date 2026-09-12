@@ -342,7 +342,7 @@ def init_db():
             CONSTRAINT uq_mcp_cover_size UNIQUE (cover_id, size_id)
         );
     """)
-    # Типы основных характеристик слоёв (оставлены для совместимости с ботом, но сайт их не использует)
+    # Типы основных характеристик слоёв
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layer_main_features_types (
             id SERIAL PRIMARY KEY,
@@ -1311,9 +1311,9 @@ def add_topper_to_cart():
         cur.close()
         conn.close()
 
-# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ (исправленные) =========
-# Убраны все упоминания color_text и is_hidden, а также дополнительные характеристики,
-# так как сайт использует только описание и цену.
+# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ =========
+# Слои и чехлы теперь возвращают фото, основные и дополнительные характеристики,
+# данные читаются из таблиц, которые заполняет бот администрирования.
 
 @app.route('/api/mattress/sizes')
 def mattress_sizes():
@@ -1351,15 +1351,21 @@ def mattress_sizes():
 
 @app.route('/api/mattress/layers')
 def mattress_layers():
-    """Возвращает слои матрацев для указанного размера с ценами (0, если цена не установлена).
-    Характеристики не возвращаются, так как сайт использует только описание."""
+    """Возвращает слои матрацев для указанного размера с ценами, фото и характеристиками.
+
+    Данные читаются из таблиц, которые заполняет бот-администратор:
+      - mattress_layers
+      - mattress_layers_prices
+      - mattress_layer_main_features + mattress_layer_main_features_types
+      - mattress_layer_extra_features
+    Фото слоя лежит по пути: media/layers/{code}.webp
+    """
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Простой запрос без учёта скрытости и цвета
         cur.execute("""
             SELECT l.id, l.code, l.name, l.description, COALESCE(p.price, 0) as price
             FROM mattress_layers l
@@ -1367,17 +1373,71 @@ def mattress_layers():
             ORDER BY l.id
         """, (size_id,))
         rows = cur.fetchall()
+        layer_ids = [r[0] for r in rows]
+
+        # Основные характеристики слоёв (пары feature_name -> value)
+        main_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT lmf.layer_id, mft.name AS feature_name, lmf.value
+                FROM mattress_layer_main_features lmf
+                JOIN mattress_layer_main_features_types mft ON lmf.feature_id = mft.id
+                WHERE lmf.layer_id = ANY(%s)
+                ORDER BY mft.name
+            """, (layer_ids,))
+            for layer_id, fname, fvalue in cur.fetchall():
+                if fvalue is None or fvalue == '':
+                    continue
+                main_features.setdefault(layer_id, []).append({
+                    'name': fname,
+                    'value': fvalue
+                })
+
+        # Дополнительные характеристики слоёв
+        extra_features = {}
+        if layer_ids:
+            cur.execute("""
+                SELECT layer_id, name, value
+                FROM mattress_layer_extra_features
+                WHERE layer_id = ANY(%s)
+                ORDER BY name
+            """, (layer_ids,))
+            for layer_id, name, value in cur.fetchall():
+                if value is None or value == '':
+                    continue
+                extra_features.setdefault(layer_id, []).append({
+                    'name': name,
+                    'value': value
+                })
+
         cur.close()
         conn.close()
 
+        # Проверяем наличие файлов фотографий в media/layers/{code}.webp
+        media_layers_dir = Path(__file__).parent / 'media' / 'layers'
+
         result = []
         for r in rows:
+            layer_id = r[0]
+            code = r[1]
+            photo_url = None
+            try:
+                if code:
+                    photo_path = media_layers_dir / f"{code}.webp"
+                    if photo_path.exists():
+                        photo_url = f"/media/layers/{code}.webp"
+            except Exception:
+                photo_url = None
+
             result.append({
-                'id': r[0],
-                'code': r[1],
+                'id': layer_id,
+                'code': code,
                 'name': r[2],
                 'description': r[3] or '',
-                'price': r[4] or 0
+                'price': r[4] or 0,
+                'photo_url': photo_url,
+                'main_features': main_features.get(layer_id, []),
+                'extra_features': extra_features.get(layer_id, [])
             })
         return jsonify(result)
     except Exception as e:
@@ -1386,7 +1446,11 @@ def mattress_layers():
 
 @app.route('/api/mattress/covers')
 def mattress_covers():
-    """Возвращает чехлы матрацев для указанного размера с ценами (0, если цена не установлена)."""
+    """Возвращает чехлы матрацев для указанного размера с ценами и фото.
+
+    Данные читаются из таблиц mattress_cover и mattress_cover_prices.
+    Фото чехла лежит по пути: media/covers/{code}.webp
+    """
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
@@ -1402,13 +1466,29 @@ def mattress_covers():
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        return jsonify([{
-            'id': r[0],
-            'code': r[1],
-            'name': r[2],
-            'description': r[3] or '',
-            'price': r[4] or 0
-        } for r in rows])
+
+        media_covers_dir = Path(__file__).parent / 'media' / 'covers'
+
+        result = []
+        for r in rows:
+            code = r[1]
+            photo_url = None
+            try:
+                if code:
+                    photo_path = media_covers_dir / f"{code}.webp"
+                    if photo_path.exists():
+                        photo_url = f"/media/covers/{code}.webp"
+            except Exception:
+                photo_url = None
+            result.append({
+                'id': r[0],
+                'code': code,
+                'name': r[2],
+                'description': r[3] or '',
+                'price': r[4] or 0,
+                'photo_url': photo_url
+            })
+        return jsonify(result)
     except Exception as e:
         app.logger.error(f"API /mattress/covers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
@@ -1533,7 +1613,7 @@ def add_mattress_to_cart():
         cur.close()
         conn.close()
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА (обновлённое) =========
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
