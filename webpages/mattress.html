@@ -440,6 +440,119 @@
         }
         .detail-toggle:hover { background: #dfeccd; }
 
+        /* ===== Кнопка "Фото" ===== */
+        .btn-photo {
+            background: #3490dc;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-photo:hover { background: #2779bd; }
+        .btn-photo::before { content: "📷"; font-size: 12px; }
+
+        /* ===== Модальное окно с фото на весь экран ===== */
+        .photo-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.92);
+            padding: 20px;
+            animation: photoModalFade 0.2s ease;
+        }
+        .photo-modal.open { display: flex; }
+        @keyframes photoModalFade {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .photo-modal-img {
+            max-width: 95vw;
+            max-height: 92vh;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+            background: #111;
+        }
+        .photo-modal-close {
+            position: absolute;
+            top: 18px;
+            right: 22px;
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            font-size: 30px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            transition: background 0.2s, transform 0.15s;
+        }
+        .photo-modal-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.06);
+        }
+        .photo-modal-caption {
+            position: absolute;
+            bottom: 22px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            background: rgba(0, 0, 0, 0.55);
+            padding: 8px 18px;
+            border-radius: 20px;
+            max-width: 90vw;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ===== Заголовок конструктора с кнопкой Сброс ===== */
+        .constructor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .constructor-header h1 {
+            margin-bottom: 0;
+            text-align: left;
+            flex: 1 1 auto;
+            font-size: 32px;
+        }
+        .btn-reset {
+            padding: 10px 22px;
+            background: #fff;
+            color: #e3342f;
+            border: 2px solid #e3342f;
+            border-radius: 30px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, transform 0.15s;
+            white-space: nowrap;
+        }
+        .btn-reset:hover {
+            background: #e3342f;
+            color: #fff;
+            transform: translateY(-1px);
+        }
+        .btn-reset:active { transform: translateY(0); }
+
         /* ===== Адаптив ===== */
         @media (max-width: 768px) {
             .type-selector { flex-direction: column; gap: 12px; }
@@ -476,12 +589,26 @@
 
             .step-actions { justify-content: stretch; }
             .step-actions .btn { flex: 1 1 45%; }
+
+            .constructor-header {
+                justify-content: center;
+                text-align: center;
+            }
+            .constructor-header h1 {
+                text-align: center;
+                flex: 1 1 100%;
+                font-size: 24px;
+            }
+            .btn-reset { font-size: 13px; padding: 8px 18px; }
         }
         @media (max-width: 480px) {
             .layer-item { gap: 10px; padding: 12px 6px; }
             .layer-photo-wrap { flex: 0 0 56px; width: 56px; height: 56px; }
             .cover-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
             .size-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+
+            .photo-modal-close { width: 40px; height: 40px; font-size: 24px; top: 12px; right: 14px; }
+            .photo-modal-caption { font-size: 13px; padding: 6px 14px; bottom: 14px; }
         }
     </style>
 </head>
@@ -518,7 +645,10 @@
     </header>
 
     <main class="mattress-container">
-        <h1>Конструктор матраса</h1>
+        <div class="constructor-header">
+            <h1>Конструктор матраса</h1>
+            <button type="button" class="btn-reset" id="resetBtn" title="Сбросить все настройки">↺ Сброс</button>
+        </div>
         <div class="mattress-steps">
 
             <!-- Шаг 1: Тип -->
@@ -653,6 +783,13 @@
         </div>
     </div>
 
+    <!-- Модальное окно просмотра фото -->
+    <div class="photo-modal" id="photoModal" aria-hidden="true">
+        <button type="button" class="photo-modal-close" id="photoModalClose" aria-label="Закрыть">×</button>
+        <img class="photo-modal-img" id="photoModalImg" src="" alt="">
+        <div class="photo-modal-caption" id="photoModalCaption"></div>
+    </div>
+
     <script>
         (function() {
             'use strict';
@@ -713,6 +850,11 @@
             const layersLayout = $('layersLayout');
             const mobileTabs = $('mobileTabs');
             const chosenCountBadge = $('chosenCountBadge');
+            const resetBtn = $('resetBtn');
+            const photoModal = $('photoModal');
+            const photoModalImg = $('photoModalImg');
+            const photoModalClose = $('photoModalClose');
+            const photoModalCaption = $('photoModalCaption');
 
             // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
             function showStep(step) {
@@ -777,6 +919,36 @@
                 layersLayout.classList.remove('tab-available', 'tab-chosen');
                 layersLayout.classList.add('tab-' + tab);
             }
+
+            // ========== МОДАЛЬНОЕ ОКНО ФОТО ==========
+            function openPhotoModal(url, name) {
+                if (!url) return;
+                photoModalImg.src = url;
+                photoModalImg.alt = name || '';
+                photoModalCaption.textContent = name || '';
+                photoModalCaption.style.display = name ? '' : 'none';
+                photoModal.classList.add('open');
+                photoModal.setAttribute('aria-hidden', 'false');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closePhotoModal() {
+                photoModal.classList.remove('open');
+                photoModal.setAttribute('aria-hidden', 'true');
+                photoModalImg.src = '';
+                photoModalCaption.textContent = '';
+                document.body.style.overflow = '';
+            }
+
+            photoModalClose.addEventListener('click', closePhotoModal);
+            photoModal.addEventListener('click', (e) => {
+                if (e.target === photoModal) closePhotoModal();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && photoModal.classList.contains('open')) {
+                    closePhotoModal();
+                }
+            });
 
             // ========== ЗАГРУЗКА РАЗМЕРОВ ==========
             async function loadSizes() {
@@ -901,6 +1073,11 @@
                         ).join('') + '</div>';
                     }
 
+                    // Кнопка "Фото" — только если есть фото
+                    const photoBtnHtml = l.photo_url
+                        ? `<button type="button" class="btn-small btn-photo" data-photo="${escapeHtml(l.photo_url)}" data-name="${escapeHtml(l.name)}">Фото</button>`
+                        : '';
+
                     div.innerHTML = `
                         <div class="layer-photo-wrap">${photoHtml}</div>
                         <div class="layer-content">
@@ -911,6 +1088,7 @@
                             ${l.description ? `<div class="layer-desc">${escapeHtml(l.description)}</div>` : ''}
                             ${featuresHtml}
                             <div class="layer-actions">
+                                ${photoBtnHtml}
                                 <button type="button" class="btn-small btn-add" data-id="${l.id}">Добавить</button>
                             </div>
                         </div>
@@ -930,6 +1108,14 @@
                             updateTotals();
                             confirmLayersBtn.disabled = false;
                         }
+                    });
+                });
+
+                // Обработчики кнопок "Фото"
+                layersList.querySelectorAll('.btn-photo').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openPhotoModal(btn.dataset.photo, btn.dataset.name);
                     });
                 });
             }
@@ -988,13 +1174,21 @@
                         ? `<div class="cover-thumb"><img src="${escapeHtml(c.photo_url)}" alt="${escapeHtml(c.name)}" loading="lazy"></div>`
                         : `<div class="cover-thumb">🧵</div>`;
 
+                    // Кнопка "Фото" — только если есть фото
+                    const photoBtnHtml = c.photo_url
+                        ? `<button type="button" class="btn-small btn-photo" data-photo="${escapeHtml(c.photo_url)}" data-name="${escapeHtml(c.name)}">Фото</button>`
+                        : '';
+
                     card.innerHTML = `
                         ${photoHtml}
                         <span class="cover-name">${escapeHtml(c.name)}</span>
                         ${c.description ? `<div class="cover-desc">${escapeHtml(c.description)}</div>` : ''}
                         <span class="cover-price">${c.price} ₽</span>
+                        ${photoBtnHtml}
                     `;
-                    card.addEventListener('click', () => {
+                    card.addEventListener('click', (e) => {
+                        // Не выбираем чехол, если кликнули по кнопке "Фото"
+                        if (e.target.closest('.btn-photo')) return;
                         document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
                         card.classList.add('selected');
                         state.cover = c;
@@ -1003,7 +1197,71 @@
                     });
                     coverGrid.appendChild(card);
                 });
+
+                // Обработчики кнопок "Фото" на чехлах
+                coverGrid.querySelectorAll('.btn-photo').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openPhotoModal(btn.dataset.photo, btn.dataset.name);
+                    });
+                });
             }
+
+            // ========== СБРОС КОНСТРУКТОРА ==========
+            function resetConstructor() {
+                const hasProgress = state.type || state.size || state.layers.length > 0 || state.cover;
+                if (hasProgress) {
+                    const ok = confirm('Сбросить все настройки и начать сборку заново?');
+                    if (!ok) return;
+                }
+
+                // Сброс состояния
+                state.type = null;
+                state.initialHeight = 0;
+                state.size = null;
+                state.layers = [];
+                state.cover = null;
+                state.allLayers = [];
+                state.allCovers = [];
+                state.mobileTab = 'available';
+
+                // Сброс UI шага 1
+                typeBtns.forEach(b => b.classList.remove('selected'));
+                typeHint.classList.add('neutral');
+                typeHint.textContent = TYPE_HINTS.neutral;
+                heightInputContainer.style.display = 'none';
+                initialHeightInput.value = 10;
+                confirmTypeBtn.disabled = true;
+
+                // Сброс UI шага 2
+                document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
+                confirmSizeBtn.disabled = true;
+
+                // Сброс UI шага 3
+                setMobileTab('available');
+                renderLayersList();
+                renderChosenLayers();
+                confirmLayersBtn.disabled = true;
+
+                // Сброс UI шага 4
+                renderCovers();
+                addToCartBtn.disabled = true;
+
+                // Закрыть панель "Подробнее", если открыта
+                if (detailPanel.classList.contains('open')) {
+                    detailPanel.classList.remove('open');
+                    detailToggle.textContent = 'Подробнее ▼';
+                }
+
+                // Перейти к первому шагу и обновить итоги
+                showStep(1);
+                updateTotals();
+
+                // Прокрутить наверх
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            resetBtn.addEventListener('click', resetConstructor);
 
             // ========== НАВИГАЦИЯ МЕЖДУ ШАГАМИ ==========
             function goToStep(step) {

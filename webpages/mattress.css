@@ -202,6 +202,54 @@ body {
     font-weight: 600;
 }
 
+/* ===== Заголовок конструктора с кнопкой "Сброс" ===== */
+.constructor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+.constructor-header h1 {
+    margin-bottom: 0;
+    text-align: left;
+    flex: 1 1 auto;
+    font-size: 32px;
+}
+.btn-reset {
+    padding: 10px 22px;
+    background: #fff;
+    color: #e3342f;
+    border: 2px solid #e3342f;
+    border-radius: 30px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, transform 0.15s;
+    white-space: nowrap;
+}
+.btn-reset:hover {
+    background: #e3342f;
+    color: #fff;
+    transform: translateY(-1px);
+}
+.btn-reset:active { transform: translateY(0); }
+
+@media (max-width: 768px) {
+    .constructor-header {
+        justify-content: center;
+        text-align: center;
+    }
+    .constructor-header h1 {
+        text-align: center;
+        flex: 1 1 100%;
+        font-size: 24px;
+    }
+    .btn-reset { font-size: 13px; padding: 8px 18px; }
+}
+
 /* Footer */
 footer {
     background: #fff;
@@ -234,4 +282,76 @@ footer {
     .mattress-container h1 { font-size: 24px; }
     .mattress-container h2 { font-size: 18px; }
     .mattress-container h3 { font-size: 15px; }
+}
+
+/* ===== Модальное окно с фото на весь экран ===== */
+.photo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.92);
+    padding: 20px;
+    animation: photoModalFade 0.2s ease;
+}
+.photo-modal.open { display: flex; }
+@keyframes photoModalFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.photo-modal-img {
+    max-width: 95vw;
+    max-height: 92vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+    background: #111;
+}
+.photo-modal-close {
+    position: absolute;
+    top: 18px;
+    right: 22px;
+    width: 48px;
+    height: 48px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    transition: background 0.2s, transform 0.15s;
+}
+.photo-modal-close:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.06);
+}
+.photo-modal-caption {
+    position: absolute;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 8px 18px;
+    border-radius: 20px;
+    max-width: 90vw;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+    .photo-modal-close { width: 40px; height: 40px; font-size: 24px; top: 12px; right: 14px; }
+    .photo-modal-caption { font-size: 13px; padding: 6px 14px; bottom: 14px; }
 }
