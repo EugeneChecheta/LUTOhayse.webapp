@@ -412,56 +412,97 @@ body {
     background: #628b35;
 }
 
-/* ===== МОДАЛЬНОЕ ОКНО МАТЕРИАЛОВ ===== */
+/* ======================================================= */
+/* ===== МОДАЛЬНОЕ ОКНО МАТЕРИАЛОВ (ПОЛНОСТЬЮ ПЕРЕПИСАНО) ===== */
+/* ======================================================= */
+
+/*
+ * Модальное окно открывается через JS (display: flex).
+ * Оно всегда центрируется в видимой области браузера,
+ * никогда не выходит за его границы, имеет гарантированные
+ * отступы со всех сторон (сверху чуть больше), учитывает
+ * безопасные зоны (вырезы/жесты) и перекрывает фиксированные
+ * иконки корзины и профиля (у них z-index: 1001).
+ */
 .modal.material-modal {
     display: none;
     position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
+    inset: 0;
     width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.7);
-    overflow-y: auto;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 1500; /* выше фиксированных иконок (1001), ниже зум-модалки (2000) */
+    background-color: rgba(0, 0, 0, 0.7);
+    box-sizing: border-box;
+
+    /* Отступы: сверху чуть больше + учёт safe-area (вырез, home-индикатор) */
+    padding-top: calc(40px + env(safe-area-inset-top, 0px));
+    padding-right: calc(24px + env(safe-area-inset-right, 0px));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(24px + env(safe-area-inset-left, 0px));
+
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    -webkit-overflow-scrolling: touch;
 }
+
+/* Контент: не выходит за пределы отступов родителя, скроллится внутри */
 .material-modal-content {
     background-color: #fff;
-    margin: 5% auto;
-    padding: 24px 28px;
-    width: 90%;
+    margin: 0;
+    width: 100%;
     max-width: 1200px;
+    max-height: 100%;
+    min-height: 0;
+    padding: 24px 28px;
     border-radius: 20px;
     position: relative;
+    box-sizing: border-box;
+
+    /* Вертикальная flex-раскладка: header + tabs фиксированы, список скроллится */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
+
+/* Отступ сверху освобождаем под крестик */
 .material-modal-content h2 {
     font-size: 22px;
     font-weight: 700;
     margin-bottom: 8px;
-    padding-right: 40px;
+    padding-right: 48px;
+    flex-shrink: 0;
 }
+
 .close-modal {
     position: absolute;
-    right: 20px;
-    top: 16px;
-    font-size: 30px;
+    right: 16px;
+    top: 14px;
+    font-size: 28px;
     font-weight: 700;
     cursor: pointer;
     color: #aaa;
     line-height: 1;
-    transition: color 0.2s;
-    width: 36px;
-    height: 36px;
+    transition: color 0.2s, background 0.2s;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
+    z-index: 2;
+    background: transparent;
+    border: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 .close-modal:hover {
     color: #000;
     background: #f2f2f2;
 }
 
-/* === Табы: горизонтальный скролл вместо кривого переноса === */
+/* === Табы: горизонтальный скролл === */
 .tabs {
     display: flex;
     flex-wrap: nowrap;
@@ -475,6 +516,7 @@ body {
     scrollbar-width: thin;
     scrollbar-color: #ccc transparent;
     align-items: center;
+    flex-shrink: 0;
 }
 .tabs::-webkit-scrollbar {
     height: 5px;
@@ -507,13 +549,14 @@ body {
     background: #e3e3e3;
 }
 
-/* === Сетка материалов === */
+/* === Сетка материалов: занимает оставшееся место и скроллится внутри модалки === */
 .materials-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 18px;
     margin-top: 6px;
-    max-height: 68vh;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding: 4px 4px 8px;
 }
@@ -806,12 +849,19 @@ footer {
         font-size: 20px;
     }
 
-    /* Модалка материалов на планшетах */
+    /* Модалка материалов на планшетах:
+       гарантированный отступ сверху (чуть больше), по бокам и снизу,
+       плюс безопасные зоны устройства. */
+    .modal.material-modal {
+        padding-top: calc(32px + env(safe-area-inset-top, 0px));
+        padding-right: calc(18px + env(safe-area-inset-right, 0px));
+        padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        padding-left: calc(18px + env(safe-area-inset-left, 0px));
+    }
     .material-modal-content {
-        margin: 3% auto;
-        width: 94%;
         padding: 18px;
         border-radius: 16px;
+        max-width: 100%;
     }
     .tabs {
         gap: 8px;
@@ -824,7 +874,6 @@ footer {
     .materials-container {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 14px;
-        max-height: 65vh;
     }
     .material-card img {
         height: 110px;
@@ -900,23 +949,31 @@ footer {
         padding-top: 6px;
     }
 
-    /* Модалка материалов на телефонах */
+    /* Модалка материалов на телефонах:
+       увеличенный отступ сверху, чтобы окно не касалось верхней кромки
+       и не перекрывалось браузерной панелью/вырезом экрана.
+       Контент центрируется по вертикали и никогда не выходит за пределы окна. */
+    .modal.material-modal {
+        padding-top: calc(28px + env(safe-area-inset-top, 0px));
+        padding-right: calc(12px + env(safe-area-inset-right, 0px));
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        padding-left: calc(12px + env(safe-area-inset-left, 0px));
+    }
     .material-modal-content {
-        margin: 2% auto;
-        width: 96%;
-        padding: 14px;
+        padding: 16px 14px 14px;
         border-radius: 14px;
+        max-width: 100%;
     }
     .material-modal-content h2 {
         font-size: 17px;
-        padding-right: 34px;
+        padding-right: 44px;
     }
     .close-modal {
-        right: 10px;
-        top: 8px;
+        right: 6px;
+        top: 6px;
         font-size: 26px;
-        width: 32px;
-        height: 32px;
+        width: 40px;
+        height: 40px;
     }
     .tabs {
         gap: 6px;
@@ -930,7 +987,6 @@ footer {
     .materials-container {
         grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
         gap: 10px;
-        max-height: 62vh;
     }
     .material-card {
         padding: 8px;
