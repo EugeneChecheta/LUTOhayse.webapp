@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Конструктор матраца | LUTOhayse</title>
+    <title>Конструктор матраса | LUTOhayse</title>
     <link rel="icon" type="image/png" href="/media/interface/favicon.png">
     <link rel="stylesheet" href="/mattress.css">
     <style>
@@ -12,7 +12,7 @@
         .step.active { display: block; }
         .btn:disabled { opacity: 0.5; pointer-events: none; }
 
-        /* ===== Шаг 1: Тип матраца ===== */
+        /* ===== Шаг 1: Тип матраса ===== */
         .type-selector {
             display: flex;
             gap: 20px;
@@ -518,7 +518,7 @@
     </header>
 
     <main class="mattress-container">
-        <h1>Конструктор матраца</h1>
+        <h1>Конструктор матраса</h1>
         <div class="mattress-steps">
 
             <!-- Шаг 1: Тип -->
@@ -526,7 +526,7 @@
                 <h2>Шаг 1. Выберите тип сборки</h2>
 
                 <div class="type-selector">
-                    <button type="button" class="type-btn" data-type="new">Новый матрац</button>
+                    <button type="button" class="type-btn" data-type="new">Новый матрас</button>
                     <button type="button" class="type-btn" data-type="old">Добавить слои к старому</button>
                 </div>
 
@@ -536,7 +536,7 @@
 
                 <div class="height-input-container" id="height-input-container" style="display:none;">
                     <div class="height-input">
-                        <label for="initialHeight">Введите высоту существующего матраца (см):</label>
+                        <label for="initialHeight">Введите высоту существующего матраса (см):</label>
                         <input type="number" id="initialHeight" min="1" value="10">
                     </div>
                 </div>
@@ -674,8 +674,8 @@
             // ========== ТЕКСТЫ ПОДСКАЗОК ДЛЯ ШАГА 1 ==========
             const TYPE_HINTS = {
                 neutral: 'Пожалуйста, выберите один из вариантов выше, чтобы продолжить сборку. Подсказка появится здесь.',
-                new: 'Соберите новый матрац с нуля — подберите размер, наполнители и чехол с учётом ваших предпочтений и особенностей сна. Мы изготовим его специально для вас и обеспечим максимальный комфорт на долгие годы.',
-                old: 'Дайте вторую жизнь любимому матрацу: докупите несколько дополнительных слоёв для комфорта и получите новый чехол, который идеально подойдёт и вашему старому матрацу, и новым слоям вместе. Экономия без потери качества.'
+                new: 'Соберите новый матрас с нуля — подберите размер, наполнители и чехол с учётом ваших предпочтений и особенностей сна. Мы изготовим его специально для вас и обеспечим максимальный комфорт на долгие годы.',
+                old: 'Дайте вторую жизнь любимому матрасу: докупите несколько дополнительных слоёв для комфорта и получите новый чехол, который идеально подойдёт и вашему старому матрасу, и новым слоям вместе. Экономия без потери качества.'
             };
 
             // ========== DOM ==========
@@ -1027,7 +1027,7 @@
                     updateTotals();
                 } else if (step === 2) {
                     if (!state.type) {
-                        alert('Сначала выберите тип матраца');
+                        alert('Сначала выберите тип матраса');
                         return;
                     }
                     showStep(2);
@@ -1057,7 +1057,7 @@
             }
 
             // ========== ОБРАБОТЧИКИ СОБЫТИЙ ==========
-            // Тип матраца
+            // Тип матраса
             typeBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
                     typeBtns.forEach(b => b.classList.remove('selected'));
@@ -1129,14 +1129,14 @@
                     });
                     const data = await resp.json();
                     if (data.success) {
-                        alert('Матрац добавлен в корзину!');
+                        alert('Матрас добавлен в корзину!');
                         updateCartCount();
                     } else {
                         alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
                     }
                 } catch (err) {
                     console.error('Ошибка добавления в корзину:', err);
-                    alert('Не удалось добавить матрац в корзину');
+                    alert('Не удалось добавить матрас в корзину');
                 }
             });
 
