@@ -59,7 +59,7 @@
 
 <main class="cart-container">
     <h1>Корзина</h1>
-    <div id="cart-items"></div>
+    <div id="cart-content"></div>
     <div id="cart-total" class="cart-total"></div>
     <div id="order-form" class="order-form" style="display: none;">
         <h2>Оформление заказа</h2>
@@ -121,7 +121,7 @@
 
 <script>
     const cartCountSpan = document.getElementById('cart-count');
-    const cartItemsDiv = document.getElementById('cart-items');
+    const cartContentDiv = document.getElementById('cart-content');
     const cartTotalDiv = document.getElementById('cart-total');
     const orderFormDiv = document.getElementById('order-form');
     const useProfileCheckbox = document.getElementById('useProfileCheckbox');
@@ -130,13 +130,26 @@
 
     let currentUser = null;
 
+    // ===== Утилиты =====
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str).replace(/[&<>"']/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            if (m === '"') return '&quot;';
+            if (m === "'") return '&#39;';
+            return m;
+        });
+    }
+
     async function fetchCurrentUser() {
         try {
             const resp = await fetch('/api/auth/me');
             const data = await resp.json();
             if (data.authenticated) {
                 currentUser = data.user;
-                profileStatusSpan.innerHTML = `Вы вошли как ${currentUser.phone} <a href="/profile">(профиль)</a>`;
+                profileStatusSpan.innerHTML = `Вы вошли как ${escapeHtml(currentUser.phone)} <a href="/profile">(профиль)</a>`;
                 if (profileIcon) profileIcon.style.background = '#628b35';
                 if (useProfileCheckbox.checked) fillFromProfile();
             } else {
@@ -195,68 +208,176 @@
         }
     }
 
+    // ===== Рендер карточки обычного товара / топпера =====
+    function renderProductItem(item) {
+        const isTopper = item.type === 'topper' && item.extra_data;
+        const productLink = item.product_code && item.product_code !== 'TOPPER'
+            ? `/product/${encodeURIComponent(item.product_code)}`
+            : null;
+
+        const titleHtml = productLink
+            ? `<strong><a href="${productLink}">${escapeHtml(item.product_name)}</a></strong>`
+            : `<strong>${escapeHtml(item.product_name)}</strong>`;
+
+        let extraHtml = '';
+        if (isTopper) {
+            const ed = item.extra_data;
+            const layerNames = (ed.layer_names || []).map(escapeHtml).join(', ') || '—';
+            extraHtml = `
+                <div class="mattress-info" style="margin-top:10px;">
+                    <div class="mattress-info-row"><span class="lbl">Размер:</span><span>${escapeHtml(ed.size_name || '—')}</span></div>
+                    <div class="mattress-info-row"><span class="lbl">Слои:</span><span>${layerNames}</span></div>
+                    <div class="mattress-info-row"><span class="lbl">Чехол:</span><span>${escapeHtml(ed.cover_name || '—')}</span></div>
+                </div>
+            `;
+        }
+
+        const materialHtml = item.material_name
+            ? `Материал: ${escapeHtml(item.material_name)} (${escapeHtml(item.material_code)})<br>`
+            : '';
+
+        return `
+            <div class="cart-item" data-id="${item.id}">
+                <div class="item-info">
+                    ${titleHtml}<br>
+                    Код товара: ${escapeHtml(item.product_code)}<br>
+                    ${materialHtml}
+                    Цена: ${item.cost} ₽<br>
+                    Количество:
+                    <div class="quantity-controls">
+                        <button type="button" class="qty-minus" data-id="${item.id}">-</button>
+                        <input type="number" class="qty-input" data-id="${item.id}" value="${item.quantity || 1}" min="1" style="width: 60px;">
+                        <button type="button" class="qty-plus" data-id="${item.id}">+</button>
+                    </div>
+                    ${extraHtml}
+                </div>
+                <button type="button" class="remove-item" data-id="${item.id}">Удалить</button>
+            </div>
+        `;
+    }
+
+    // ===== Рендер карточки матраса =====
+    function renderMattressItem(item) {
+        const ed = item.extra_data || {};
+        const layerNames = ed.layer_names || [];
+        const layerPrices = ed.layer_prices || [];
+
+        const layersHtml = layerNames.length
+            ? layerNames.map((name, i) => {
+                const price = layerPrices[i] || 0;
+                return `<div class="mattress-layer-row"><span>${escapeHtml(name)}</span><span>${price} ₽</span></div>`;
+            }).join('')
+            : '<div class="mattress-layer-row"><span>Слои не указаны</span><span></span></div>';
+
+        const initialHeightText = ed.is_new
+            ? 'новый матрас (0 см)'
+            : `${ed.initial_height || 0} см`;
+
+        const coverLine = `${escapeHtml(ed.cover_name || '—')} — ${ed.cover_price || 0} ₽`;
+
+        return `
+            <div class="cart-item mattress-item" data-id="${item.id}">
+                <div class="item-info">
+                    <strong>🛏️ ${escapeHtml(item.product_name)}</strong>
+                    <div class="mattress-info">
+                        <div class="mattress-info-row"><span class="lbl">Размер:</span><span>${escapeHtml(ed.size_name || '—')}</span></div>
+                        <div class="mattress-info-row"><span class="lbl">Высота основы:</span><span>${initialHeightText}</span></div>
+                        <div class="mattress-info-row"><span class="lbl">Чехол:</span><span>${coverLine}</span></div>
+                        <div class="mattress-info-row"><span class="lbl">Слои (${layerNames.length}):</span></div>
+                        <div class="mattress-layers">${layersHtml}</div>
+                        <div class="mattress-info-row"><span class="lbl">Итоговая высота:</span><span>${ed.total_height || 0} см</span></div>
+                    </div>
+                    <div class="item-price-row">Стоимость: <strong>${item.cost} ₽</strong></div>
+                    <div class="quantity-controls">
+                        <button type="button" class="qty-minus" data-id="${item.id}">-</button>
+                        <input type="number" class="qty-input" data-id="${item.id}" value="${item.quantity || 1}" min="1" style="width: 60px;">
+                        <button type="button" class="qty-plus" data-id="${item.id}">+</button>
+                    </div>
+                </div>
+                <button type="button" class="remove-item" data-id="${item.id}">Удалить</button>
+            </div>
+        `;
+    }
+
+    // ===== Основной рендер корзины с двумя разделами =====
     async function renderCart() {
         const data = await updateCartCount();
-        const items = data.items;
-        const total = data.total;
+        const items = data.items || [];
+        const total = data.total || 0;
+
         if (!items.length) {
-            cartItemsDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/catalog">каталог</a>.</p>';
+            cartContentDiv.innerHTML = '<p>Ваша корзина пуста. Перейдите в <a href="/catalog">каталог</a> или соберите <a href="/mattress">матрас</a>.</p>';
             cartTotalDiv.innerHTML = '';
             orderFormDiv.style.display = 'none';
             return;
         }
-        let html = '<div class="cart-items-list">';
-        items.forEach(item => {
-            const productLink = `/product/${encodeURIComponent(item.product_code)}`;
+
+        const productItems = items.filter(i => i.type !== 'mattress');
+        const mattressItems = items.filter(i => i.type === 'mattress');
+
+        let html = '';
+
+        // Раздел 1: товары и топперы
+        if (productItems.length) {
             html += `
-                <div class="cart-item" data-id="${item.id}">
-                    <div class="item-info">
-                        <strong><a href="${productLink}" style="color: #628b35; text-decoration: none;">${escapeHtml(item.product_name)}</a></strong><br>
-                        Код товара: ${escapeHtml(item.product_code)}<br>
-                        Материал: ${escapeHtml(item.material_name)} (${escapeHtml(item.material_code)})<br>
-                        Цена: ${item.cost} ₽<br>
-                        Количество:
-                        <div class="quantity-controls">
-                            <button class="qty-minus" data-id="${item.id}">-</button>
-                            <input type="number" class="qty-input" data-id="${item.id}" value="${item.quantity || 1}" min="1" style="width: 60px; text-align: center;">
-                            <button class="qty-plus" data-id="${item.id}">+</button>
-                        </div>
+                <section class="cart-section">
+                    <h2 class="cart-section-title">
+                        <span>Товары и топперы</span>
+                        <span class="section-count">${productItems.length} поз.</span>
+                    </h2>
+                    <div class="cart-items-list">
+                        ${productItems.map(renderProductItem).join('')}
                     </div>
-                    <button class="remove-item" data-id="${item.id}">Удалить</button>
-                </div>
+                </section>
             `;
-        });
-        html += '</div>';
-        cartItemsDiv.innerHTML = html;
+        }
+
+        // Раздел 2: матрасы
+        if (mattressItems.length) {
+            html += `
+                <section class="cart-section">
+                    <h2 class="cart-section-title">
+                        <span>Матрасы</span>
+                        <span class="section-count">${mattressItems.length} поз.</span>
+                    </h2>
+                    <div class="cart-items-list">
+                        ${mattressItems.map(renderMattressItem).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        cartContentDiv.innerHTML = html;
         cartTotalDiv.innerHTML = `<strong>Итого: ${total} ₽</strong>`;
         orderFormDiv.style.display = 'block';
 
-        document.querySelectorAll('.qty-minus').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+        // Обработчики количества
+        cartContentDiv.querySelectorAll('.qty-minus').forEach(btn => {
+            btn.addEventListener('click', async () => {
                 const id = btn.dataset.id;
-                const input = document.querySelector(`.qty-input[data-id="${id}"]`);
+                const input = cartContentDiv.querySelector(`.qty-input[data-id="${id}"]`);
                 let val = parseInt(input.value, 10) || 1;
                 if (val > 1) await updateItemQuantity(id, val - 1);
             });
         });
-        document.querySelectorAll('.qty-plus').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+        cartContentDiv.querySelectorAll('.qty-plus').forEach(btn => {
+            btn.addEventListener('click', async () => {
                 const id = btn.dataset.id;
-                const input = document.querySelector(`.qty-input[data-id="${id}"]`);
+                const input = cartContentDiv.querySelector(`.qty-input[data-id="${id}"]`);
                 let val = parseInt(input.value, 10) || 1;
                 await updateItemQuantity(id, val + 1);
             });
         });
-        document.querySelectorAll('.qty-input').forEach(input => {
-            input.addEventListener('change', async (e) => {
+        cartContentDiv.querySelectorAll('.qty-input').forEach(input => {
+            input.addEventListener('change', async () => {
                 const id = input.dataset.id;
                 let val = parseInt(input.value, 10);
                 if (isNaN(val) || val < 1) val = 1;
                 await updateItemQuantity(id, val);
             });
         });
-        document.querySelectorAll('.remove-item').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+        cartContentDiv.querySelectorAll('.remove-item').forEach(btn => {
+            btn.addEventListener('click', async () => {
                 const id = btn.dataset.id;
                 await fetch(`/api/cart/remove/${id}`, { method: 'DELETE' });
                 renderCart();
@@ -264,15 +385,7 @@
         });
     }
 
-    function escapeHtml(str) {
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
-    }
-
+    // ===== Оформление заказа =====
     document.getElementById('order-form-fields').addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = {
@@ -295,7 +408,14 @@
             });
             const result = await resp.json();
             if (result.success) {
-                alert('Заказ успешно оформлен! Номер заказа: ' + result.order_id);
+                const ids = [];
+                if (result.order_id) ids.push(`№${result.order_id} (товары)`);
+                if (Array.isArray(result.mattress_order_ids)) {
+                    result.mattress_order_ids.forEach(id => ids.push(`№${id} (матрас)`));
+                }
+                let msg = 'Заказ успешно оформлен!';
+                if (ids.length) msg += '\nНомера заказов: ' + ids.join(', ');
+                alert(msg);
                 window.location.href = '/';
             } else {
                 alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));

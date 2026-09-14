@@ -3,6 +3,7 @@
 # Изменения:
 #   - /api/mattress/layers теперь возвращает photo_url, main_features, extra_features
 #   - /api/mattress/covers теперь возвращает photo_url
+#   - /api/orders/history теперь возвращает читаемые названия size_name и cover_name для матрасов
 
 import psycopg2
 import os
@@ -899,7 +900,7 @@ def change_password():
         cur.close()
         conn.close()
 
-# ========= ИСТОРИЯ ЗАКАЗОВ (объединённая) =========
+# ========= ИСТОРИЯ ЗАКАЗОВ (разделение продуктов и матрасов) =========
 @app.route('/api/orders/history')
 def order_history():
     user_id = session.get('user_id')
@@ -916,11 +917,16 @@ def order_history():
         """, (user_id,))
         product_orders = cur.fetchall()
 
-        # Получаем заказы матрацев
+        # Получаем заказы матрацев (сразу с названиями размера и чехла)
         cur.execute("""
-            SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status, 'mattress' as type
-            FROM mattress_orders
-            WHERE user_id = %s
+            SELECT mo.id, mo.user_name, mo.phone, mo.email, mo.address, mo.comment,
+                   mo.contact_time, mo.order_date, mo.status, 'mattress' as type,
+                   ms.name AS size_name, mo.initial_height,
+                   mc.name AS cover_name, mo.cover_price
+            FROM mattress_orders mo
+            JOIN mattress_sizes ms ON mo.size_id = ms.id
+            JOIN mattress_cover mc ON mo.cover_id = mc.id
+            WHERE mo.user_id = %s
         """, (user_id,))
         mattress_orders = cur.fetchall()
 
@@ -973,18 +979,10 @@ def order_history():
                 order_data['total'] = sum(it['cost'] * it['quantity'] for it in items)
 
             else:  # mattress
-                # Получаем детали заказа матраца
-                cur.execute("""
-                    SELECT size_id, initial_height, cover_id, cover_price
-                    FROM mattress_orders
-                    WHERE id = %s
-                """, (order_id,))
-                mattress_row = cur.fetchone()
-                if mattress_row:
-                    order_data['size_id'] = mattress_row[0]
-                    order_data['initial_height'] = mattress_row[1]
-                    order_data['cover_id'] = mattress_row[2]
-                    order_data['cover_price'] = mattress_row[3]
+                order_data['size_name'] = row[10]
+                order_data['initial_height'] = row[11]
+                order_data['cover_name'] = row[12]
+                order_data['cover_price'] = row[13]
 
                 cur.execute("""
                     SELECT layer_id, layer_code, layer_name, quantity, price_per_unit, total_price
@@ -1005,6 +1003,9 @@ def order_history():
                     total += r[5]
                 order_data['items'] = items
                 order_data['total'] = total + (order_data.get('cover_price', 0))
+                # Для удобства фронта — единое поле высоты
+                order_data['layers_height'] = len(items) * 5
+                order_data['total_height'] = (order_data.get('initial_height') or 0) + order_data['layers_height']
 
             result.append(order_data)
 

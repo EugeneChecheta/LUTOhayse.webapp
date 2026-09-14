@@ -90,6 +90,44 @@
         .btn-secondary:hover {
             background: #5a6268;
         }
+
+        /* ===== Разделы истории заказов ===== */
+        .orders-section {
+            margin-bottom: 30px;
+        }
+        .orders-section:last-child {
+            margin-bottom: 0;
+        }
+        .orders-section-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #222;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #628b35;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .orders-section-title .count {
+            font-size: 13px;
+            font-weight: 500;
+            color: #777;
+            background: #f2f2f2;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+        .orders-section-empty {
+            color: #999;
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+            background: #fafafa;
+            border-radius: 12px;
+        }
+
         .order-card {
             background: white;
             border-radius: 16px;
@@ -101,6 +139,7 @@
             display: flex;
             justify-content: space-between;
             flex-wrap: wrap;
+            gap: 8px;
             border-bottom: 1px solid #eee;
             padding-bottom: 10px;
             margin-bottom: 10px;
@@ -112,13 +151,20 @@
         .order-item {
             display: flex;
             justify-content: space-between;
-            padding: 5px 0;
+            gap: 12px;
+            padding: 6px 0;
             border-bottom: 1px dashed #eee;
+            flex-wrap: wrap;
+        }
+        .order-item:last-child {
+            border-bottom: none;
         }
         .order-total {
             text-align: right;
             font-weight: bold;
             margin-top: 10px;
+            color: #628b35;
+            font-size: 16px;
         }
         .loader, .empty {
             text-align: center;
@@ -130,6 +176,55 @@
         }
         .order-item a:hover {
             text-decoration: underline;
+        }
+
+        /* ===== Детали матраса в заказе ===== */
+        .mattress-details {
+            background: #f9f9f9;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin: 10px 0;
+            font-size: 13.5px;
+        }
+        .mattress-detail-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 4px 0;
+            border-bottom: 1px dashed #eee;
+            flex-wrap: wrap;
+        }
+        .mattress-detail-row:last-child {
+            border-bottom: none;
+        }
+        .mattress-detail-row .lbl {
+            color: #777;
+            font-weight: 500;
+        }
+        .mattress-detail-row .val {
+            color: #222;
+            font-weight: 600;
+            text-align: right;
+        }
+        .mattress-layers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin: 6px 0 6px 0;
+            padding-left: 10px;
+            border-left: 2px solid #dfeccd;
+        }
+        .mattress-layer-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13px;
+            color: #333;
+        }
+        .mattress-layer-item .lp {
+            color: #628b35;
+            font-weight: 600;
+            white-space: nowrap;
         }
 
         /* Модальное окно для смены пароля */
@@ -337,21 +432,29 @@
                 ...(options.headers || {})
             }
         });
-        // Пытаемся распарсить ответ как JSON (даже при ошибке)
         let data = null;
         let text = '';
         try {
             text = await response.text();
             data = text ? JSON.parse(text) : null;
-        } catch (e) {
-            // Если не JSON, оставляем data = null
-        }
+        } catch (e) {}
         if (!response.ok) {
-            // Если есть поле error в ответе – используем его, иначе общее сообщение
             const errorMsg = data && data.error ? data.error : `Ошибка ${response.status}: ${text || 'Неизвестная ошибка'}`;
             throw new Error(errorMsg);
         }
         return data;
+    }
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str).replace(/[&<>"']/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            if (m === '"') return '&quot;';
+            if (m === "'") return '&#39;';
+            return m;
+        });
     }
 
     async function updateCartCount() {
@@ -386,54 +489,135 @@
         }
     }
 
+    // ===== Рендер карточки заказа товаров =====
+    function renderProductOrderCard(order) {
+        let itemsHtml = '';
+        for (const item of (order.items || [])) {
+            const productLink = item.product_code && item.product_code !== 'TOPPER'
+                ? `/product/${encodeURIComponent(item.product_code)}`
+                : null;
+            const titleHtml = productLink
+                ? `<a href="${productLink}">${escapeHtml(item.product_name)}</a>`
+                : escapeHtml(item.product_name);
+
+            let extraInfo = '';
+            if (item.is_topper && item.extra_data) {
+                const ed = item.extra_data;
+                extraInfo = `<div style="font-size:12px; color:#777; margin-top:2px;">
+                    Размер: ${escapeHtml(ed.size_name || '—')}; Чехол: ${escapeHtml(ed.cover_name || '—')}
+                </div>`;
+            }
+
+            itemsHtml += `
+                <div class="order-item">
+                    <span>${titleHtml} (${escapeHtml(item.material_name || '')})${extraInfo}</span>
+                    <span>${item.quantity} шт. × ${item.cost}₽ = ${item.quantity * item.cost}₽</span>
+                </div>
+            `;
+        }
+        return `
+            <div class="order-card">
+                <div class="order-header">
+                    <strong>Заказ товаров №${order.id}</strong>
+                    <span>${new Date(order.order_date).toLocaleDateString()}</span>
+                    <span>Статус: ${escapeHtml(order.status)}</span>
+                </div>
+                <div class="order-items">${itemsHtml}</div>
+                <div class="order-total">Итого: ${order.total} ₽</div>
+            </div>
+        `;
+    }
+
+    // ===== Рендер карточки заказа матраса =====
+    function renderMattressOrderCard(order) {
+        const layers = order.items || [];
+        const layersHtml = layers.length
+            ? layers.map(l => `
+                <div class="mattress-layer-item">
+                    <span>${escapeHtml(l.layer_name)}</span>
+                    <span class="lp">${l.total_price} ₽</span>
+                </div>
+            `).join('')
+            : '<div class="mattress-layer-item"><span>Слои не указаны</span><span></span></div>';
+
+        const initialHeightText = order.initial_height && order.initial_height > 0
+            ? `${order.initial_height} см`
+            : 'новый матрас';
+
+        return `
+            <div class="order-card">
+                <div class="order-header">
+                    <strong>🛏️ Заказ матраса №${order.id}</strong>
+                    <span>${new Date(order.order_date).toLocaleDateString()}</span>
+                    <span>Статус: ${escapeHtml(order.status)}</span>
+                </div>
+                <div class="mattress-details">
+                    <div class="mattress-detail-row">
+                        <span class="lbl">Размер:</span>
+                        <span class="val">${escapeHtml(order.size_name || '—')}</span>
+                    </div>
+                    <div class="mattress-detail-row">
+                        <span class="lbl">Высота основы:</span>
+                        <span class="val">${escapeHtml(initialHeightText)}</span>
+                    </div>
+                    <div class="mattress-detail-row">
+                        <span class="lbl">Чехол:</span>
+                        <span class="val">${escapeHtml(order.cover_name || '—')} — ${order.cover_price || 0} ₽</span>
+                    </div>
+                    <div class="mattress-detail-row">
+                        <span class="lbl">Слои (${layers.length}):</span>
+                        <span class="val"></span>
+                    </div>
+                    <div class="mattress-layers-list">${layersHtml}</div>
+                    <div class="mattress-detail-row">
+                        <span class="lbl">Итоговая высота:</span>
+                        <span class="val">${order.total_height || 0} см</span>
+                    </div>
+                </div>
+                <div class="order-total">Итого: ${order.total} ₽</div>
+            </div>
+        `;
+    }
+
     async function loadOrders() {
         const container = document.getElementById('ordersList');
         try {
             const orders = await fetchJson('/api/orders/history');
-            if (orders.length === 0) {
+            if (!orders.length) {
                 container.innerHTML = '<div class="empty">У вас пока нет заказов.</div>';
                 return;
             }
+
+            const productOrders = orders.filter(o => o.type === 'product');
+            const mattressOrders = orders.filter(o => o.type === 'mattress');
+
             let html = '';
-            for (const order of orders) {
-                html += `
-                        <div class="order-card">
-                            <div class="order-header">
-                                <strong>Заказ №${order.id}</strong>
-                                <span>${new Date(order.order_date).toLocaleDateString()}</span>
-                                <span>Статус: ${order.status}</span>
-                            </div>
-                            <div class="order-items">
-                    `;
-                for (const item of order.items) {
-                    const productLink = `/product/${encodeURIComponent(item.product_code)}`;
-                    html += `
-                            <div class="order-item">
-                                <span><a href="${productLink}">${escapeHtml(item.product_name)}</a> (${escapeHtml(item.material_name)})</span>
-                                <span>${item.quantity} шт. × ${item.cost}₽ = ${item.quantity * item.cost}₽</span>
-                            </div>
-                        `;
-                }
-                html += `
-                            </div>
-                            <div class="order-total">Итого: ${order.total} ₽</div>
-                        </div>
-                    `;
+
+            // Раздел товаров
+            html += '<div class="orders-section">';
+            html += `<h3 class="orders-section-title"><span>Заказы товаров</span><span class="count">${productOrders.length}</span></h3>`;
+            if (productOrders.length) {
+                productOrders.forEach(o => { html += renderProductOrderCard(o); });
+            } else {
+                html += '<div class="orders-section-empty">Нет заказов товаров.</div>';
             }
+            html += '</div>';
+
+            // Раздел матрасов
+            html += '<div class="orders-section">';
+            html += `<h3 class="orders-section-title"><span>Заказы матрасов</span><span class="count">${mattressOrders.length}</span></h3>`;
+            if (mattressOrders.length) {
+                mattressOrders.forEach(o => { html += renderMattressOrderCard(o); });
+            } else {
+                html += '<div class="orders-section-empty">Нет заказов матрасов.</div>';
+            }
+            html += '</div>';
+
             container.innerHTML = html;
         } catch (err) {
             console.error(err);
             container.innerHTML = '<div class="empty">Не удалось загрузить заказы</div>';
         }
-    }
-
-    function escapeHtml(str) {
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
     }
 
     document.getElementById('profileForm').addEventListener('submit', async (e) => {
@@ -469,7 +653,7 @@
         }
     });
 
-    // ========== СМЕНА ПАРОЛЯ (исправленная версия) ==========
+    // ========== СМЕНА ПАРОЛЯ ==========
     const changePasswordBtn = document.getElementById('changePasswordBtn');
     const modal = document.getElementById('changePasswordModal');
     const closeModal = document.getElementById('closeChangePassword');
@@ -523,7 +707,6 @@
         }
 
         try {
-            // Используем fetch напрямую, чтобы получить тело ошибки
             const response = await fetch('/api/auth/change-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -540,7 +723,6 @@
             try {
                 data = JSON.parse(text);
             } catch (e) {
-                // если ответ не JSON
                 data = { error: text || 'Неизвестная ошибка сервера' };
             }
 
@@ -549,13 +731,11 @@
                 successDiv.style.display = 'block';
                 setTimeout(closeModalFunc, 1500);
             } else {
-                // Показываем ошибку из ответа или общее сообщение
                 const errorMsg = data && data.error ? data.error : `Ошибка ${response.status}`;
                 errorDiv.textContent = errorMsg;
                 errorDiv.style.display = 'block';
             }
         } catch (err) {
-            // Сетевая ошибка или ошибка запроса
             console.error('Ошибка при смене пароля:', err);
             errorDiv.textContent = 'Ошибка соединения с сервером. Проверьте, запущен ли сервер и доступен ли эндпоинт.';
             errorDiv.style.display = 'block';

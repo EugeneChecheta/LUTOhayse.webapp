@@ -227,6 +227,41 @@ body {
     margin-bottom: 30px;
     font-size: 32px;
 }
+
+/* ===== Разделы корзины ===== */
+.cart-section {
+    margin-bottom: 40px;
+}
+.cart-section-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--accent-color);
+    color: #222;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.cart-section-title .section-count {
+    font-size: 14px;
+    font-weight: 500;
+    color: #777;
+    background: #f2f2f2;
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+.cart-section-empty {
+    color: #999;
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+    background: #fafafa;
+    border-radius: 12px;
+}
+
 .cart-items-list {
     background: #f9f9f9;
     border-radius: 16px;
@@ -235,7 +270,7 @@ body {
 .cart-item {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     border-bottom: 1px solid #ddd;
     padding: 15px 0;
     flex-wrap: wrap;
@@ -248,7 +283,16 @@ body {
     flex: 1;
     font-size: 14px;
     line-height: 1.5;
+    min-width: 0;
 }
+.item-info strong a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+.item-info strong a:hover {
+    text-decoration: underline;
+}
+
 .quantity-controls {
     display: inline-flex;
     align-items: center;
@@ -284,15 +328,92 @@ body {
     border-radius: 30px;
     cursor: pointer;
     transition: background 0.2s;
+    align-self: flex-start;
 }
 .remove-item:hover {
     background: #cc1f1a;
 }
+
+/* ===== Детали матраса ===== */
+.mattress-item {
+    align-items: flex-start;
+}
+.mattress-info {
+    margin-top: 10px;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+}
+.mattress-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px dashed #f0f0f0;
+    flex-wrap: wrap;
+}
+.mattress-info-row:last-child {
+    border-bottom: none;
+}
+.mattress-info-row .lbl {
+    color: #777;
+    font-weight: 500;
+}
+.mattress-info-row span:not(.lbl) {
+    color: #222;
+    font-weight: 600;
+    text-align: right;
+}
+.mattress-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0 6px;
+    padding-left: 8px;
+    border-left: 2px solid #dfeccd;
+}
+.mattress-layer-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    color: #333;
+}
+.mattress-layer-row span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    word-break: break-word;
+}
+.mattress-layer-row span:last-child {
+    color: var(--accent-color);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.item-price-row {
+    margin-top: 8px;
+    font-size: 15px;
+}
+.item-price-row strong {
+    color: var(--accent-color);
+    font-size: 16px;
+}
+
+/* ===== Итог ===== */
 .cart-total {
     text-align: right;
     font-size: 24px;
     margin: 20px 0;
+    padding-top: 20px;
+    border-top: 2px solid #eee;
 }
+.cart-total strong {
+    color: var(--accent-color);
+}
+
+/* ===== Форма заказа ===== */
 .order-form {
     background: #f9f9f9;
     border-radius: 16px;
@@ -377,4 +498,20 @@ footer {
     float: right;
     font-size: 28px;
     cursor: pointer;
+}
+
+@media (max-width: 600px) {
+    .cart-section-title {
+        font-size: 18px;
+    }
+    .cart-total {
+        font-size: 20px;
+    }
+    .cart-items-list {
+        padding: 12px;
+    }
+    .mattress-info {
+        padding: 10px;
+        font-size: 12.5px;
+    }
 }
