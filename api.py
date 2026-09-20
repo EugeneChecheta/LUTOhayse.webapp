@@ -1,9 +1,10 @@
 # api.py
-# Полностью переработанный файл API для поддержки конструктора матрацев
+# Полностью переработанный файл API для поддержки конструктора матрасов
 # Изменения:
 #   - /api/mattress/layers теперь возвращает photo_url, main_features, extra_features
 #   - /api/mattress/covers теперь возвращает photo_url
 #   - /api/orders/history теперь возвращает читаемые названия size_name и cover_name для матрасов
+#   - Исправлено написание: "матрац" -> "матрас" во всех текстах и комментариях
 
 import psycopg2
 import os
@@ -80,7 +81,7 @@ def send_order_notification(order_id, user_name, phone, total_sum, order_type='p
 
     if order_type == 'mattress':
         text = (
-            f"🛏️ *Новый заказ матраца!*\n"
+            f"🛏️ *Новый заказ матраса!*\n"
             f"Номер: #{order_id}\n"
             f"Клиент: {user_name}\n"
             f"Телефон: {phone}\n"
@@ -280,7 +281,7 @@ def init_db():
     if cur.fetchone()[0] == 0:
         cur.execute("ALTER TABLE topper_covers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
 
-    # ========== НОВЫЕ ТАБЛИЦЫ ДЛЯ КОНСТРУКТОРА МАТРАЦЕВ ==========
+    # ========== НОВЫЕ ТАБЛИЦЫ ДЛЯ КОНСТРУКТОРА МАТРАСОВ ==========
     # Размеры
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_sizes (
@@ -384,7 +385,7 @@ def init_db():
             CONSTRAINT uq_mlef_layer_name UNIQUE (layer_id, name)
         );
     """)
-    # Заказы матрацев
+    # Заказы матрасов
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_orders (
             id SERIAL PRIMARY KEY,
@@ -404,7 +405,7 @@ def init_db():
             cover_price INTEGER NOT NULL CHECK (cover_price >= 0)
         );
     """)
-    # Позиции заказов матрацев (слои)
+    # Позиции заказов матрасов (слои)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_order_items (
             id SERIAL PRIMARY KEY,
@@ -917,7 +918,7 @@ def order_history():
         """, (user_id,))
         product_orders = cur.fetchall()
 
-        # Получаем заказы матрацев (сразу с названиями размера и чехла)
+        # Получаем заказы матрасов (сразу с названиями размера и чехла)
         cur.execute("""
             SELECT mo.id, mo.user_name, mo.phone, mo.email, mo.address, mo.comment,
                    mo.contact_time, mo.order_date, mo.status, 'mattress' as type,
@@ -1314,7 +1315,7 @@ def add_topper_to_cart():
         cur.close()
         conn.close()
 
-# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАЦЕВ =========
+# ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАСОВ =========
 # Возвращают photo_url (/media/layers/CODE.webp, /media/covers/CODE.webp),
 # а также основные и дополнительные характеристики из БД бота.
 
@@ -1323,7 +1324,7 @@ MATTRESS_COVERS_MEDIA = Path(__file__).parent / 'media' / 'covers'
 
 @app.route('/api/mattress/sizes')
 def mattress_sizes():
-    """Возвращает список размеров матрацев."""
+    """Возвращает список размеров матрасов."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1357,7 +1358,7 @@ def mattress_sizes():
 
 @app.route('/api/mattress/layers')
 def mattress_layers():
-    """Возвращает слои матрацев для указанного размера с ценами.
+    """Возвращает слои матрасов для указанного размера с ценами.
     Для каждого слоя возвращается photo_url (если файл /media/layers/CODE.webp существует),
     а также основные и дополнительные характеристики из БД административного бота."""
     size_id = request.args.get('size_id', type=int)
@@ -1437,7 +1438,7 @@ def mattress_layers():
 
 @app.route('/api/mattress/covers')
 def mattress_covers():
-    """Возвращает чехлы матрацев для указанного размера с ценами.
+    """Возвращает чехлы матрасов для указанного размера с ценами.
     Для каждого чехла возвращается photo_url (если файл /media/covers/CODE.webp существует)."""
     size_id = request.args.get('size_id', type=int)
     if size_id is None:
@@ -1475,7 +1476,7 @@ def mattress_covers():
 
 @app.route('/api/cart/add-mattress', methods=['POST'])
 def add_mattress_to_cart():
-    """Добавляет собранный матрац в корзину."""
+    """Добавляет собранный матрас в корзину."""
     data = request.get_json()
     size_id = data.get('size_id')
     layer_ids = data.get('layer_ids', [])
@@ -1560,7 +1561,7 @@ def add_mattress_to_cart():
             'id': str(uuid.uuid4()),
             'type': 'mattress',
             'product_code': 'MATTRESS',
-            'product_name': f'Собранный матрац ({size_name})',
+            'product_name': f'Собранный матрас ({size_name})',
             'material_code': '',
             'material_name': '',
             'cost': total_price,
@@ -1615,7 +1616,7 @@ def create_order():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Разделяем элементы корзины на обычные товары, топперы и матрацы
+        # Разделяем элементы корзины на обычные товары, топперы и матрасы
         product_items = [item for item in cart if item.get('type') in ('product', 'topper')]
         mattress_items = [item for item in cart if item.get('type') == 'mattress']
 
@@ -1655,7 +1656,7 @@ def create_order():
             if order_id:
                 send_order_notification(order_id, data['user_name'], data['phone'], total_sum, order_type='product')
 
-        # Создаём заказы для матрацев (каждый матрац - отдельный заказ)
+        # Создаём заказы для матрасов (каждый матрас - отдельный заказ)
         mattress_order_ids = []
         for mattress_item in mattress_items:
             extra = mattress_item.get('extra_data', {})
@@ -1670,10 +1671,10 @@ def create_order():
             layer_prices = extra.get('layer_prices', [])
 
             if not size_id or not cover_id or not layer_ids:
-                app.logger.error(f"Некорректные данные матраца в корзине: {extra}")
+                app.logger.error(f"Некорректные данные матраса в корзине: {extra}")
                 continue
 
-            # Вставляем заказ матраца
+            # Вставляем заказ матраса
             cur.execute("""
                 INSERT INTO mattress_orders
                 (session_id, user_id, user_name, phone, email, address, comment, contact_time, status,
@@ -1698,7 +1699,7 @@ def create_order():
                 """, (mattress_order_id, layer_id, layer_codes[idx] if idx < len(layer_codes) else '',
                       layer_names[idx] if idx < len(layer_names) else '', 1, price, price))
 
-            # Отправляем уведомление для заказа матраца
+            # Отправляем уведомление для заказа матраса
             total_mattress_price = cover_price + total_layers_price
             send_order_notification(mattress_order_id, data['user_name'], data['phone'], total_mattress_price, order_type='mattress')
 
@@ -1786,7 +1787,7 @@ def toppers_page():
 def toppers_css():
     return send_from_directory('webpages', 'toppers.css')
 
-# Новые маршруты для конструктора матрацев
+# Новые маршруты для конструктора матрасов
 @app.route('/mattress')
 def mattress_page():
     return send_from_directory('webpages', 'mattress.html')

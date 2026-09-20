@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления конструктором матрацев.
-Версия 1.0 — работа со слоями, чехлами, размерами, ценами, характеристиками и фотографиями.
+Версия 1.2 — работа со слоями, чехлами, размерами, ценами, характеристиками,
+фотографиями и экспортом /partner0 в Excel (с отправкой файла в Telegram).
 Основан на структуре БД для матрацев (mattress_*).
 """
 import asyncio
@@ -50,7 +51,7 @@ def read_token():
                 sys.exit(1)
             return token
     except Exception as e:
-        logger.error(f"Ошибка чтения token_mattress.txt: {e}")
+        logger.error(f"Ошибка чтения token_toppers.txt: {e}")
         sys.exit(1)
 
 def read_db_config():
@@ -186,6 +187,11 @@ class Database:
             row = await conn.fetchrow("SELECT id, code, name, description FROM mattress_layers WHERE id = $1", layer_id)
             return dict(row) if row else None
 
+    async def get_all_layers(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, code, name, description FROM mattress_layers ORDER BY code")
+            return [dict(r) for r in rows]
+
     async def create_layer(self, code: str, name: str, description: str = "") -> int:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(
@@ -231,6 +237,11 @@ class Database:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT id, code, name, description FROM mattress_cover WHERE id = $1", cover_id)
             return dict(row) if row else None
+
+    async def get_all_covers(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, code, name, description FROM mattress_cover ORDER BY code")
+            return [dict(r) for r in rows]
 
     async def create_cover(self, code: str, name: str, description: str = "") -> int:
         async with self.pool.acquire() as conn:
@@ -324,6 +335,11 @@ class Database:
             )
             return [dict(r) for r in rows]
 
+    async def get_all_layer_prices(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT layer_id, size_id, price FROM mattress_layers_prices")
+            return {(r["layer_id"], r["size_id"]): r["price"] for r in rows}
+
     async def set_layer_price(self, layer_id: int, size_id: int, price: int):
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -348,6 +364,11 @@ class Database:
                 cover_id
             )
             return [dict(r) for r in rows]
+
+    async def get_all_cover_prices(self):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT cover_id, size_id, price FROM mattress_cover_prices")
+            return {(r["cover_id"], r["size_id"]): r["price"] for r in rows}
 
     async def set_cover_price(self, cover_id: int, size_id: int, price: int):
         async with self.pool.acquire() as conn:
@@ -631,7 +652,6 @@ async def layer_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_photo(chat_id=update.effective_chat.id, photo=f)
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ У слоя нет фото.")
-    # Вернуться к деталям
     await layer_details(update, context)
 
 # ----- Добавление слоя -----
@@ -812,7 +832,6 @@ async def layer_photo_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not layer:
             await update.message.reply_text("❌ Слой не найден.")
             return ConversationHandler.END
-        # Удаляем старое фото, если есть
         await delete_layer_photo(layer['code'])
         success = await save_layer_photo(photo_file, layer['code'])
         if success:
@@ -822,7 +841,6 @@ async def layer_photo_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка загрузки фото слоя: {e}")
         await update.message.reply_text("❌ Не удалось скачать фото.")
-    # Возврат в управление фото
     await layer_photo_manage(update, context)
     return ConversationHandler.END
 
@@ -1901,6 +1919,103 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Ошибка при выполнении reboot")
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
+@admin_only
+async def partner0_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Создаёт Excel-файл 000000.xlsx.
+    По вертикали — размеры, по горизонтали — коды слоёв и чехлов (только коды).
+    В ячейках — цены для соответствующего размера.
+    Файл отправляется пользователю в Telegram как документ.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        await update.message.reply_text(
+            "❌ Для создания Excel-файла установите openpyxl: pip install openpyxl"
+        )
+        return
+
+    try:
+        partners_dir = BASE_DIR.parent / "partners"
+        partners_dir.mkdir(parents=True, exist_ok=True)
+        file_path = partners_dir / "000000.xlsx"
+
+        if file_path.exists():
+            file_path.unlink()
+
+        sizes = await db.get_all_sizes()
+        layers = await db.get_all_layers()
+        covers = await db.get_all_covers()
+        layer_prices = await db.get_all_layer_prices()
+        cover_prices = await db.get_all_cover_prices()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "000000"
+
+        # Заголовки: только коды слоёв и чехлов (без префиксов)
+        headers = ["Размер"]
+        for layer in layers:
+            headers.append(layer['code'])
+        for cover in covers:
+            headers.append(cover['code'])
+
+        ws.append(headers)
+
+        for size in sizes:
+            row = [size["name"]]
+            for layer in layers:
+                row.append(layer_prices.get((layer["id"], size["id"]), ""))
+            for cover in covers:
+                row.append(cover_prices.get((cover["id"], size["id"]), ""))
+            ws.append(row)
+
+        header_font = Font(bold=True)
+        header_fill = PatternFill("solid", fgColor="DDDDDD")
+        thin = Side(style="thin", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.fill = header_fill
+            cell.border = border
+
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+            for cell in row:
+                cell.border = border
+                if cell.column == 1:
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+                else:
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        ws.freeze_panes = "A2"
+
+        for col_idx in range(1, ws.max_column + 1):
+            letter = get_column_letter(col_idx)
+            max_len = 0
+            for row_idx in range(1, ws.max_row + 1):
+                value = ws.cell(row=row_idx, column=col_idx).value
+                if value is not None:
+                    max_len = max(max_len, len(str(value)))
+            ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 50)
+
+        wb.save(file_path)
+
+        # Отправляем файл пользователю
+        with open(file_path, "rb") as f:
+            await update.message.reply_document(
+                document=f,
+                filename="000000.xlsx",
+                caption="✅ Таблица сформирована."
+            )
+
+    except Exception as e:
+        logger.exception("Ошибка при создании 000000.xlsx")
+        await update.message.reply_text(f"❌ Не удалось создать файл: {e}")
+
 async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
@@ -1908,6 +2023,7 @@ async def noop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reboot", reboot_command))
+    app.add_handler(CommandHandler("partner0", partner0_command))
 
     # Главное меню
     app.add_handler(CallbackQueryHandler(show_main_menu, pattern="^main_menu$"))
@@ -1950,7 +2066,6 @@ def register_handlers(app: Application):
             LAYER_EDIT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_update_code)],
             LAYER_EDIT_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_update_desc)],
             LAYER_DELETE_CONFIRM: [CallbackQueryHandler(layer_delete_execute, pattern="^layer_del_yes$")],
-            # Управление фото слоя
             LAYER_PHOTO_MANAGE: [
                 CallbackQueryHandler(layer_photo_view, pattern="^layer_photo_view$"),
                 CallbackQueryHandler(layer_photo_add, pattern="^layer_photo_add$"),
@@ -1958,13 +2073,11 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
             ],
             LAYER_PHOTO_ADD: [MessageHandler(filters.PHOTO, layer_photo_save)],
-            # Основные характеристики
             LAYER_MAIN_FEATURES: [
                 CallbackQueryHandler(layer_main_feature_edit, pattern="^layer_mainfeat_edit_\\d+$"),
                 CallbackQueryHandler(layer_edit_back, pattern="^layer_edit_back$"),
             ],
             LAYER_MAIN_FEATURE_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, layer_main_feature_save)],
-            # Дополнительные характеристики
             LAYER_EXTRA_FEATURES: [
                 CallbackQueryHandler(layer_extra_add_name, pattern="^layer_extra_add$"),
                 CallbackQueryHandler(layer_extra_edit_entry, pattern="^layer_extra_edit_\\d+$"),
@@ -2044,7 +2157,6 @@ def register_handlers(app: Application):
             COVER_EDIT_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cover_update_code)],
             COVER_EDIT_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, cover_update_desc)],
             COVER_DELETE_CONFIRM: [CallbackQueryHandler(cover_delete_execute, pattern="^cover_del_yes$")],
-            # Управление фото чехла
             COVER_PHOTO_MANAGE: [
                 CallbackQueryHandler(cover_photo_view, pattern="^cover_photo_view$"),
                 CallbackQueryHandler(cover_photo_add, pattern="^cover_photo_add$"),
@@ -2167,7 +2279,7 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот для управления матрацами запущен (с характеристиками слоёв и фото).")
+    logging.info("Бот для управления матрацами запущен (с характеристиками слоёв, фото и /partner0).")
     await application.updater.start_polling()
     await asyncio.Event().wait()
 

@@ -202,6 +202,19 @@ body {
     font-weight: 600;
 }
 
+/* ===== Подсказка шага (аналогично шагу 1) ===== */
+.step-hint {
+    padding: 14px 18px;
+    background: #f3f8ec;
+    border-left: 4px solid #628b35;
+    border-radius: 10px;
+    color: #4a5568;
+    font-size: 14px;
+    line-height: 1.55;
+    margin-bottom: 16px;
+}
+.step-hint b { color: #46631f; }
+
 /* ===== Заголовок конструктора с кнопкой "Сброс" ===== */
 .constructor-header {
     display: flex;
