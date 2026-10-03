@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Конструктор матраса | LUTOhayse</title>
+    <title>Партнёрский конструктор матраса | LUTOhayse</title>
     <link rel="icon" type="image/png" href="/media/interface/favicon.png">
     <link rel="stylesheet" href="/mattress.css">
     <style>
-        /* Базовые стили шагов */
+        /* Базовые стили шагов (аналогично mattress.html) */
         .step { display: none; }
         .step.active { display: block; }
         .btn:disabled { opacity: 0.5; pointer-events: none; }
@@ -146,7 +146,6 @@
             text-align: center;
         }
 
-        /* Карточка слоя с фото и характеристиками */
         .layer-item {
             display: flex;
             gap: 14px;
@@ -251,7 +250,6 @@
         .btn-remove { background: #e3342f; color: white; }
         .btn-remove:hover { background: #b91c1c; }
 
-        /* Выбранный слой */
         .chosen-layer {
             display: flex;
             justify-content: space-between;
@@ -272,7 +270,6 @@
         .chosen-layer .layer-name { font-size: 15px; }
         .chosen-layer .layer-price { font-size: 14px; }
 
-        /* Мобильные вкладки для шага 3 */
         .mobile-tabs {
             display: none;
             gap: 8px;
@@ -375,6 +372,8 @@
         .btn-primary:hover:not(:disabled) { background: #4f702a; }
         .btn-secondary { background: #6c757d; color: white; }
         .btn-secondary:hover { background: #5a6268; }
+        .btn-offer { background: #2c3e50; color: white; }
+        .btn-offer:hover:not(:disabled) { background: #1a252f; }
 
         /* ===== Нижняя фиксированная панель ===== */
         .bottom-panel {
@@ -404,7 +403,6 @@
             padding: 16px 30px 18px;
             overflow-y: auto;
         }
-        /* Каждая характеристика — с новой строки */
         .detail-panel .detail-row {
             display: flex;
             flex-wrap: wrap;
@@ -576,6 +574,147 @@
         }
         .btn-reset:active { transform: translateY(0); }
 
+        /* ===== Блок партнёрского кода ===== */
+        .partner-code-bar {
+            background: #2c3e50;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            justify-content: space-between;
+        }
+        .partner-code-bar .code-label {
+            font-weight: 500;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .partner-code-bar .code-value {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: 1px;
+            color: #a8c288;
+        }
+        .partner-code-bar .code-input-wrap {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .partner-code-bar input {
+            padding: 8px 12px;
+            border: 1px solid #4a5b6b;
+            border-radius: 8px;
+            background: #3a4a5a;
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            min-width: 160px;
+        }
+        .partner-code-bar input::placeholder { color: #8a9aa8; }
+        .partner-code-bar input:focus {
+            outline: none;
+            border-color: #a8c288;
+        }
+        .partner-code-bar .btn-apply {
+            padding: 8px 18px;
+            background: #628b35;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .partner-code-bar .btn-apply:hover { background: #4f702a; }
+        .partner-code-bar .code-error {
+            color: #ff6b6b;
+            font-size: 13px;
+            width: 100%;
+            margin-top: 4px;
+        }
+
+        /* ===== Модальное окно коммерческого предложения ===== */
+        .offer-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 2500;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+        }
+        .offer-modal.open { display: flex; }
+        .offer-modal-content {
+            background: #fff;
+            border-radius: 16px;
+            max-width: 600px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 28px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        .offer-modal-content h2 {
+            margin-bottom: 18px;
+            font-size: 22px;
+            color: #222;
+        }
+        .offer-modal-close {
+            position: absolute;
+            top: 14px;
+            right: 18px;
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 50%;
+            background: #f0f0f0;
+            color: #555;
+            font-size: 22px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+        .offer-modal-close:hover { background: #e0e0e0; }
+        .offer-detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px dashed #e4e4e4;
+            font-size: 14px;
+            gap: 10px;
+        }
+        .offer-detail-row:last-child { border-bottom: none; }
+        .offer-detail-row .label { color: #777; }
+        .offer-detail-row .value { font-weight: 600; color: #222; text-align: right; }
+        .offer-total {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 2px solid #628b35;
+            display: flex;
+            justify-content: space-between;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .offer-total .value { color: #628b35; }
+        .offer-actions {
+            margin-top: 22px;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
         /* ===== Адаптив ===== */
         @media (max-width: 768px) {
             .type-selector { flex-direction: column; gap: 12px; }
@@ -586,7 +725,6 @@
             .layers-list, .chosen-layers { max-height: 60vh; }
             .mobile-tabs { display: flex; }
 
-            /* Скрываем неактивную вкладку на мобильных */
             .layers-layout.tab-available .layers-chosen-container { display: none; }
             .layers-layout.tab-chosen .layers-list-container { display: none; }
 
@@ -623,6 +761,20 @@
                 font-size: 24px;
             }
             .btn-reset { font-size: 13px; padding: 8px 18px; }
+
+            .partner-code-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+            .partner-code-bar .code-input-wrap {
+                justify-content: stretch;
+            }
+            .partner-code-bar input {
+                flex: 1 1 auto;
+                min-width: 0;
+            }
+            .offer-modal-content { padding: 20px; }
         }
         @media (max-width: 480px) {
             .layer-item { gap: 10px; padding: 12px 6px; }
@@ -630,7 +782,6 @@
             .cover-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
             .size-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 
-            /* В узких экранах каждая характеристика в панели "Подробнее" занимает всю ширину */
             .detail-panel .detail-row {
                 flex-direction: column;
                 align-items: flex-start;
@@ -639,20 +790,18 @@
 
             .photo-modal-close { width: 40px; height: 40px; font-size: 24px; top: 12px; right: 14px; }
             .photo-modal-caption { font-size: 13px; padding: 6px 14px; bottom: 14px; }
+
+            .offer-modal-content { padding: 16px; }
+            .offer-detail-row { font-size: 13px; }
+            .offer-total { font-size: 17px; }
         }
     </style>
 </head>
 <body>
-    <!-- Иконки профиля и корзины -->
+    <!-- Иконка профиля (без корзины) -->
     <div class="profile-icon-wrapper" id="profileIcon">
         <a href="/profile" class="profile-fixed-link">
             <img src="/media/interface/profile_icon.svg" alt="Профиль">
-        </a>
-    </div>
-    <div class="cart-icon-wrapper">
-        <a href="/cart" class="cart-fixed-link">
-            <img src="/media/interface/cart_icon.svg" alt="Корзина">
-            <span id="cart-count" class="cart-count-badge">0</span>
         </a>
     </div>
 
@@ -675,8 +824,21 @@
     </header>
 
     <main class="mattress-container">
+        <!-- Блок партнёрского кода -->
+        <div class="partner-code-bar" id="partnerCodeBar">
+            <div>
+                <span class="code-label">Партнёрский код:</span>
+                <span class="code-value" id="currentPartnerCode">—</span>
+            </div>
+            <div class="code-input-wrap">
+                <input type="text" id="partnerCodeInputBar" placeholder="Введите код партнёра" autocomplete="off">
+                <button type="button" class="btn-apply" id="applyPartnerCodeBtn">Применить</button>
+            </div>
+            <div class="code-error" id="partnerCodeError" style="display:none;"></div>
+        </div>
+
         <div class="constructor-header">
-            <h1>Конструктор матраса</h1>
+            <h1>Партнёрский конструктор матраса</h1>
             <button type="button" class="btn-reset" id="resetBtn" title="Сбросить все настройки">↺ Сброс</button>
         </div>
         <div class="mattress-steps">
@@ -727,7 +889,6 @@
             <div id="step-layers" class="step">
                 <h2>Шаг 3. Выберите слои</h2>
 
-                <!-- Мобильные вкладки -->
                 <div class="mobile-tabs" id="mobileTabs">
                     <button type="button" class="tab-btn active" data-tab="available">
                         Доступные слои
@@ -760,19 +921,9 @@
                 <div class="cover-grid" id="coverGrid"></div>
                 <div class="step-actions">
                     <button class="btn btn-secondary" id="backFromCover">Назад</button>
-                    <button class="btn btn-primary" id="addToCartBtn" disabled>Добавить в корзину</button>
+                    <button class="btn btn-offer" id="offerBtn" disabled>Сформировать предложение</button>
                 </div>
             </div>
-        </div>
-
-        <!-- Блок для партнёров -->
-        <div class="partner-access-section">
-            <p>Если вы являетесь партнёром компании, введите свой код для работы здесь</p>
-            <div class="partner-code-form">
-                <input type="text" id="partnerCodeInput" placeholder="Введите код партнёра">
-                <button type="button" id="partnerCodeCheckBtn">Проверить</button>
-            </div>
-            <div class="partner-code-message" id="partnerCodeMessage"></div>
         </div>
     </main>
 
@@ -846,9 +997,30 @@
         <div class="photo-modal-caption" id="photoModalCaption"></div>
     </div>
 
+    <!-- Модальное окно коммерческого предложения -->
+    <div class="offer-modal" id="offerModal">
+        <div class="offer-modal-content">
+            <button type="button" class="offer-modal-close" id="offerModalClose" aria-label="Закрыть">×</button>
+            <h2>Коммерческое предложение</h2>
+            <div id="offerDetails"></div>
+            <div class="offer-total">
+                <span>Итого:</span>
+                <span class="value" id="offerTotalPrice">0 ₽</span>
+            </div>
+            <div class="offer-actions">
+                <button type="button" class="btn btn-secondary" id="offerPrintBtn">Распечатать</button>
+                <button type="button" class="btn btn-primary" id="offerCloseBtn">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function() {
             'use strict';
+
+            // ========== ПОЛУЧЕНИЕ КОДА ПАРТНЁРА ИЗ URL ==========
+            const urlParams = new URLSearchParams(window.location.search);
+            let partnerCode = urlParams.get('code') || '';
 
             // ========== СОСТОЯНИЕ ==========
             const state = {
@@ -891,7 +1063,7 @@
             const confirmLayersBtn = $('confirmLayersBtn');
             const backFromLayers = $('backFromLayers');
             const coverGrid = $('coverGrid');
-            const addToCartBtn = $('addToCartBtn');
+            const offerBtn = $('offerBtn');
             const backFromCover = $('backFromCover');
             const totalPriceDisplay = $('totalPriceDisplay');
             const totalHeightDisplay = $('totalHeightDisplay');
@@ -915,9 +1087,16 @@
             const photoModalImg = $('photoModalImg');
             const photoModalClose = $('photoModalClose');
             const photoModalCaption = $('photoModalCaption');
-            const partnerCodeInput = $('partnerCodeInput');
-            const partnerCodeCheckBtn = $('partnerCodeCheckBtn');
-            const partnerCodeMessage = $('partnerCodeMessage');
+            const currentPartnerCodeSpan = $('currentPartnerCode');
+            const partnerCodeInputBar = $('partnerCodeInputBar');
+            const applyPartnerCodeBtn = $('applyPartnerCodeBtn');
+            const partnerCodeError = $('partnerCodeError');
+            const offerModal = $('offerModal');
+            const offerModalClose = $('offerModalClose');
+            const offerDetails = $('offerDetails');
+            const offerTotalPrice = $('offerTotalPrice');
+            const offerPrintBtn = $('offerPrintBtn');
+            const offerCloseBtn = $('offerCloseBtn');
 
             // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
             function showStep(step) {
@@ -961,10 +1140,8 @@
                 detailLayersHeight.textContent = state.layers.length * 5;
                 detailTotalHeight.textContent = totalHeight;
 
-                // Обновляем бейдж количества выбранных слоёв
                 if (chosenCountBadge) chosenCountBadge.textContent = state.layers.length;
 
-                // Список выбранных слоёв в панели "Подробнее"
                 if (state.layers.length > 0) {
                     detailLayersListRow.style.display = '';
                     detailLayersList.textContent = state.layers.map(l => l.name).join(', ');
@@ -973,7 +1150,6 @@
                     detailLayersList.textContent = '—';
                 }
 
-                // Чехол в панели "Подробнее" + кнопка фото
                 if (state.cover) {
                     detailCoverRow.style.display = '';
                     detailCoverName.textContent = `${state.cover.name} — ${state.cover.price || 0} ₽`;
@@ -1000,9 +1176,8 @@
             }
 
             function updateLayersConfirmButton() {
-                // Если чехол всего один — шаг 4 пропускается, кнопка сразу добавляет в корзину
                 if (state.allCovers.length === 1 && state.cover) {
-                    confirmLayersBtn.textContent = 'Добавить в корзину';
+                    confirmLayersBtn.textContent = 'Сформировать предложение';
                 } else {
                     confirmLayersBtn.textContent = 'Далее →';
                 }
@@ -1058,39 +1233,67 @@
                 }
             });
 
-            // Кнопка "Фото" для чехла в панели "Подробнее"
             detailCoverPhotoBtn.addEventListener('click', () => {
                 openPhotoModal(detailCoverPhotoBtn.dataset.photo, detailCoverPhotoBtn.dataset.name);
             });
 
-            // ========== ПАРТНЁРСКИЙ БЛОК ==========
-            if (partnerCodeCheckBtn) {
-                partnerCodeCheckBtn.addEventListener('click', async () => {
-                    const code = partnerCodeInput.value.trim();
-                    if (!code) {
-                        partnerCodeMessage.textContent = 'Введите код партнёра';
-                        partnerCodeMessage.className = 'partner-code-message error';
-                        return;
-                    }
-                    partnerCodeMessage.textContent = 'Проверка...';
-                    partnerCodeMessage.className = 'partner-code-message';
-                    try {
-                        const resp = await fetch(`/api/partners/check?code=${encodeURIComponent(code)}`);
-                        const data = await resp.json();
-                        if (data.exists) {
-                            partnerCodeMessage.textContent = 'Код найден! Перенаправление...';
-                            partnerCodeMessage.className = 'partner-code-message success';
-                            window.location.href = `/partners?code=${encodeURIComponent(code)}`;
-                        } else {
-                            partnerCodeMessage.textContent = 'Код не найден. Проверьте правильность ввода.';
-                            partnerCodeMessage.className = 'partner-code-message error';
-                        }
-                    } catch (e) {
-                        partnerCodeMessage.textContent = 'Ошибка проверки кода. Попробуйте позже.';
-                        partnerCodeMessage.className = 'partner-code-message error';
-                    }
-                });
+            // ========== ПАРТНЁРСКИЙ КОД ==========
+            function updatePartnerCodeDisplay() {
+                currentPartnerCodeSpan.textContent = partnerCode || '—';
             }
+            updatePartnerCodeDisplay();
+
+            // Применение нового кода партнёра
+            applyPartnerCodeBtn.addEventListener('click', async () => {
+                const newCode = partnerCodeInputBar.value.trim();
+                if (!newCode) {
+                    partnerCodeError.textContent = 'Введите код';
+                    partnerCodeError.style.display = 'block';
+                    return;
+                }
+                partnerCodeError.style.display = 'none';
+                applyPartnerCodeBtn.disabled = true;
+                applyPartnerCodeBtn.textContent = 'Проверка...';
+                try {
+                    const resp = await fetch(`/api/partners/check?code=${encodeURIComponent(newCode)}`);
+                    const data = await resp.json();
+                    if (data.exists) {
+                        partnerCode = newCode;
+                        updatePartnerCodeDisplay();
+                        partnerCodeInputBar.value = '';
+                        // Обновляем URL без перезагрузки
+                        const newUrl = new URL(window.location);
+                        newUrl.searchParams.set('code', partnerCode);
+                        window.history.replaceState({}, '', newUrl);
+                        // Перезагружаем данные с новым кодом
+                        state.size = null;
+                        state.layers = [];
+                        state.cover = null;
+                        state.allLayers = [];
+                        state.allCovers = [];
+                        renderLayersList();
+                        renderChosenLayers();
+                        renderCovers();
+                        confirmSizeBtn.disabled = true;
+                        confirmLayersBtn.disabled = true;
+                        offerBtn.disabled = true;
+                        // Перезагружаем размеры (цены обновятся при выборе)
+                        await loadSizes();
+                        showStep(1);
+                        updateTotals();
+                        alert('Код применён! Цены обновлены.');
+                    } else {
+                        partnerCodeError.textContent = 'Код не найден. Проверьте правильность.';
+                        partnerCodeError.style.display = 'block';
+                    }
+                } catch (e) {
+                    partnerCodeError.textContent = 'Ошибка проверки кода. Попробуйте позже.';
+                    partnerCodeError.style.display = 'block';
+                } finally {
+                    applyPartnerCodeBtn.disabled = false;
+                    applyPartnerCodeBtn.textContent = 'Применить';
+                }
+            });
 
             // ========== ЗАГРУЗКА РАЗМЕРОВ ==========
             async function loadSizes() {
@@ -1132,9 +1335,12 @@
             // ========== ЗАГРУЗКА СЛОЁВ И ЧЕХЛОВ ДЛЯ РАЗМЕРА ==========
             async function loadLayersAndCovers(sizeId) {
                 try {
+                    const params = new URLSearchParams({ size_id: sizeId });
+                    if (partnerCode) params.append('partner_code', partnerCode);
+
                     const [layersRes, coversRes] = await Promise.all([
-                        fetch(`/api/mattress/layers?size_id=${sizeId}`),
-                        fetch(`/api/mattress/covers?size_id=${sizeId}`)
+                        fetch(`/api/mattress/layers?${params.toString()}`),
+                        fetch(`/api/mattress/covers?${params.toString()}`)
                     ]);
 
                     if (!layersRes.ok) {
@@ -1149,7 +1355,6 @@
                     state.allLayers = await layersRes.json();
                     state.allCovers = await coversRes.json();
 
-                    // Сброс выбранных слоёв и чехла при смене размера
                     state.layers = [];
                     state.cover = null;
                     setMobileTab('available');
@@ -1157,15 +1362,13 @@
                     renderChosenLayers();
                     renderCovers();
                     confirmLayersBtn.disabled = true;
-                    addToCartBtn.disabled = true;
+                    offerBtn.disabled = true;
 
-                    // Если есть только один чехол – выбираем автоматически
-                    // (тогда шаг 4 будет пропущен, а кнопка "Далее" превратится в "Добавить в корзину")
                     if (state.allCovers.length === 1) {
                         state.cover = state.allCovers[0];
                         const coverCard = document.querySelector('.cover-card');
                         if (coverCard) coverCard.classList.add('selected');
-                        addToCartBtn.disabled = false;
+                        offerBtn.disabled = false;
                     }
                     updateLayersConfirmButton();
                     updateTotals();
@@ -1186,7 +1389,6 @@
                     const div = document.createElement('div');
                     div.className = 'layer-item';
 
-                    // Фото слоя
                     let photoHtml;
                     if (l.photo_url) {
                         photoHtml = `<img src="${escapeHtml(l.photo_url)}" alt="${escapeHtml(l.name)}" loading="lazy">`;
@@ -1194,7 +1396,6 @@
                         photoHtml = `<span class="layer-photo-placeholder"></span>`;
                     }
 
-                    // Характеристики: основные и дополнительные
                     let featuresHtml = '';
                     const allFeatures = [];
                     if (Array.isArray(l.main_features)) {
@@ -1217,7 +1418,6 @@
                         ).join('') + '</div>';
                     }
 
-                    // Кнопка "Фото" — только если есть фото
                     const photoBtnHtml = l.photo_url
                         ? `<button type="button" class="btn-small btn-photo" data-photo="${escapeHtml(l.photo_url)}" data-name="${escapeHtml(l.name)}">Фото</button>`
                         : '';
@@ -1240,13 +1440,11 @@
                     layersList.appendChild(div);
                 });
 
-                // Обработчики кнопок "Добавить"
                 layersList.querySelectorAll('.btn-add').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const id = parseInt(btn.dataset.id);
                         const layer = state.allLayers.find(l => l.id === id);
                         if (layer) {
-                            // Добавляем копию объекта
                             state.layers.push({ ...layer });
                             renderChosenLayers();
                             updateTotals();
@@ -1255,7 +1453,6 @@
                     });
                 });
 
-                // Обработчики кнопок "Фото"
                 layersList.querySelectorAll('.btn-photo').forEach(btn => {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -1318,7 +1515,6 @@
                         ? `<div class="cover-thumb"><img src="${escapeHtml(c.photo_url)}" alt="${escapeHtml(c.name)}" loading="lazy"></div>`
                         : `<div class="cover-thumb">🧵</div>`;
 
-                    // Кнопка "Фото" — только если есть фото
                     const photoBtnHtml = c.photo_url
                         ? `<button type="button" class="btn-small btn-photo" data-photo="${escapeHtml(c.photo_url)}" data-name="${escapeHtml(c.name)}">Фото</button>`
                         : '';
@@ -1331,18 +1527,16 @@
                         ${photoBtnHtml}
                     `;
                     card.addEventListener('click', (e) => {
-                        // Не выбираем чехол, если кликнули по кнопке "Фото"
                         if (e.target.closest('.btn-photo')) return;
                         document.querySelectorAll('.cover-card').forEach(el => el.classList.remove('selected'));
                         card.classList.add('selected');
                         state.cover = c;
-                        addToCartBtn.disabled = false;
+                        offerBtn.disabled = false;
                         updateTotals();
                     });
                     coverGrid.appendChild(card);
                 });
 
-                // Обработчики кнопок "Фото" на чехлах
                 coverGrid.querySelectorAll('.btn-photo').forEach(btn => {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -1359,7 +1553,6 @@
                     if (!ok) return;
                 }
 
-                // Сброс состояния
                 state.type = null;
                 state.initialHeight = 0;
                 state.size = null;
@@ -1369,7 +1562,6 @@
                 state.allCovers = [];
                 state.mobileTab = 'available';
 
-                // Сброс UI шага 1
                 typeBtns.forEach(b => b.classList.remove('selected'));
                 typeHint.classList.add('neutral');
                 typeHint.textContent = TYPE_HINTS.neutral;
@@ -1379,32 +1571,25 @@
                 heightError.classList.remove('visible');
                 confirmTypeBtn.disabled = true;
 
-                // Сброс UI шага 2
                 document.querySelectorAll('.size-card').forEach(c => c.classList.remove('selected'));
                 confirmSizeBtn.disabled = true;
 
-                // Сброс UI шага 3
                 setMobileTab('available');
                 renderLayersList();
                 renderChosenLayers();
                 confirmLayersBtn.disabled = true;
                 confirmLayersBtn.textContent = 'Далее →';
 
-                // Сброс UI шага 4
                 renderCovers();
-                addToCartBtn.disabled = true;
+                offerBtn.disabled = true;
 
-                // Закрыть панель "Подробнее", если открыта
                 if (detailPanel.classList.contains('open')) {
                     detailPanel.classList.remove('open');
                     detailToggle.textContent = 'Подробнее ▼';
                 }
 
-                // Перейти к первому шагу и обновить итоги
                 showStep(1);
                 updateTotals();
-
-                // Прокрутить наверх
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             }
 
@@ -1413,7 +1598,6 @@
             // ========== НАВИГАЦИЯ МЕЖДУ ШАГАМИ ==========
             function goToStep(step) {
                 if (step === 1) {
-                    // Сброс до первого шага (тип)
                     state.size = null;
                     state.layers = [];
                     state.cover = null;
@@ -1423,7 +1607,7 @@
                     document.querySelectorAll('.cover-card').forEach(c => c.classList.remove('selected'));
                     confirmSizeBtn.disabled = true;
                     confirmLayersBtn.disabled = true;
-                    addToCartBtn.disabled = true;
+                    offerBtn.disabled = true;
                     renderLayersList();
                     renderChosenLayers();
                     renderCovers();
@@ -1450,9 +1634,8 @@
                         alert('Добавьте хотя бы один слой');
                         return;
                     }
-                    // Шаг 4 не нужен, если чехол всего один — сразу добавляем в корзину
                     if (state.allCovers.length === 1 && state.cover) {
-                        addToCart();
+                        showOffer();
                         return;
                     }
                     showStep(4);
@@ -1460,55 +1643,93 @@
                         state.cover = state.allCovers[0];
                         const card = document.querySelector('.cover-card');
                         if (card) card.classList.add('selected');
-                        addToCartBtn.disabled = false;
+                        offerBtn.disabled = false;
                         updateTotals();
                     }
                 }
                 updateTotals();
             }
 
-            // ========== ДОБАВЛЕНИЕ В КОРЗИНУ ==========
-            async function addToCart() {
+            // ========== ФОРМИРОВАНИЕ ПРЕДЛОЖЕНИЯ ==========
+            function showOffer() {
                 if (!state.size || state.layers.length === 0 || !state.cover) {
                     alert('Необходимо выбрать размер, хотя бы один слой и чехол');
                     return;
                 }
-                const payload = {
-                    size_id: state.size.id,
-                    layer_ids: state.layers.map(l => l.id),
-                    cover_id: state.cover.id,
-                    initial_height: state.initialHeight,
-                    is_new: state.type === 'new',
-                    quantity: 1
-                };
-                try {
-                    const resp = await fetch('/api/cart/add-mattress', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await resp.json();
-                    if (data.success) {
-                        alert('Матрас добавлен в корзину!');
-                        updateCartCount();
-                    } else {
-                        alert('Ошибка: ' + (data.error || 'неизвестная ошибка'));
-                    }
-                } catch (err) {
-                    console.error('Ошибка добавления в корзину:', err);
-                    alert('Не удалось добавить матрас в корзину');
+
+                let totalPrice = state.initialHeight ? 0 : 0; // base cost not included
+                let layersPrice = 0;
+                state.layers.forEach(l => layersPrice += (l.price || 0));
+                const coverPrice = state.cover.price || 0;
+                totalPrice = layersPrice + coverPrice;
+
+                const totalHeight = (state.initialHeight || 0) + state.layers.length * 5;
+
+                let html = '';
+
+                // Партнёрский код
+                if (partnerCode) {
+                    html += `<div class="offer-detail-row"><span class="label">Партнёрский код:</span><span class="value">${escapeHtml(partnerCode)}</span></div>`;
                 }
+
+                // Размер
+                html += `<div class="offer-detail-row"><span class="label">Размер:</span><span class="value">${escapeHtml(state.size.name)}</span></div>`;
+
+                // Тип
+                html += `<div class="offer-detail-row"><span class="label">Тип сборки:</span><span class="value">${state.type === 'new' ? 'Новый матрас' : 'Добавление к старому'}</span></div>`;
+
+                // Высота основы
+                if (state.initialHeight > 0) {
+                    html += `<div class="offer-detail-row"><span class="label">Высота основы:</span><span class="value">${state.initialHeight} см</span></div>`;
+                }
+
+                // Слои
+                const layerNames = state.layers.map(l => l.name).join(', ');
+                html += `<div class="offer-detail-row"><span class="label">Слои (${state.layers.length} шт.):</span><span class="value">${escapeHtml(layerNames)}</span></div>`;
+                html += `<div class="offer-detail-row"><span class="label">Высота слоёв:</span><span class="value">${state.layers.length * 5} см</span></div>`;
+
+                // Чехол
+                html += `<div class="offer-detail-row"><span class="label">Чехол:</span><span class="value">${escapeHtml(state.cover.name)} — ${coverPrice} ₽</span></div>`;
+
+                // Итоговая высота
+                html += `<div class="offer-detail-row"><span class="label">Итоговая высота:</span><span class="value">${totalHeight} см</span></div>`;
+
+                // Стоимость слоёв
+                html += `<div class="offer-detail-row"><span class="label">Стоимость слоёв:</span><span class="value">${layersPrice} ₽</span></div>`;
+
+                offerDetails.innerHTML = html;
+                offerTotalPrice.textContent = totalPrice + ' ₽';
+                offerModal.classList.add('open');
+                document.body.style.overflow = 'hidden';
             }
 
+            function closeOfferModal() {
+                offerModal.classList.remove('open');
+                document.body.style.overflow = '';
+            }
+
+            offerModalClose.addEventListener('click', closeOfferModal);
+            offerCloseBtn.addEventListener('click', closeOfferModal);
+            offerModal.addEventListener('click', (e) => {
+                if (e.target === offerModal) closeOfferModal();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && offerModal.classList.contains('open')) {
+                    closeOfferModal();
+                }
+            });
+
+            offerPrintBtn.addEventListener('click', () => {
+                window.print();
+            });
+
             // ========== ОБРАБОТЧИКИ СОБЫТИЙ ==========
-            // Тип матраса
             typeBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
                     typeBtns.forEach(b => b.classList.remove('selected'));
                     btn.classList.add('selected');
                     state.type = btn.dataset.type;
 
-                    // Обновляем подсказку
                     typeHint.classList.remove('neutral');
                     if (state.type === 'new') {
                         typeHint.textContent = TYPE_HINTS.new;
@@ -1518,7 +1739,6 @@
 
                     if (state.type === 'old') {
                         heightInputContainer.style.display = 'block';
-                        // Не устанавливаем 0, а валидируем значение
                         const val = parseInt(initialHeightInput.value, 10);
                         if (!isNaN(val) && val > 0) {
                             state.initialHeight = val;
@@ -1573,42 +1793,26 @@
             confirmSizeBtn.addEventListener('click', () => goToStep(3));
             backFromLayers.addEventListener('click', () => goToStep(2));
             confirmLayersBtn.addEventListener('click', () => {
-                if (confirmLayersBtn.textContent.trim() === 'Добавить в корзину') {
-                    addToCart();
+                if (confirmLayersBtn.textContent.trim() === 'Сформировать предложение') {
+                    showOffer();
                 } else {
                     goToStep(4);
                 }
             });
             backFromCover.addEventListener('click', () => goToStep(3));
 
-            // Мобильные вкладки
             mobileTabs.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     setMobileTab(btn.dataset.tab);
                 });
             });
 
-            // Добавление в корзину
-            addToCartBtn.addEventListener('click', addToCart);
+            offerBtn.addEventListener('click', showOffer);
 
-            // Детали (Подробнее)
             detailToggle.addEventListener('click', () => {
                 const isOpen = detailPanel.classList.toggle('open');
                 detailToggle.textContent = isOpen ? 'Подробнее ▲' : 'Подробнее ▼';
             });
-
-            // ========== СЧЁТЧИК КОРЗИНЫ ==========
-            async function updateCartCount() {
-                try {
-                    const resp = await fetch('/api/cart');
-                    const data = await resp.json();
-                    const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-                    const cartCountSpan = document.getElementById('cart-count');
-                    if (cartCountSpan) cartCountSpan.textContent = totalItems;
-                } catch (e) { console.error('Ошибка обновления счётчика корзины:', e); }
-            }
-            updateCartCount();
-            setInterval(updateCartCount, 5000);
 
             // ========== ИНИЦИАЛИЗАЦИЯ ==========
             setMobileTab('available');

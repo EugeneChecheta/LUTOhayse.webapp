@@ -263,6 +263,65 @@ body {
     .btn-reset { font-size: 13px; padding: 8px 18px; }
 }
 
+/* ===== Партнёрский блок ===== */
+.partner-access-section {
+    margin-top: 30px;
+    padding: 24px;
+    background: #f8f8f8;
+    border-radius: 16px;
+    border: 1px solid #e4e4e4;
+    text-align: center;
+}
+.partner-access-section p {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 16px;
+    color: #333;
+}
+.partner-code-form {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.partner-code-form input {
+    padding: 10px 16px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 15px;
+    min-width: 220px;
+}
+.partner-code-form input:focus {
+    outline: none;
+    border-color: #628b35;
+}
+.partner-code-form button {
+    padding: 10px 24px;
+    background: #628b35;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+}
+.partner-code-form button:hover {
+    background: #4f702a;
+}
+.partner-code-message {
+    margin-top: 12px;
+    font-size: 14px;
+    min-height: 20px;
+}
+.partner-code-message.error {
+    color: #e3342f;
+}
+.partner-code-message.success {
+    color: #628b35;
+}
+
 /* Footer */
 footer {
     background: #fff;

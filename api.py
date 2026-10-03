@@ -5,6 +5,8 @@
 #   - /api/mattress/covers теперь возвращает photo_url
 #   - /api/orders/history теперь возвращает читаемые названия size_name и cover_name для матрасов
 #   - Исправлено написание: "матрац" -> "матрас" во всех текстах и комментариях
+#   - Добавлена поддержка партнёрских цен из /partners/[код].xlsx
+#   - Добавлен эндпоинт /api/partners/check и страница /partners
 
 import psycopg2
 import os
@@ -21,6 +23,12 @@ import urllib.request
 import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 import logging
+
+try:
+    from openpyxl import load_workbook
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(24))
@@ -716,6 +724,71 @@ def gallery_project(folder):
         'description': description
     })
 
+# ========= ПАРТНЁРСКИЕ ЦЕНЫ =========
+PARTNERS_DIR = Path(__file__).parent / 'partners'
+
+def get_partner_prices(partner_code):
+    """Читает xlsx-файл партнёра и возвращает словарь:
+    { 'размер': { 'код_слоя': цена, 'код_чехла': цена } }
+    """
+    if not partner_code:
+        return None
+    partner_code = partner_code.strip()
+    if not partner_code or '..' in partner_code or '/' in partner_code or '\\' in partner_code:
+        return None
+    file_path = PARTNERS_DIR / f"{partner_code}.xlsx"
+    if not file_path.exists():
+        return None
+    if not OPENPYXL_AVAILABLE:
+        app.logger.error("openpyxl не установлен, невозможно прочитать xlsx")
+        return None
+    try:
+        wb = load_workbook(filename=str(file_path), data_only=True, read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        if not rows:
+            return None
+        header = rows[0]
+        # Первая колонка — "Размер", далее коды
+        codes = [str(h).strip() if h is not None else '' for h in header[1:]]
+        prices = {}
+        for row in rows[1:]:
+            if not row or row[0] is None:
+                continue
+            size_name = str(row[0]).strip()
+            if not size_name:
+                continue
+            prices[size_name] = {}
+            for idx, code in enumerate(codes):
+                if not code:
+                    continue
+                val = row[idx + 1] if idx + 1 < len(row) else None
+                if val is not None:
+                    try:
+                        prices[size_name][code] = int(val)
+                    except (ValueError, TypeError):
+                        try:
+                            prices[size_name][code] = int(float(val))
+                        except:
+                            prices[size_name][code] = 0
+                else:
+                    prices[size_name][code] = 0
+        return prices
+    except Exception as e:
+        app.logger.error(f"Ошибка чтения xlsx партнёра {partner_code}: {e}")
+        return None
+
+@app.route('/api/partners/check')
+def partner_check():
+    code = request.args.get('code', '').strip()
+    if not code:
+        return jsonify({'exists': False, 'error': 'Код не указан'}), 400
+    prices = get_partner_prices(code)
+    if prices is None:
+        return jsonify({'exists': False})
+    return jsonify({'exists': True})
+
 # ========= АВТЕНТИФИКАЦИЯ И ПРОФИЛЬ =========
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -1318,6 +1391,7 @@ def add_topper_to_cart():
 # ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАСОВ =========
 # Возвращают photo_url (/media/layers/CODE.webp, /media/covers/CODE.webp),
 # а также основные и дополнительные характеристики из БД бота.
+# При передаче partner_code цены берутся из /partners/[код].xlsx
 
 MATTRESS_LAYERS_MEDIA = Path(__file__).parent / 'media' / 'layers'
 MATTRESS_COVERS_MEDIA = Path(__file__).parent / 'media' / 'covers'
@@ -1360,13 +1434,33 @@ def mattress_sizes():
 def mattress_layers():
     """Возвращает слои матрасов для указанного размера с ценами.
     Для каждого слоя возвращается photo_url (если файл /media/layers/CODE.webp существует),
-    а также основные и дополнительные характеристики из БД административного бота."""
+    а также основные и дополнительные характеристики из БД административного бота.
+    Если передан partner_code, цена берётся из /partners/[код].xlsx."""
     size_id = request.args.get('size_id', type=int)
+    partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Получаем название размера
+        cur.execute("SELECT name FROM mattress_sizes WHERE id = %s", (size_id,))
+        size_row = cur.fetchone()
+        if not size_row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Размер не найден'}), 404
+        size_name = size_row[0]
+
+        partner_prices = None
+        if partner_code:
+            partner_prices = get_partner_prices(partner_code)
+            if partner_prices is None:
+                cur.close()
+                conn.close()
+                return jsonify({'error': 'Партнёр не найден'}), 404
+
         cur.execute("""
             SELECT l.id, l.code, l.name, l.description, COALESCE(p.price, 0) as price
             FROM mattress_layers l
@@ -1419,6 +1513,10 @@ def mattress_layers():
         for r in rows:
             layer_id = r[0]
             code = r[1]
+            if partner_prices is not None:
+                price = partner_prices.get(size_name, {}).get(code, 0)
+            else:
+                price = r[4] or 0
             photo_path = MATTRESS_LAYERS_MEDIA / f"{code}.webp"
             photo_url = f"/media/layers/{code}.webp" if photo_path.exists() else None
             result.append({
@@ -1426,7 +1524,7 @@ def mattress_layers():
                 'code': code,
                 'name': r[2],
                 'description': r[3] or '',
-                'price': r[4] or 0,
+                'price': price,
                 'photo_url': photo_url,
                 'main_features': main_features.get(layer_id, []),
                 'extra_features': extra_features.get(layer_id, [])
@@ -1439,13 +1537,32 @@ def mattress_layers():
 @app.route('/api/mattress/covers')
 def mattress_covers():
     """Возвращает чехлы матрасов для указанного размера с ценами.
-    Для каждого чехла возвращается photo_url (если файл /media/covers/CODE.webp существует)."""
+    Для каждого чехла возвращается photo_url (если файл /media/covers/CODE.webp существует).
+    Если передан partner_code, цена берётся из /partners/[код].xlsx."""
     size_id = request.args.get('size_id', type=int)
+    partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
         return jsonify({'error': 'Параметр size_id обязателен'}), 400
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+
+        cur.execute("SELECT name FROM mattress_sizes WHERE id = %s", (size_id,))
+        size_row = cur.fetchone()
+        if not size_row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Размер не найден'}), 404
+        size_name = size_row[0]
+
+        partner_prices = None
+        if partner_code:
+            partner_prices = get_partner_prices(partner_code)
+            if partner_prices is None:
+                cur.close()
+                conn.close()
+                return jsonify({'error': 'Партнёр не найден'}), 404
+
         cur.execute("""
             SELECT c.id, c.code, c.name, c.description, COALESCE(p.price, 0) as price
             FROM mattress_cover c
@@ -1459,6 +1576,10 @@ def mattress_covers():
         result = []
         for r in rows:
             code = r[1]
+            if partner_prices is not None:
+                price = partner_prices.get(size_name, {}).get(code, 0)
+            else:
+                price = r[4] or 0
             photo_path = MATTRESS_COVERS_MEDIA / f"{code}.webp"
             photo_url = f"/media/covers/{code}.webp" if photo_path.exists() else None
             result.append({
@@ -1466,7 +1587,7 @@ def mattress_covers():
                 'code': code,
                 'name': r[2],
                 'description': r[3] or '',
-                'price': r[4] or 0,
+                'price': price,
                 'photo_url': photo_url
             })
         return jsonify(result)
@@ -1796,6 +1917,11 @@ def mattress_page():
 def mattress_css():
     return send_from_directory('webpages', 'mattress.css')
 
+# Партнёрская страница
+@app.route('/partners')
+def partners_page():
+    return send_from_directory('webpages', 'partners.html')
+
 @app.route('/media/<path:filename>')
 def media_files(filename):
     return send_from_directory('media', filename)
@@ -1813,5 +1939,6 @@ if __name__ == '__main__':
     Path('media/gallery').mkdir(parents=True, exist_ok=True)
     Path('media/layers').mkdir(parents=True, exist_ok=True)
     Path('media/covers').mkdir(parents=True, exist_ok=True)
+    Path('partners').mkdir(parents=True, exist_ok=True)
     init_db()
     app.run(host='0.0.0.0', port=5000, debug=True)
