@@ -7,6 +7,11 @@
 #   - Исправлено написание: "матрац" -> "матрас" во всех текстах и комментариях
 #   - Добавлена поддержка партнёрских цен из /partners/[код].xlsx
 #   - Добавлен эндпоинт /api/partners/check и страница /partners
+#   - Добавлена галерея коммерческих проектов:
+#       /api/gallery/commercial/projects
+#       /api/gallery/commercial/project/<folder>
+#       /gallery_commercial
+#       папка media/commercial
 
 import psycopg2
 import os
@@ -66,8 +71,8 @@ ORDER_ADMIN_IDS = None
 
 def load_order_bot_config():
     global ORDER_BOT_TOKEN, ORDER_ADMIN_IDS
-    token_path = Path(__file__).parent / 'telegram_order_panel' / 'token.txt'
-    admin_path = Path(__file__).parent / 'telegram_order_panel' / 'admin_ids.txt'
+    token_path = Path(__file__).parent / 'telegram_manager_panel' / 'token.txt'
+    admin_path = Path(__file__).parent / 'telegram_manager_panel' / 'admin_ids.txt'
     try:
         with open(token_path, 'r', encoding='utf-8') as f:
             ORDER_BOT_TOKEN = f.read().strip()
@@ -662,11 +667,13 @@ def get_materials():
 
 # ========= ГАЛЕРЕЯ =========
 GALLERY_DIR = Path(__file__).parent / 'media' / 'gallery'
+COMMERCIAL_GALLERY_DIR = Path(__file__).parent / 'media' / 'commercial'
 
-def get_gallery_projects(page=1, limit=10):
-    if not GALLERY_DIR.exists():
+
+def _get_gallery_projects_from_dir(base_dir, page=1, limit=10):
+    if not base_dir.exists():
         return [], 0
-    folders = [f for f in GALLERY_DIR.iterdir() if f.is_dir()]
+    folders = [f for f in base_dir.iterdir() if f.is_dir()]
     folders.sort(key=lambda x: x.name, reverse=True)
     total = len(folders)
     start = (page - 1) * limit
@@ -680,7 +687,7 @@ def get_gallery_projects(page=1, limit=10):
             with open(desc_file, 'r', encoding='utf-8') as f:
                 description = f.read().strip()
         images = sorted(folder.glob('*.webp'))
-        preview = f'/media/gallery/{folder.name}/{images[0].name}' if images else None
+        preview = f'/media/{base_dir.name}/{folder.name}/{images[0].name}' if images else None
         projects.append({
             'folder': folder.name,
             'preview': preview,
@@ -689,6 +696,33 @@ def get_gallery_projects(page=1, limit=10):
             'date': folder.name
         })
     return projects, total
+
+
+def _get_gallery_project_from_dir(base_dir, folder):
+    folder_path = base_dir / folder
+    if not folder_path.is_dir():
+        return None
+    images = sorted(folder_path.glob('*.webp'))
+    image_urls = [f'/media/{base_dir.name}/{folder}/{img.name}' for img in images]
+    desc_file = folder_path / 'description.txt'
+    description = ''
+    if desc_file.exists():
+        with open(desc_file, 'r', encoding='utf-8') as f:
+            description = f.read().strip()
+    return {
+        'folder': folder,
+        'images': image_urls,
+        'description': description
+    }
+
+
+def get_gallery_projects(page=1, limit=10):
+    return _get_gallery_projects_from_dir(GALLERY_DIR, page, limit)
+
+
+def get_commercial_gallery_projects(page=1, limit=10):
+    return _get_gallery_projects_from_dir(COMMERCIAL_GALLERY_DIR, page, limit)
+
 
 @app.route('/api/gallery/projects')
 def gallery_projects():
@@ -706,23 +740,38 @@ def gallery_projects():
         'limit': limit
     })
 
+
+@app.route('/api/gallery/commercial/projects')
+def commercial_gallery_projects():
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 10, type=int)
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 50:
+        limit = 10
+    projects, total = get_commercial_gallery_projects(page, limit)
+    return jsonify({
+        'projects': projects,
+        'total': total,
+        'page': page,
+        'limit': limit
+    })
+
+
 @app.route('/api/gallery/project/<folder>')
 def gallery_project(folder):
-    folder_path = GALLERY_DIR / folder
-    if not folder_path.is_dir():
+    data = _get_gallery_project_from_dir(GALLERY_DIR, folder)
+    if data is None:
         return jsonify({'error': 'Project not found'}), 404
-    images = sorted(folder_path.glob('*.webp'))
-    image_urls = [f'/media/gallery/{folder}/{img.name}' for img in images]
-    desc_file = folder_path / 'description.txt'
-    description = ''
-    if desc_file.exists():
-        with open(desc_file, 'r', encoding='utf-8') as f:
-            description = f.read().strip()
-    return jsonify({
-        'folder': folder,
-        'images': image_urls,
-        'description': description
-    })
+    return jsonify(data)
+
+
+@app.route('/api/gallery/commercial/project/<folder>')
+def commercial_gallery_project(folder):
+    data = _get_gallery_project_from_dir(COMMERCIAL_GALLERY_DIR, folder)
+    if data is None:
+        return jsonify({'error': 'Project not found'}), 404
+    return jsonify(data)
 
 # ========= ПАРТНЁРСКИЕ ЦЕНЫ =========
 PARTNERS_DIR = Path(__file__).parent / 'partners'
@@ -1896,6 +1945,10 @@ def profile_page():
 def gallery_page():
     return send_from_directory('webpages', 'gallery.html')
 
+@app.route('/gallery_commercial')
+def gallery_commercial_page():
+    return send_from_directory('webpages', 'gallery_commercial.html')
+
 @app.route('/gallery.css')
 def gallery_css():
     return send_from_directory('webpages', 'gallery.css')
@@ -1937,6 +1990,7 @@ if __name__ == '__main__':
     Path('media/interface').mkdir(parents=True, exist_ok=True)
     Path('media/index').mkdir(parents=True, exist_ok=True)
     Path('media/gallery').mkdir(parents=True, exist_ok=True)
+    Path('media/commercial').mkdir(parents=True, exist_ok=True)
     Path('media/layers').mkdir(parents=True, exist_ok=True)
     Path('media/covers').mkdir(parents=True, exist_ok=True)
     Path('partners').mkdir(parents=True, exist_ok=True)

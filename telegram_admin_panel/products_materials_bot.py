@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Telegram‑бот для управления интернет‑магазином (PostgreSQL) + Галерея проектов.
-ВЕРСИЯ: 2.1 – ИСПРАВЛЕНО РЕДАКТИРОВАНИЕ МАТЕРИАЛОВ,
-УБРАНА КНОПКА ДОБАВЛЕНИЯ С ПРЕДУСТАНОВЛЕННЫМ ТИПОМ,
-ДОБАВЛЕНИЕ МАТЕРИАЛА ВСЕГДА ЗАПРАШИВАЕТ ТИП.
+ВЕРСИЯ: 3.0
+- ИМЕНА ПРОЕКТОВ ГАЛЕРЕИ В ФОРМАТЕ гггг-мм-дд-чч-мм-сс
+- СТАБИЛЬНОЕ ДОБАВЛЕНИЕ/РЕДАКТИРОВАНИЕ ПРОЕКТОВ ГАЛЕРЕИ
+- БЕЗОПАСНАЯ ОТПРАВКА МЕДИА-ГРУПП (без утечек файловых дескрипторов)
 """
 import asyncio
 import logging
@@ -18,6 +19,7 @@ from typing import List, Dict, Optional, Tuple
 import asyncpg
 from PIL import Image
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -35,6 +37,13 @@ TOKEN_FILE = BASE_DIR / "token_products_materials.txt"
 CONFIG_DB_FILE = BASE_DIR / "config_db.txt"
 ADMIN_FILE = BASE_DIR / "admin_ids.txt"
 
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
 # ------------------------- Чтение конфигураций -------------------------
 def read_token():
     if not TOKEN_FILE.exists():
@@ -50,6 +59,7 @@ def read_token():
     except Exception as e:
         logger.error(f"Ошибка чтения token.txt: {e}")
         sys.exit(1)
+
 
 def read_db_config():
     if not CONFIG_DB_FILE.exists():
@@ -72,6 +82,7 @@ def read_db_config():
         logger.error(f"Ошибка чтения config_db.txt: {e}")
         sys.exit(1)
 
+
 def read_admin_ids():
     if not ADMIN_FILE.exists():
         logger.warning(f"Файл admin_ids.txt не найден: {ADMIN_FILE}")
@@ -88,18 +99,12 @@ def read_admin_ids():
         logger.error(f"Ошибка чтения admin_ids.txt: {e}")
         return []
 
-# ------------------------- Инициализация конфигураций -------------------------
+
 TOKEN = read_token()
 DB_CONFIG = read_db_config()
 ADMIN_IDS = read_admin_ids()
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# Состояния разговоров
+# ------------------------- Состояния разговоров -------------------------
 (
     ADD_PROD_NAME,
     ADD_PROD_CODE,
@@ -165,19 +170,23 @@ PRODUCTS_MEDIA.mkdir(parents=True, exist_ok=True)
 MATERIALS_MEDIA.mkdir(parents=True, exist_ok=True)
 GALLERY_BASE.mkdir(parents=True, exist_ok=True)
 
+
 # ------------------------- Декоратор проверки администратора -------------------------
 def admin_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        if ADMIN_IDS is not None and user_id not in ADMIN_IDS:
+        if ADMIN_IDS and user_id not in ADMIN_IDS:
             if update.callback_query:
-                await update.callback_query.answer("⛔ У вас нет прав.")
-                await update.callback_query.edit_message_text("⛔ Доступ запрещён.")
-            else:
+                try:
+                    await update.callback_query.answer("⛔ У вас нет прав.", show_alert=True)
+                except Exception:
+                    pass
+            elif update.message:
                 await update.message.reply_text("⛔ У вас нет прав на использование этого бота.")
             return None
         return await func(update, context)
     return wrapper
+
 
 # ------------------------- Команда перезапуска -------------------------
 @admin_only
@@ -203,12 +212,12 @@ async def reboot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Ошибка при выполнении reboot")
         await update.message.reply_text(f"❌ Непредвиденная ошибка: {e}")
 
+
 # ------------------------- Работа с базой данных -------------------------
 class Database:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
-    # ---------- Вспомогательные методы ----------
     async def update_min_cost(self, prod_id: int):
         async with self.pool.acquire() as conn:
             await conn.execute("""
@@ -441,10 +450,11 @@ class Database:
                 query += f" AND fp.flags_id = ANY(${idx}::int[])"
                 params.append(flag_ids)
                 idx += 1
-                query += """
+                query += f"""
                     GROUP BY p.id, p.code, p.name, p.products_type_id
-                    HAVING COUNT(DISTINCT fp.flags_id) = $3
-                    ORDER BY p.code OFFSET $""" + str(idx) + f" LIMIT ${idx+1}"
+                    HAVING COUNT(DISTINCT fp.flags_id) = {len(flag_ids)}
+                    ORDER BY p.code OFFSET ${idx} LIMIT ${idx+1}
+                """
                 params.append(offset)
                 params.append(limit)
                 total_query = """
@@ -481,11 +491,18 @@ class Database:
                 query += f" ORDER BY code OFFSET ${idx} LIMIT ${idx+1}"
                 params.append(offset)
                 params.append(limit)
-                total = await conn.fetchval(
-                    "SELECT COUNT(*) FROM products WHERE 1=1" +
-                    (f" AND (name ILIKE '%{search}%' OR code ILIKE '%{search}%')" if search else "") +
-                    (f" AND products_type_id = {type_id}" if type_id else "")
-                )
+
+                total_query = "SELECT COUNT(*) FROM products WHERE 1=1"
+                total_params = []
+                tidx = 1
+                if search:
+                    total_query += f" AND (name ILIKE ${tidx} OR code ILIKE ${tidx})"
+                    total_params.append(f"%{search}%")
+                    tidx += 1
+                if type_id is not None:
+                    total_query += f" AND products_type_id = ${tidx}"
+                    total_params.append(type_id)
+                total = await conn.fetchval(total_query, *total_params)
             rows = await conn.fetch(query, *params)
             return [dict(r) for r in rows], total
 
@@ -649,8 +666,10 @@ class Database:
                 row = await conn.fetchrow("SELECT id FROM materials WHERE code = $1", code)
             return row is None
 
+
 db_pool = None
 db = None
+
 
 # ------------------------- Работа с фото товаров -------------------------
 async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
@@ -664,13 +683,16 @@ async def download_photo_with_retry(photo, max_retries=3, delay=2.0):
             await asyncio.sleep(delay)
     return None
 
+
 def get_product_media_dir(product_code: str) -> Path:
     return PRODUCTS_MEDIA / product_code
+
 
 def ensure_media_dir(product_code: str) -> Path:
     path = get_product_media_dir(product_code)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 async def save_photo_from_telegram(file, product_code: str, photo_type: str, index: int = None) -> bool:
     try:
@@ -701,6 +723,7 @@ async def save_photo_from_telegram(file, product_code: str, photo_type: str, ind
         logger.error(f"Ошибка сохранения фото: {e}")
         return False
 
+
 async def delete_photo(product_code: str, photo_type: str, index: int = None) -> bool:
     if photo_type == 'preview':
         filename = 'preview.webp'
@@ -726,6 +749,7 @@ async def delete_photo(product_code: str, photo_type: str, index: int = None) ->
             new_index += 1
     return True
 
+
 def get_product_photos(product_code: str):
     base = get_product_media_dir(product_code)
     if not base.exists():
@@ -735,6 +759,7 @@ def get_product_photos(product_code: str):
         'size': str(base / 'size.webp') if (base / 'size.webp').exists() else None,
         'main': sorted([str(p) for p in base.glob('[0-9]*.webp') if p.stem.isdigit()], key=lambda x: int(Path(x).stem))
     }
+
 
 async def move_media_folder(old_code: str, new_code: str) -> bool:
     old_path = get_product_media_dir(old_code)
@@ -749,29 +774,55 @@ async def move_media_folder(old_code: str, new_code: str) -> bool:
         return True
     return False
 
+
 async def delete_media_folder(product_code: str):
     path = get_product_media_dir(product_code)
     if path.exists():
         shutil.rmtree(path)
 
+
 async def send_product_photos(chat_id: int, product_code: str, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет все фото товара. Файлы корректно открываются и закрываются."""
     photos = get_product_photos(product_code)
-    media_group = []
+    paths: List[Tuple[Path, Optional[str]]] = []
     if photos['preview']:
-        media_group.append(InputMediaPhoto(media=open(photos['preview'], 'rb'), caption="🖼️ Preview"))
+        paths.append((Path(photos['preview']), "🖼️ Preview"))
     for main_path in photos['main']:
-        media_group.append(InputMediaPhoto(media=open(main_path, 'rb')))
+        paths.append((Path(main_path), None))
     if photos['size']:
-        media_group.append(InputMediaPhoto(media=open(photos['size'], 'rb'), caption="📐 Схема (size)"))
-    if media_group:
-        for i in range(0, len(media_group), 10):
-            await context.bot.send_media_group(chat_id=chat_id, media=media_group[i:i+10])
-    else:
-        await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
+        paths.append((Path(photos['size']), "📐 Схема (size)"))
+
+    if not paths:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text="❌ У этого товара нет фото.")
+        except Exception as e:
+            logger.error(f"Не удалось отправить сообщение: {e}")
+        return
+
+    for i in range(0, len(paths), 10):
+        chunk = paths[i:i + 10]
+        opened = []
+        media = []
+        try:
+            for path, caption in chunk:
+                f = open(path, 'rb')
+                opened.append(f)
+                media.append(InputMediaPhoto(media=f, caption=caption))
+            await context.bot.send_media_group(chat_id=chat_id, media=media)
+        except Exception as e:
+            logger.error(f"Ошибка отправки медиагруппы: {e}")
+        finally:
+            for f in opened:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
 
 # ------------------------- Работа с фото материалов (один файл на материал) -------------------------
 def get_material_photo_path(material_code: str) -> Path:
     return MATERIALS_MEDIA / f"{material_code}.webp"
+
 
 async def save_material_photo(file, material_code: str) -> bool:
     try:
@@ -788,10 +839,12 @@ async def save_material_photo(file, material_code: str) -> bool:
         logger.error(f"Ошибка сохранения фото материала: {e}")
         return False
 
+
 async def delete_material_photo(material_code: str):
     path = get_material_photo_path(material_code)
     if path.exists():
         path.unlink()
+
 
 async def move_material_photo(old_code: str, new_code: str):
     old_path = get_material_photo_path(old_code)
@@ -801,29 +854,57 @@ async def move_material_photo(old_code: str, new_code: str):
             new_path.unlink()
         old_path.rename(new_path)
 
+
 async def send_material_photo(chat_id: int, material_code: str, context: ContextTypes.DEFAULT_TYPE):
     path = get_material_photo_path(material_code)
     if path.exists():
-        with open(path, 'rb') as f:
-            await context.bot.send_photo(chat_id=chat_id, photo=f)
+        try:
+            with open(path, 'rb') as f:
+                await context.bot.send_photo(chat_id=chat_id, photo=f)
+        except Exception as e:
+            logger.error(f"Ошибка отправки фото материала: {e}")
+            await context.bot.send_message(chat_id=chat_id, text="❌ Не удалось отправить фото материала.")
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ У материала нет фото.")
+
 
 # ------------------------- Вспомогательные функции -------------------------
 CANCEL_KEYBOARD = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]])
 
+
 async def send_or_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                 text: str, keyboard: InlineKeyboardMarkup,
                                 new_message: bool = False):
+    """Пытается отредактировать сообщение-callback, иначе отправляет новое. Игнорирует 'not modified'."""
     if update.callback_query and not new_message:
         try:
             await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
-            await update.callback_query.answer()
             return
-        except Exception:
-            pass
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
-                                   reply_markup=keyboard, parse_mode="Markdown")
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                # Просто обновим клавиатуру
+                try:
+                    await update.callback_query.edit_message_reply_markup(reply_markup=keyboard)
+                    return
+                except Exception:
+                    pass
+            logger.debug(f"edit_message_text failed ({e}); отправляем новое сообщение")
+        except Exception as e:
+            logger.debug(f"edit_message_text failed ({e}); отправляем новое сообщение")
+    try:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                       reply_markup=keyboard, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Ошибка отправки сообщения: {e}")
+
+
+async def safe_answer(query):
+    """Безопасно отвечает на callback."""
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.debug(f"answer() error: {e}")
+
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new_message: bool = False):
     keyboard = [
@@ -839,12 +920,14 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, new
     await send_or_edit_message(update, context, "🔧 *Главное меню*",
                                InlineKeyboardMarkup(keyboard), new_message)
 
+
 async def cancel_to_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
+
 
 async def exit_to_materials_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     type_id = context.user_data.get("materials_type_id")
@@ -854,9 +937,11 @@ async def exit_to_materials_page(update: Update, context: ContextTypes.DEFAULT_T
         await show_material_type_choice(update, context)
     return ConversationHandler.END
 
+
 async def exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu_callback(update, context)
     return ConversationHandler.END
+
 
 # ------------------------- Управление флагами -------------------------
 async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
@@ -891,16 +976,19 @@ async def show_flags(update: Update, context: ContextTypes.DEFAULT_TYPE, page: i
     context.user_data["flags_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def flags_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_flags(update, context, page)
 
+
 async def add_flag_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+    await safe_answer(update.callback_query)
     await update.callback_query.edit_message_text("Введите название флага:", reply_markup=CANCEL_KEYBOARD)
     return ADD_FLAG_NAME
+
 
 async def add_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
@@ -909,14 +997,16 @@ async def add_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_flags(update, context, context.user_data.get("flags_page", 0))
     return ConversationHandler.END
 
+
 async def edit_flag_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     _, _, flag_id, page = query.data.split("_")
     context.user_data["edit_flag_id"] = int(flag_id)
     context.user_data["edit_flag_page"] = int(page)
     await query.edit_message_text("Введите новое название флага:", reply_markup=CANCEL_KEYBOARD)
     return ADD_FLAG_NAME
+
 
 async def edit_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -926,9 +1016,10 @@ async def edit_flag_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_flags(update, context, context.user_data.get("edit_flag_page", 0))
     return ConversationHandler.END
 
+
 async def delete_flag_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     flag_id = int(parts[3])
     page = int(parts[4])
@@ -942,15 +1033,17 @@ async def delete_flag_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return DELETE_FLAG_CONFIRM
 
+
 async def delete_flag_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     flag_id = context.user_data["del_flag_id"]
     page = context.user_data["del_flag_page"]
     await db.delete_flag(flag_id)
     await query.edit_message_text("✅ Флаг удалён.")
     await show_flags(update, context, page)
     return ConversationHandler.END
+
 
 # ------------------------- Управление типами товаров -------------------------
 async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
@@ -985,16 +1078,19 @@ async def show_prod_types(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
     context.user_data["prodtypes_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def prodtypes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_prod_types(update, context, page)
 
+
 async def add_prodtype_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+    await safe_answer(update.callback_query)
     await update.callback_query.edit_message_text("Введите название типа товара:", reply_markup=CANCEL_KEYBOARD)
     return ADD_PROD_TYPE_NAME
+
 
 async def add_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
@@ -1003,14 +1099,16 @@ async def add_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_prod_types(update, context, context.user_data.get("prodtypes_page", 0))
     return ConversationHandler.END
 
+
 async def edit_prodtype_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     _, _, type_id, page = query.data.split("_")
     context.user_data["edit_prodtype_id"] = int(type_id)
     context.user_data["edit_prodtype_page"] = int(page)
     await query.edit_message_text("Введите новое название типа товара:", reply_markup=CANCEL_KEYBOARD)
     return ADD_PROD_TYPE_NAME
+
 
 async def edit_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -1020,9 +1118,10 @@ async def edit_prodtype_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await show_prod_types(update, context, context.user_data.get("edit_prodtype_page", 0))
     return ConversationHandler.END
 
+
 async def delete_prodtype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     type_id = int(parts[3])
     page = int(parts[4])
@@ -1036,15 +1135,17 @@ async def delete_prodtype_confirm(update: Update, context: ContextTypes.DEFAULT_
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return DELETE_PROD_TYPE_CONFIRM
 
+
 async def delete_prodtype_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = context.user_data["del_prodtype_id"]
     page = context.user_data["del_prodtype_page"]
     success = await db.delete_product_type_cascade(type_id)
     await query.edit_message_text("✅ Тип и все его товары удалены." if success else "❌ Ошибка при удалении типа.")
     await show_prod_types(update, context, page)
     return ConversationHandler.END
+
 
 # ------------------------- Управление типами материалов -------------------------
 async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
@@ -1079,16 +1180,19 @@ async def show_mat_types(update: Update, context: ContextTypes.DEFAULT_TYPE, pag
     context.user_data["mattypes_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def mattypes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_mat_types(update, context, page)
 
+
 async def add_mattype_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+    await safe_answer(update.callback_query)
     await update.callback_query.edit_message_text("Введите название типа материала:", reply_markup=CANCEL_KEYBOARD)
     return ADD_MAT_TYPE_NAME
+
 
 async def add_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
@@ -1097,14 +1201,16 @@ async def add_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_mat_types(update, context, context.user_data.get("mattypes_page", 0))
     return ConversationHandler.END
 
+
 async def edit_mattype_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     _, _, mt_id, page = query.data.split("_")
     context.user_data["edit_mattype_id"] = int(mt_id)
     context.user_data["edit_mattype_page"] = int(page)
     await query.edit_message_text("Введите новое название типа материала:", reply_markup=CANCEL_KEYBOARD)
     return ADD_MAT_TYPE_NAME
+
 
 async def edit_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -1114,9 +1220,10 @@ async def edit_mattype_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_mat_types(update, context, context.user_data.get("edit_mattype_page", 0))
     return ConversationHandler.END
 
+
 async def delete_mattype_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     mt_id = int(parts[3])
     page = int(parts[4])
@@ -1130,9 +1237,10 @@ async def delete_mattype_confirm(update: Update, context: ContextTypes.DEFAULT_T
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return DELETE_MAT_TYPE_CONFIRM
 
+
 async def delete_mattype_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     mt_id = context.user_data.get("del_mattype_id")
     page = context.user_data.get("del_mattype_page", 0)
     if not mt_id:
@@ -1150,6 +1258,7 @@ async def delete_mattype_execute(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(f"❌ Непредвиденная ошибка: {e}")
     await show_mat_types(update, context, page)
     return ConversationHandler.END
+
 
 # ------------------------- Управление основными характеристиками -------------------------
 async def show_main_features(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
@@ -1184,16 +1293,19 @@ async def show_main_features(update: Update, context: ContextTypes.DEFAULT_TYPE,
     context.user_data["mainfeat_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def mainfeat_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_main_features(update, context, page)
 
+
 async def add_mainfeat_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+    await safe_answer(update.callback_query)
     await update.callback_query.edit_message_text("Введите название основной характеристики:", reply_markup=CANCEL_KEYBOARD)
     return ADD_MAIN_FEATURE_NAME
+
 
 async def add_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
@@ -1202,14 +1314,16 @@ async def add_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_features(update, context, context.user_data.get("mainfeat_page", 0))
     return ConversationHandler.END
 
+
 async def edit_mainfeat_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     _, _, feat_id, page = query.data.split("_")
     context.user_data["edit_mainfeat_id"] = int(feat_id)
     context.user_data["edit_mainfeat_page"] = int(page)
     await query.edit_message_text("Введите новое название характеристики:", reply_markup=CANCEL_KEYBOARD)
     return EDIT_MAIN_FEATURE_NAME
+
 
 async def edit_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -1219,9 +1333,10 @@ async def edit_mainfeat_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await show_main_features(update, context, context.user_data.get("edit_mainfeat_page", 0))
     return ConversationHandler.END
 
+
 async def delete_mainfeat_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     feat_id = int(parts[3])
     page = int(parts[4])
@@ -1235,15 +1350,17 @@ async def delete_mainfeat_confirm(update: Update, context: ContextTypes.DEFAULT_
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return DELETE_MAIN_FEATURE_CONFIRM
 
+
 async def delete_mainfeat_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     feat_id = context.user_data["del_mainfeat_id"]
     page = context.user_data["del_mainfeat_page"]
     await db.delete_main_feature_type(feat_id)
     await query.edit_message_text("✅ Характеристика удалена.")
     await show_main_features(update, context, page)
     return ConversationHandler.END
+
 
 # ------------------------- Управление материалами (просмотр и выбор типа) -------------------------
 async def show_material_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0, new_message: bool = False):
@@ -1270,24 +1387,26 @@ async def show_material_type_choice(update: Update, context: ContextTypes.DEFAUL
             nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"mat_choice_page_{page+1}"))
         if nav:
             keyboard.append(nav)
-        # Кнопка добавления материала (без предустановленного типа)
         keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
         keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
     context.user_data["mat_choice_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=new_message)
 
+
 async def material_choice_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_material_type_choice(update, context, page)
 
+
 async def material_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = int(query.data.split("_")[-1])
     context.user_data["materials_type_id"] = type_id
     await show_materials(update, context, type_id, 0)
+
 
 async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, type_id: int, page: int = 0, new_message: bool = False):
     limit = 8
@@ -1321,7 +1440,6 @@ async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, typ
         nav.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"materials_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    # Кнопка добавления материала (без предустановленного типа)
     keyboard.append([InlineKeyboardButton("➕ Добавить материал", callback_data="mat_add")])
     keyboard.append([InlineKeyboardButton("🔄 Сменить тип", callback_data="mat_choice_back")])
     keyboard.append([InlineKeyboardButton("◀ Главное меню", callback_data="main_menu")])
@@ -1329,9 +1447,10 @@ async def show_materials(update: Update, context: ContextTypes.DEFAULT_TYPE, typ
     context.user_data["materials_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=new_message)
 
+
 async def materials_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     type_id = context.user_data.get("materials_type_id")
     if type_id is None:
@@ -1340,9 +1459,10 @@ async def materials_page_callback(update: Update, context: ContextTypes.DEFAULT_
         return
     await show_materials(update, context, type_id, page)
 
+
 async def material_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     mat_id = int(parts[2])
     type_id = int(parts[3])
@@ -1363,9 +1483,10 @@ async def material_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+
 async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     mat_id = int(parts[3])
     type_id = int(parts[4])
@@ -1375,72 +1496,67 @@ async def material_view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
         await send_material_photo(update.effective_chat.id, material['code'], context)
     else:
         await query.edit_message_text("❌ Материал не найден.")
+        return
     await material_details(update, context)
 
-# ------------------------- НОВАЯ ЛОГИКА ДОБАВЛЕНИЯ МАТЕРИАЛА (ВСЕГДА ЗАПРАШИВАЕТ ТИП) -------------------------
+
+# ------------------------- Добавление материала -------------------------
 async def start_add_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Единая точка входа для добавления материала.
-    Всегда показывает выбор типа материала.
-    """
     query = update.callback_query
-    await query.answer()
-    # Показываем выбор типа
+    await safe_answer(query)
     types, _ = await db.get_material_types(0, 1000)
     if not types:
         await query.edit_message_text("❌ Нет типов материалов. Сначала создайте тип материала.")
         return ConversationHandler.END
-
     keyboard = [[InlineKeyboardButton(t['name'], callback_data=f"mat_add_type_{t['id']}")] for t in types]
     keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="main_menu")])
-    await query.edit_message_text("Выберите *тип материала*:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("Выберите *тип материала*:", parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_MAT_SELECT_TYPE
 
+
 async def add_material_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик выбора типа материала."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = int(query.data.split("_")[-1])
     context.user_data["new_mat_type_id"] = type_id
-    # Сохраняем тип для возврата
     context.user_data["return_mat_type_id"] = type_id
     context.user_data["return_mat_page"] = 0
-    await query.edit_message_text("Введите *код* материала (уникальный):", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    await query.edit_message_text("Введите *код* материала (уникальный):", parse_mode="Markdown",
+                                  reply_markup=CANCEL_KEYBOARD)
     return ADD_MAT_CODE
 
+
 async def add_material_code_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ввода кода материала."""
     code = update.message.text.strip()
     if not await db.is_material_code_unique(code):
-        await update.message.reply_text("❌ Материал с таким кодом уже существует. Введите другой код:", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Материал с таким кодом уже существует. Введите другой код:",
+                                        reply_markup=CANCEL_KEYBOARD)
         return ADD_MAT_CODE
     context.user_data["new_mat_code"] = code
-    await update.message.reply_text("Введите *название* материала:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    await update.message.reply_text("Введите *название* материала:", parse_mode="Markdown",
+                                    reply_markup=CANCEL_KEYBOARD)
     return ADD_MAT_NAME
 
+
 async def add_material_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ввода названия материала. Создаёт материал и завершает."""
     name = update.message.text
     code = context.user_data["new_mat_code"]
     type_id = context.user_data["new_mat_type_id"]
     chat_id = update.effective_chat.id
-
     try:
-        mat_id = await db.create_material(code, name, type_id)
+        await db.create_material(code, name, type_id)
         await context.bot.send_message(chat_id=chat_id, text=f"✅ Материал создан, код: `{code}`.", parse_mode="Markdown")
     except Exception as e:
         logger.exception("Ошибка при создании материала в БД")
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Ошибка при создании материала: {e}")
-        # Очищаем временные данные
         context.user_data.pop("new_mat_code", None)
         context.user_data.pop("new_mat_name", None)
         context.user_data.pop("new_mat_type_id", None)
         return ConversationHandler.END
 
-    # Возвращаемся к списку материалов выбранного типа
     return_type_id = context.user_data.pop("return_mat_type_id", None)
     return_page = context.user_data.pop("return_mat_page", 0)
-    # Очищаем остальные временные данные
     context.user_data.pop("new_mat_code", None)
     context.user_data.pop("new_mat_name", None)
     context.user_data.pop("new_mat_type_id", None)
@@ -1451,10 +1567,11 @@ async def add_material_name_handler(update: Update, context: ContextTypes.DEFAUL
         await show_material_type_choice(update, context, 0, new_message=True)
     return ConversationHandler.END
 
+
 # ------------------------- Редактирование материала -------------------------
 async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     mat_id = int(parts[2])
     type_id = int(parts[3])
@@ -1482,11 +1599,13 @@ async def material_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return EDIT_MAT_SELECT
 
+
 async def material_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await query.edit_message_text("Введите новое название материала:", reply_markup=CANCEL_KEYBOARD)
     return EDIT_MAT_NAME
+
 
 async def material_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -1497,11 +1616,13 @@ async def material_update_name(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
+
 async def material_edit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await query.edit_message_text("Введите новый код материала (уникальный):", reply_markup=CANCEL_KEYBOARD)
     return EDIT_MAT_CODE
+
 
 async def material_update_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_code = update.message.text.strip()
@@ -1517,9 +1638,10 @@ async def material_update_code(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
+
 async def material_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     types, _ = await db.get_material_types(0, 1000)
     if not types:
         await query.edit_message_text("❌ Нет типов материалов. Сначала создайте тип.")
@@ -1529,33 +1651,36 @@ async def material_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text("Выберите новый тип материала:", reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_MAT_TYPE
 
+
 async def material_update_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     new_type_id = int(query.data.split("_")[-1])
     mat_id = context.user_data["edit_mat_id"]
     material = await db.get_material_by_id(mat_id)
     await db.update_material(mat_id, material['code'], material['name'], new_type_id)
     await query.edit_message_text("✅ Тип материала обновлён.")
-    # Обновляем контекст на новый тип и переходим к списку материалов нового типа
     context.user_data["edit_mat_type_id"] = new_type_id
     await show_materials(update, context, new_type_id, 0)
     return ConversationHandler.END
 
+
 async def material_edit_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Отправьте новое фото для материала (одно изображение) или нажмите «Удалить фото», чтобы удалить существующее.",
-                                  reply_markup=InlineKeyboardMarkup([
-                                      [InlineKeyboardButton("🗑️ Удалить фото", callback_data="mat_delete_photo")],
-                                      [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]]
-                                  ))
+    await safe_answer(query)
+    await query.edit_message_text(
+        "Отправьте новое фото для материала (одно изображение) или нажмите «Удалить фото», чтобы удалить существующее.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗑️ Удалить фото", callback_data="mat_delete_photo")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]]
+        ))
     return EDIT_MAT_PHOTO
+
 
 async def material_update_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         if query.data == "mat_delete_photo":
             mat_id = context.user_data["edit_mat_id"]
             material = await db.get_material_by_id(mat_id)
@@ -1591,9 +1716,10 @@ async def material_update_photo(update: Update, context: ContextTypes.DEFAULT_TY
     await show_materials(update, context, context.user_data["edit_mat_type_id"], context.user_data["edit_mat_page"])
     return ConversationHandler.END
 
+
 async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     mat_id = context.user_data["edit_mat_id"]
     material = await db.get_material_by_id(mat_id)
     keyboard = [
@@ -1604,9 +1730,10 @@ async def material_edit_delete(update: Update, context: ContextTypes.DEFAULT_TYP
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return DELETE_MAT_CONFIRM
 
+
 async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     mat_id = context.user_data.get("edit_mat_id")
     page = context.user_data.get("edit_mat_page", 0)
     type_id = context.user_data.get("edit_mat_type_id")
@@ -1632,10 +1759,11 @@ async def material_delete_execute(update: Update, context: ContextTypes.DEFAULT_
         await show_material_type_choice(update, context)
     return ConversationHandler.END
 
+
 # ------------------------- Основные характеристики товара -------------------------
 async def product_main_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["mainfeat_prod_id"] = prod_id
     features = await db.get_product_main_features(prod_id)
@@ -1644,14 +1772,16 @@ async def product_main_features_menu(update: Update, context: ContextTypes.DEFAU
     for f in features:
         value_display = f['value'][:40] + "…" if len(f['value']) > 40 else f['value']
         text += f"• **{f['feature_name']}**: {value_display}\n"
-        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"prod_mainfeat_edit_{f['feature_id']}_{prod_id}")])
+        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}",
+                                              callback_data=f"prod_mainfeat_edit_{f['feature_id']}_{prod_id}")])
     keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return PROD_MAIN_FEATURES
 
+
 async def product_main_feature_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     feature_id = int(parts[3])
     prod_id = int(parts[4])
@@ -1659,6 +1789,7 @@ async def product_main_feature_edit(update: Update, context: ContextTypes.DEFAUL
     context.user_data["edit_mainfeat_prod_id"] = prod_id
     await query.edit_message_text("Введите новое значение для этой характеристики:", reply_markup=CANCEL_KEYBOARD)
     return PROD_MAIN_FEATURE_EDIT
+
 
 async def product_main_feature_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value = update.message.text
@@ -1672,17 +1803,24 @@ async def product_main_feature_save(update: Update, context: ContextTypes.DEFAUL
     for f in features:
         value_display = f['value'][:40] + "…" if len(f['value']) > 40 else f['value']
         text += f"• **{f['feature_name']}**: {value_display}\n"
-        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}", callback_data=f"prod_mainfeat_edit_{f['feature_id']}_{prod_id}")])
+        keyboard.append([InlineKeyboardButton(f"✏️ {f['feature_name']}",
+                                              callback_data=f"prod_mainfeat_edit_{f['feature_id']}_{prod_id}")])
     keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return PROD_MAIN_FEATURES
 
+
 # ------------------------- Дополнительные характеристики товара -------------------------
 async def product_extra_features_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["extra_prod_id"] = prod_id
+    await _render_extra_features(update, context, prod_id, edit=True)
+    return PROD_EXTRA_FEATURES
+
+
+async def _render_extra_features(update: Update, context, prod_id: int, edit: bool = False):
     features = await db.get_product_extra_features(prod_id)
     text = "*Дополнительные характеристики*\n\n"
     keyboard = []
@@ -1694,16 +1832,21 @@ async def product_extra_features_menu(update: Update, context: ContextTypes.DEFA
         ])
     keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
     keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return PROD_EXTRA_FEATURES
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                       reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
 
 async def product_extra_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["extra_prod_id"] = prod_id
     await query.edit_message_text("Введите название дополнительной характеристики:", reply_markup=CANCEL_KEYBOARD)
     return PROD_EXTRA_FEATURE_ADD_NAME
+
 
 async def product_extra_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
@@ -1711,29 +1854,20 @@ async def product_extra_add_value(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("Теперь введите значение:", reply_markup=CANCEL_KEYBOARD)
     return PROD_EXTRA_FEATURE_ADD_VALUE
 
+
 async def product_extra_save_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value = update.message.text
     name = context.user_data["extra_new_name"]
     prod_id = context.user_data["extra_prod_id"]
     await db.add_product_extra_feature(prod_id, name, value)
     await update.message.reply_text("✅ Характеристика добавлена.")
-    features = await db.get_product_extra_features(prod_id)
-    text = "*Дополнительные характеристики*\n\n"
-    keyboard = []
-    for f in features:
-        text += f"• **{f['name']}**: {f['value']}\n"
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{prod_id}"),
-            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{prod_id}")
-        ])
-    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await _render_extra_features(update, context, prod_id, edit=False)
     return PROD_EXTRA_FEATURES
+
 
 async def product_extra_edit_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     feat_id = int(parts[3])
     prod_id = int(parts[4])
@@ -1747,17 +1881,20 @@ async def product_extra_edit_entry(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text("Что хотите отредактировать?", reply_markup=InlineKeyboardMarkup(keyboard))
     return PROD_EXTRA_FEATURES
 
+
 async def product_extra_edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await query.edit_message_text("Введите новое название:", reply_markup=CANCEL_KEYBOARD)
     return PROD_EXTRA_FEATURE_EDIT_NAME
 
+
 async def product_extra_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await query.edit_message_text("Введите новое значение:", reply_markup=CANCEL_KEYBOARD)
     return PROD_EXTRA_FEATURE_EDIT_VALUE
+
 
 async def product_extra_update_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -1765,19 +1902,9 @@ async def product_extra_update_name(update: Update, context: ContextTypes.DEFAUL
     await db.update_product_extra_feature(feat_id, name=new_name)
     await update.message.reply_text("✅ Название обновлено.")
     prod_id = context.user_data["edit_extra_prod_id"]
-    features = await db.get_product_extra_features(prod_id)
-    text = "*Дополнительные характеристики*\n\n"
-    keyboard = []
-    for f in features:
-        text += f"• **{f['name']}**: {f['value']}\n"
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{prod_id}"),
-            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{prod_id}")
-        ])
-    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await _render_extra_features(update, context, prod_id, edit=False)
     return PROD_EXTRA_FEATURES
+
 
 async def product_extra_update_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_value = update.message.text
@@ -1785,47 +1912,28 @@ async def product_extra_update_value(update: Update, context: ContextTypes.DEFAU
     await db.update_product_extra_feature(feat_id, value=new_value)
     await update.message.reply_text("✅ Значение обновлено.")
     prod_id = context.user_data["edit_extra_prod_id"]
-    features = await db.get_product_extra_features(prod_id)
-    text = "*Дополнительные характеристики*\n\n"
-    keyboard = []
-    for f in features:
-        text += f"• **{f['name']}**: {f['value']}\n"
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{prod_id}"),
-            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{prod_id}")
-        ])
-    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await _render_extra_features(update, context, prod_id, edit=False)
     return PROD_EXTRA_FEATURES
+
 
 async def product_extra_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     feat_id = int(parts[3])
     prod_id = int(parts[4])
     await db.delete_product_extra_feature(feat_id)
-    features = await db.get_product_extra_features(prod_id)
-    text = "*Дополнительные характеристики*\n\n"
-    keyboard = []
-    for f in features:
-        text += f"• **{f['name']}**: {f['value']}\n"
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {f['name']}", callback_data=f"prod_extra_edit_{f['id']}_{prod_id}"),
-            InlineKeyboardButton("🗑️", callback_data=f"prod_extra_del_{f['id']}_{prod_id}")
-        ])
-    keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data=f"prod_extra_add_{prod_id}")])
-    keyboard.append([InlineKeyboardButton("◀ Назад к товару", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await _render_extra_features(update, context, prod_id, edit=True)
     return PROD_EXTRA_FEATURES
+
 
 async def product_extra_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
+
 
 # ------------------------- Управление фото товаров -------------------------
 async def show_photo_management(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int):
@@ -1844,9 +1952,10 @@ async def show_photo_management(update: Update, context: ContextTypes.DEFAULT_TY
     await send_or_edit_message(update, context, "📸 *Управление фото товара*\nВыберите действие:",
                                InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def manage_photos_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     data = query.data
     if data.startswith("prod_manage_photos_"):
         prod_id = int(data.split("_")[-1])
@@ -1858,9 +1967,10 @@ async def manage_photos_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     await show_photo_management(update, context, prod_id)
     return PHOTO_MANAGE
 
+
 async def photo_add_select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     keyboard = [
         [InlineKeyboardButton("📐 Size (схема)", callback_data="photo_type_size")],
         [InlineKeyboardButton("🔢 Основное фото", callback_data="photo_type_main")],
@@ -1868,9 +1978,10 @@ async def photo_add_select_type(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text("Выберите тип фото:", reply_markup=InlineKeyboardMarkup(keyboard))
     return PHOTO_ADD_TYPE_SELECT
 
+
 async def photo_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     photo_type = query.data.split("_")[-1]
     context.user_data["temp_photo_type"] = photo_type
     if photo_type == "main":
@@ -1886,12 +1997,12 @@ async def photo_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
                 [InlineKeyboardButton("❌ Отменить", callback_data="cancel_main_photos")]
             ])
         )
-        context.user_data["photo_main_message_id"] = query.message.message_id
         return PHOTO_ADD_MAIN_COLLECT
     else:
         await query.edit_message_text("Отправьте *одно фото* (будет сохранено как Size).",
                                       parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
         return PHOTO_ADD_WAIT
+
 
 async def photo_add_wait(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
@@ -1910,10 +2021,11 @@ async def photo_add_wait(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_product_edit(update, context, context.user_data["photo_prod_id"])
     return ConversationHandler.END
 
+
 async def photo_add_main_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         data = query.data
         if data == "send_main_photos":
             chat_id = context.user_data.get("photo_main_chat_id")
@@ -1925,7 +2037,8 @@ async def photo_add_main_collect(update: Update, context: ContextTypes.DEFAULT_T
                     logger.warning(f"Не удалось удалить сообщение: {e}")
             buffer = context.user_data.get("main_photos_buffer", [])
             if not buffer:
-                await context.bot.send_message(chat_id=chat_id, text="❌ Нет фото для сохранения. Отправьте хотя бы одно фото.")
+                await context.bot.send_message(chat_id=chat_id,
+                                               text="❌ Нет фото для сохранения. Отправьте хотя бы одно фото.")
                 await show_product_edit(update, context, context.user_data["photo_prod_id"])
                 return ConversationHandler.END
             prod_code = context.user_data["photo_prod_code"]
@@ -2011,9 +2124,10 @@ async def photo_add_main_collect(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Не удалось скачать фото. Попробуйте ещё раз.")
     return PHOTO_ADD_MAIN_COLLECT
 
+
 async def photo_delete_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_code = context.user_data["photo_prod_code"]
     prod_id = context.user_data["photo_prod_id"]
     photos = get_product_photos(prod_code)
@@ -2032,12 +2146,14 @@ async def photo_delete_select(update: Update, context: ContextTypes.DEFAULT_TYPE
         await show_photo_management(update, context, prod_id)
         return PHOTO_MANAGE
     keyboard.append([InlineKeyboardButton("◀ Отмена", callback_data="photo_cancel")])
-    await query.edit_message_text("Фото отправлены выше. Выберите, что удалить:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("Фото отправлены выше. Выберите, что удалить:",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
     return PHOTO_DELETE_SELECT
+
 
 async def photo_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     data = query.data
     prod_code = context.user_data["photo_prod_code"]
     if data == "photo_del_preview":
@@ -2055,9 +2171,10 @@ async def photo_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_product_edit(update, context, context.user_data["photo_prod_id"])
     return ConversationHandler.END
 
+
 async def photo_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_code = context.user_data.get("photo_prod_code")
     prod_id = context.user_data.get("photo_prod_id")
     if prod_code and prod_id:
@@ -2067,15 +2184,17 @@ async def photo_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Ошибка: данные товара не найдены.")
     return PHOTO_MANAGE
 
+
 async def photo_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await show_product_edit(update, context, context.user_data["photo_prod_id"])
     return ConversationHandler.END
 
+
 async def details_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     product = await db.get_product_by_id(prod_id)
     if product:
@@ -2084,21 +2203,27 @@ async def details_photos_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("❌ Товар не найден.")
     await show_product_details(update, context, prod_id)
 
-# ------------------------- Добавление товара, удаление, редактирование полей -------------------------
+
+# ------------------------- Добавление/удаление/редактирование товара -------------------------
 async def add_product_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("Введите *название* товара:", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    await safe_answer(update.callback_query)
+    await update.callback_query.edit_message_text("Введите *название* товара:", parse_mode="Markdown",
+                                                  reply_markup=CANCEL_KEYBOARD)
     return ADD_PROD_NAME
+
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_prod_name"] = update.message.text
-    await update.message.reply_text("Введите *код* товара (уникальный):", parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    await update.message.reply_text("Введите *код* товара (уникальный):", parse_mode="Markdown",
+                                    reply_markup=CANCEL_KEYBOARD)
     return ADD_PROD_CODE
+
 
 async def add_product_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = update.message.text.strip()
     if not await db.is_code_unique(code):
-        await update.message.reply_text("❌ Товар с таким кодом уже существует. Введите другой код:", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Товар с таким кодом уже существует. Введите другой код:",
+                                        reply_markup=CANCEL_KEYBOARD)
         return ADD_PROD_CODE
     context.user_data["new_prod_code"] = code
     types, _ = await db.get_product_types(0, 1000)
@@ -2111,9 +2236,10 @@ async def add_product_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите тип товара:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_PROD_TYPE_SELECT
 
+
 async def add_product_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = int(query.data.split("_")[-1])
     code = context.user_data["new_prod_code"]
     prod_id = await db.create_product(code, context.user_data["new_prod_name"], type_id)
@@ -2122,9 +2248,10 @@ async def add_product_type_selected(update: Update, context: ContextTypes.DEFAUL
     await show_product_edit(update, context, prod_id, new_message=True)
     return ConversationHandler.END
 
+
 async def delete_product_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     product = await db.get_product_by_id(prod_id)
     if not product:
@@ -2137,9 +2264,10 @@ async def delete_product_confirm_callback(update: Update, context: ContextTypes.
     await query.edit_message_text(f"Удалить товар *{product['name']}* (код {product['code']}) навсегда?",
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+
 async def delete_product_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     product = await db.get_product_by_id(prod_id)
     if product:
@@ -2148,19 +2276,22 @@ async def delete_product_execute(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text("✅ Товар удалён вместе со всеми связями (флаги, цены, фото, характеристики).")
     await show_products(update, context)
 
+
 async def edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
 
+
 async def edit_product_name_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     await query.edit_message_text("Введите новое название товара:", reply_markup=CANCEL_KEYBOARD)
     return EDIT_PROD_NAME
+
 
 async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_name = update.message.text
@@ -2171,20 +2302,23 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_code_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     await query.edit_message_text("Введите новый код товара:", reply_markup=CANCEL_KEYBOARD)
     return EDIT_PROD_CODE
+
 
 async def edit_product_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_code = update.message.text.strip()
     prod_id = context.user_data["edit_prod_id"]
     prod = await db.get_product_by_id(prod_id)
     if not await db.is_code_unique(new_code, exclude_product_id=prod_id):
-        await update.message.reply_text("❌ Товар с таким кодом уже существует. Введите другой код:", reply_markup=CANCEL_KEYBOARD)
+        await update.message.reply_text("❌ Товар с таким кодом уже существует. Введите другой код:",
+                                        reply_markup=CANCEL_KEYBOARD)
         return EDIT_PROD_CODE
     old_code = prod["code"]
     await db.update_product(prod_id, new_code, prod["name"], prod["products_type_id"])
@@ -2193,9 +2327,10 @@ async def edit_product_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_type_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     types, _ = await db.get_product_types(0, 1000)
@@ -2207,9 +2342,10 @@ async def edit_product_type_entry(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text("Выберите новый тип товара:", reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PROD_TYPE_SELECT
 
+
 async def edit_product_type_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     new_type_id = int(query.data.split("_")[-1])
     prod_id = context.user_data["edit_prod_id"]
     prod = await db.get_product_by_id(prod_id)
@@ -2218,9 +2354,10 @@ async def edit_product_type_update(update: Update, context: ContextTypes.DEFAULT
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_flags_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     all_flags, _ = await db.get_flags(0, 1000)
@@ -2237,9 +2374,10 @@ async def edit_product_flags_start(update: Update, context: ContextTypes.DEFAULT
                                   reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PROD_FLAGS
 
+
 async def edit_product_toggle_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     flag_id = int(parts[3])
     prod_id = int(parts[4])
@@ -2256,11 +2394,16 @@ async def edit_product_toggle_flag(update: Update, context: ContextTypes.DEFAULT
         keyboard.append([InlineKeyboardButton(f"{checked}{f['name']}", callback_data=f"prod_toggle_flag_{f['id']}_{prod_id}")])
     keyboard.append([InlineKeyboardButton("💾 Сохранить и выйти", callback_data=f"prod_save_flags_{prod_id}")])
     keyboard.append([InlineKeyboardButton("◀ Отмена", callback_data=f"prod_edit_cancel_{prod_id}")])
-    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            logger.debug(f"edit_message_reply_markup: {e}")
+
 
 async def edit_product_save_flags(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     flag_ids = list(context.user_data.get("prod_flags_current", set()))
     await db.set_product_flags(prod_id, flag_ids)
@@ -2268,9 +2411,10 @@ async def edit_product_save_flags(update: Update, context: ContextTypes.DEFAULT_
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_costs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     costs = await db.get_costs_for_product(prod_id)
@@ -2287,23 +2431,27 @@ async def edit_product_costs_menu(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PROD_COST_MENU
 
+
 async def edit_product_cost_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     material_types, _ = await db.get_material_types(0, 1000)
     if not material_types:
         await query.edit_message_text("Нет типов материалов. Сначала создайте хотя бы один.")
         return ConversationHandler.END
-    keyboard = [[InlineKeyboardButton(mt['name'], callback_data=f"cost_add_type_{mt['id']}_{prod_id}")] for mt in material_types]
+    keyboard = [[InlineKeyboardButton(mt['name'], callback_data=f"cost_add_type_{mt['id']}_{prod_id}")]
+                for mt in material_types]
     keyboard.append([InlineKeyboardButton("◀ Отмена", callback_data=f"prod_cost_cancel_{prod_id}")])
-    await query.edit_message_text("Выберите тип материала для добавления/изменения стоимости:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("Выберите тип материала для добавления/изменения стоимости:",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PROD_COST_ADD_TYPE
+
 
 async def edit_product_cost_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     mt_id = int(parts[3])
     prod_id = int(parts[4])
@@ -2311,6 +2459,7 @@ async def edit_product_cost_type_selected(update: Update, context: ContextTypes.
     context.user_data["edit_prod_id"] = prod_id
     await query.edit_message_text("Введите стоимость в рублях (целое число):", reply_markup=CANCEL_KEYBOARD)
     return EDIT_PROD_COST_VALUE
+
 
 async def edit_product_cost_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -2327,23 +2476,26 @@ async def edit_product_cost_value(update: Update, context: ContextTypes.DEFAULT_
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_cost_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     context.user_data["edit_prod_id"] = prod_id
     costs = await db.get_costs_for_product(prod_id)
     if not costs:
         await query.edit_message_text("Нет записей стоимости для удаления.")
         return ConversationHandler.END
-    keyboard = [[InlineKeyboardButton(f"{c['material_name']} – {c['cost']}₽", callback_data=f"cost_del_{c['id']}_{prod_id}")] for c in costs]
+    keyboard = [[InlineKeyboardButton(f"{c['material_name']} – {c['cost']}₽", callback_data=f"cost_del_{c['id']}_{prod_id}")]
+                for c in costs]
     keyboard.append([InlineKeyboardButton("◀ Отмена", callback_data=f"prod_cost_cancel_{prod_id}")])
     await query.edit_message_text("Выберите запись стоимости для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PROD_COST_DELETE
 
+
 async def edit_product_cost_delete_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     parts = query.data.split("_")
     cost_id = int(parts[2])
     prod_id = int(parts[3])
@@ -2352,22 +2504,25 @@ async def edit_product_cost_delete_execute(update: Update, context: ContextTypes
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def edit_product_cost_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
     return ConversationHandler.END
 
+
 async def refresh_min_cost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await db.update_min_cost(prod_id)
     await query.edit_message_text("🔄 Минимальная цена пересчитана.")
     await show_product_edit(update, context, prod_id)
 
-# ------------------------- Отображение товаров с пагинацией -------------------------
+
+# ------------------------- Отображение товаров -------------------------
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         search: str = None, type_id: int = None, flag_ids: List[int] = None,
                         page: int = 0):
@@ -2416,26 +2571,30 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE,
     context.user_data["products_flag_ids"] = flag_ids
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def products_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     search = context.user_data.get("products_search")
     type_id = context.user_data.get("products_type_id")
     flag_ids = context.user_data.get("products_flag_ids")
     await show_products(update, context, search=search, type_id=type_id, flag_ids=flag_ids, page=page)
 
+
 async def product_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_details(update, context, prod_id)
 
+
 async def product_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     prod_id = int(query.data.split("_")[-1])
     await show_product_edit(update, context, prod_id)
+
 
 async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
@@ -2473,6 +2632,7 @@ async def show_product_details(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
+
 
 async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, prod_id: int, new_message: bool = False):
     product = await db.get_product_by_id(prod_id)
@@ -2514,10 +2674,11 @@ async def show_product_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     ]
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message)
 
+
 # ------------------------- Расширенный поиск -------------------------
 async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     keyboard = [
         [InlineKeyboardButton("🔍 Поиск по ключевому слову", callback_data="search_keyword")],
         [InlineKeyboardButton("🏷️ Поиск по типу и флагам", callback_data="search_advanced")],
@@ -2525,24 +2686,28 @@ async def search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text("Выберите способ поиска:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+
 async def search_keyword_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+    await safe_answer(update.callback_query)
     await update.callback_query.edit_message_text("🔍 Введите ключевое слово для поиска (по названию или коду):",
                                                   reply_markup=CANCEL_KEYBOARD)
     return SEARCH_KEYWORD
+
 
 async def search_keyword_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = update.message.text
     await show_products(update, context, search=keyword, page=0)
     return ConversationHandler.END
 
+
 async def search_advanced_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     context.user_data["search_type_id"] = None
     context.user_data["search_flag_ids"] = set()
     await show_type_selection(update, context)
     return SEARCH_TYPE_SELECT
+
 
 async def show_type_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
@@ -2577,21 +2742,25 @@ async def show_type_selection(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["search_type_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def search_type_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = int(query.data.split("_")[-1])
     current = context.user_data.get("search_type_id")
     context.user_data["search_type_id"] = None if current == type_id else type_id
     await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
 
+
 async def search_type_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["search_type_id"] = None
     await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
 
+
 async def search_type_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_flag_selection(update, context)
     return SEARCH_FLAGS_SELECT
+
 
 async def show_flag_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     limit = 8
@@ -2626,9 +2795,10 @@ async def show_flag_selection(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["search_flag_page"] = page
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def search_flag_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     flag_id = int(query.data.split("_")[-1])
     selected = context.user_data.get("search_flag_ids", set())
     if flag_id in selected:
@@ -2638,13 +2808,15 @@ async def search_flag_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["search_flag_ids"] = selected
     await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
 
+
 async def search_flag_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["search_flag_ids"] = set()
     await show_flag_selection(update, context, context.user_data.get("search_flag_page", 0))
 
+
 async def search_flag_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     type_id = context.user_data.get("search_type_id")
     flag_ids = list(context.user_data.get("search_flag_ids", set()))
     await show_products(update, context, search=None, type_id=type_id, flag_ids=flag_ids, page=0)
@@ -2652,9 +2824,11 @@ async def search_flag_finish(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("search_flag_ids", None)
     return ConversationHandler.END
 
+
 async def search_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_type_selection(update, context, context.user_data.get("search_type_page", 0))
     return SEARCH_TYPE_SELECT
+
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("return_mat_type_id") is not None:
@@ -2663,14 +2837,42 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_materials(update, context, type_id, page)
         return ConversationHandler.END
     if update.callback_query:
-        await update.callback_query.edit_message_text("Операция отменена.")
+        try:
+            await update.callback_query.edit_message_text("Операция отменена.")
+        except Exception:
+            pass
         await show_main_menu(update, context, new_message=True)
     else:
         await update.message.reply_text("Операция отменена.")
         await show_main_menu(update, context, new_message=True)
     return ConversationHandler.END
 
-# ------------------------- ГАЛЕРЕЯ ПРОЕКТОВ -------------------------
+
+# =====================================================================
+# =======================  ГАЛЕРЕЯ ПРОЕКТОВ  ==========================
+# =====================================================================
+
+PROJECT_NAME_FORMAT = "%Y-%m-%d-%H-%M-%S"
+
+
+def _project_name_from_now() -> str:
+    return datetime.now().strftime(PROJECT_NAME_FORMAT)
+
+
+def _generate_unique_project_name() -> str:
+    """Генерирует уникальное имя проекта в формате гггг-мм-дд-чч-мм-сс."""
+    base = _project_name_from_now()
+    name = base
+    counter = 1
+    while (GALLERY_BASE / name).exists():
+        name = f"{base}-{counter}"
+        counter += 1
+        # защита от бесконечного цикла на всякий случай
+        if counter > 1000:
+            raise RuntimeError("Не удалось сгенерировать уникальное имя проекта")
+    return name
+
+
 def get_gallery_projects() -> List[str]:
     if not GALLERY_BASE.exists():
         return []
@@ -2678,8 +2880,10 @@ def get_gallery_projects() -> List[str]:
     items.sort(reverse=True)
     return items
 
+
 def get_project_path(project_name: str) -> Path:
     return GALLERY_BASE / project_name
+
 
 def get_project_description(project_name: str) -> str:
     path = get_project_path(project_name) / "description.txt"
@@ -2687,14 +2891,18 @@ def get_project_description(project_name: str) -> str:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return f.read().strip()
-        except:
+        except Exception:
             return ""
     return ""
 
+
 def set_project_description(project_name: str, text: str):
-    path = get_project_path(project_name) / "description.txt"
+    project_dir = get_project_path(project_name)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    path = project_dir / "description.txt"
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+
 
 def get_project_photo_paths(project_name: str) -> List[Path]:
     project_dir = get_project_path(project_name)
@@ -2704,8 +2912,10 @@ def get_project_photo_paths(project_name: str) -> List[Path]:
     files.sort(key=lambda x: int(x.stem))
     return files
 
+
 def get_project_photo_count(project_name: str) -> int:
     return len(get_project_photo_paths(project_name))
+
 
 async def save_gallery_photo(file, project_name: str) -> bool:
     try:
@@ -2718,16 +2928,14 @@ async def save_gallery_photo(file, project_name: str) -> bool:
         project_dir = get_project_path(project_name)
         project_dir.mkdir(parents=True, exist_ok=True)
         existing = get_project_photo_paths(project_name)
-        if existing:
-            next_num = max(int(p.stem) for p in existing) + 1
-        else:
-            next_num = 1
+        next_num = (max(int(p.stem) for p in existing) + 1) if existing else 1
         filepath = project_dir / f"{next_num}.webp"
         img.save(filepath, 'WEBP', quality=85)
         return True
     except Exception as e:
         logger.error(f"Ошибка сохранения фото галереи: {e}")
         return False
+
 
 async def delete_gallery_photo(project_name: str, index: int) -> bool:
     project_dir = get_project_path(project_name)
@@ -2745,14 +2953,45 @@ async def delete_gallery_photo(project_name: str, index: int) -> bool:
         new_index += 1
     return True
 
+
 async def delete_project_folder(project_name: str):
     path = get_project_path(project_name)
     if path.exists():
-        shutil.rmtree(path)
+        try:
+            shutil.rmtree(path)
+        except Exception as e:
+            logger.error(f"Ошибка удаления папки проекта {project_name}: {e}")
+
+
+async def send_project_photos(chat_id: int, project_name: str, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет все фото проекта. Файлы корректно закрываются."""
+    paths = get_project_photo_paths(project_name)
+    if not paths:
+        return
+    for i in range(0, len(paths), 10):
+        chunk = paths[i:i + 10]
+        opened = []
+        media = []
+        try:
+            for p in chunk:
+                f = open(p, 'rb')
+                opened.append(f)
+                media.append(InputMediaPhoto(media=f))
+            await context.bot.send_media_group(chat_id=chat_id, media=media)
+        except Exception as e:
+            logger.error(f"Ошибка отправки медиагруппы проекта: {e}")
+        finally:
+            for f in opened:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
 
 @admin_only
 async def gallery_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_gallery(update, context, page=0)
+
 
 async def show_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     projects = get_gallery_projects()
@@ -2761,6 +3000,8 @@ async def show_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE, page:
     total_pages = (total + PER_PAGE - 1) // PER_PAGE if total > 0 else 1
     if page >= total_pages:
         page = total_pages - 1
+    if page < 0:
+        page = 0
     start = page * PER_PAGE
     end = min(start + PER_PAGE, total)
     page_projects = projects[start:end]
@@ -2791,117 +3032,189 @@ async def show_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE, page:
 
     await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
 
+
 async def gallery_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     page = int(query.data.split("_")[-1])
     await show_gallery(update, context, page)
+
 
 @admin_only
 async def gallery_view_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     project_name = query.data.split("_", 2)[2]
+    if not get_project_path(project_name).exists():
+        await query.edit_message_text("❌ Проект не найден.")
+        return
     context.user_data["gallery_project"] = project_name
     desc = get_project_description(project_name)
-    photos = get_project_photo_paths(project_name)
-    text = f"🖼️ *Проект {project_name}*\n\n📝 *Описание:*\n{desc}\n\n📷 *Фото:* {len(photos)} шт."
+    photo_count = get_project_photo_count(project_name)
+    text = f"🖼️ *Проект {project_name}*\n\n📝 *Описание:*\n{desc or '(пусто)'}\n\n📷 *Фото:* {photo_count} шт."
 
-    if photos:
-        media_group = []
-        for p in photos:
-            with open(p, 'rb') as f:
-                media_group.append(InputMediaPhoto(media=f.read()))
-        if media_group:
-            for i in range(0, len(media_group), 10):
-                await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media_group[i:i+10])
+    # Отправляем фото альбомами
+    await send_project_photos(update.effective_chat.id, project_name, context)
 
     keyboard = [
         [InlineKeyboardButton("✏️ Редактировать", callback_data=f"gallery_edit_{project_name}")],
         [InlineKeyboardButton("◀ Назад к списку", callback_data="gallery_back")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
-    await send_or_edit_message(update, context, text, InlineKeyboardMarkup(keyboard), new_message=False)
+    # Пытаемся отредактировать исходное сообщение
+    try:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except BadRequest as e:
+        if "not modified" in str(e).lower():
+            pass
+        else:
+            # Если текст слишком длинный и т.п. — отправим новое
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                               reply_markup=InlineKeyboardMarkup(keyboard),
+                                               parse_mode="Markdown")
+            except Exception as e2:
+                logger.error(f"send_message после view_project: {e2}")
+
 
 @admin_only
 async def gallery_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_gallery(update, context, 0)
 
+
+# ------------------------- Создание проекта -------------------------
 @admin_only
 async def gallery_create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("📝 Введите *описание* для нового проекта (можно оставить пустым, отправьте пробел или '-'):",
-                                  parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
+    await safe_answer(query)
+    await query.edit_message_text(
+        "📝 Введите *описание* для нового проекта (можно оставить пустым, отправьте пробел или '-'):",
+        parse_mode="Markdown", reply_markup=CANCEL_KEYBOARD)
     return GALLERY_CREATE_DESC
+
 
 async def gallery_create_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     desc = update.message.text.strip()
-    if desc == "-" or desc == "":
+    if desc in ("-", ""):
         desc = ""
-    now = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    project_name = now
-    base_name = project_name
-    counter = 1
-    while get_project_path(project_name).exists():
-        project_name = f"{base_name}-{counter}"
-        counter += 1
+    try:
+        project_name = _generate_unique_project_name()
+    except Exception as e:
+        logger.exception("Не удалось сгенерировать имя проекта")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await show_gallery(update, context, 0)
+        return ConversationHandler.END
+
     project_dir = get_project_path(project_name)
     project_dir.mkdir(parents=True, exist_ok=True)
     if desc:
         set_project_description(project_name, desc)
-    context.user_data["gallery_new_project"] = project_name
 
-    await update.message.reply_text(f"✅ Проект создан с именем `{project_name}`.\nТеперь отправьте *фото* для этого проекта. Можно отправить несколько фото (альбомом или по одному).\nКогда закончите, нажмите кнопку «Готово».",
-                                    parse_mode="Markdown",
-                                    reply_markup=InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
-                                        [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
-                                    ]))
+    context.user_data["gallery_new_project"] = project_name
+    context.user_data["gallery_new_count"] = 0
+
+    # Отправляем одно статусное сообщение
+    msg = await update.message.reply_text(
+        f"✅ Проект `{project_name}` создан.\n\n"
+        f"📷 Отправьте *одно или несколько фото* (можно альбомом).\n"
+        f"Когда закончите — нажмите «Готово».",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+            [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+        ])
+    )
+    context.user_data["gallery_new_status_msg_id"] = msg.message_id
     return GALLERY_CREATE_PHOTOS
+
 
 async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     project_name = context.user_data.get("gallery_new_project")
     if not project_name:
-        await update.message.reply_text("❌ Ошибка: проект не определён.")
+        # Контекст потерян — выходим
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text("❌ Ошибка: проект не определён.")
+            except Exception:
+                pass
+        elif update.message:
+            await update.message.reply_text("❌ Ошибка: проект не определён.")
         return ConversationHandler.END
 
+    chat_id = update.effective_chat.id
+
+    # --- Обработка кнопок ---
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         data = query.data
         if data == "gallery_create_finish":
-            await query.edit_message_text("✅ Проект создан. Фото сохранены.")
+            count = context.user_data.get("gallery_new_count", 0)
             context.user_data.pop("gallery_new_project", None)
+            context.user_data.pop("gallery_new_count", None)
+            context.user_data.pop("gallery_new_status_msg_id", None)
+            try:
+                await query.edit_message_text(
+                    f"✅ Проект `{project_name}` сохранён (фото: {count}).",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.warning(f"edit_message_text при завершении галереи: {e}")
             await show_gallery(update, context, 0)
             return ConversationHandler.END
         elif data == "gallery_create_cancel":
             await delete_project_folder(project_name)
-            await query.edit_message_text("❌ Создание проекта отменено.")
             context.user_data.pop("gallery_new_project", None)
+            context.user_data.pop("gallery_new_count", None)
+            context.user_data.pop("gallery_new_status_msg_id", None)
+            try:
+                await query.edit_message_text("❌ Создание проекта отменено.")
+            except Exception as e:
+                logger.warning(f"edit_message_text при отмене галереи: {e}")
             await show_gallery(update, context, 0)
             return ConversationHandler.END
         else:
-            await query.edit_message_text("Неизвестная команда.")
+            # Неизвестный callback — не падаем
             return GALLERY_CREATE_PHOTOS
 
+    # --- Обработка фото ---
+    if not update.message:
+        return GALLERY_CREATE_PHOTOS
     if not update.message.photo:
-        await update.message.reply_text("❌ Пожалуйста, отправьте фото или используйте кнопку «Готово».",
-                                        reply_markup=InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
-                                            [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
-                                        ]))
+        await update.message.reply_text(
+            "❌ Пожалуйста, отправьте фото или используйте кнопку «Готово».",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+            ]))
         return GALLERY_CREATE_PHOTOS
 
     try:
         photo_file = await download_photo_with_retry(update.message.photo[-1])
         success = await save_gallery_photo(photo_file, project_name)
         if success:
-            await update.message.reply_text("📷 Фото сохранено. Отправьте ещё или нажмите «Готово».",
-                                            reply_markup=InlineKeyboardMarkup([
-                                                [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
-                                                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
-                                            ]))
+            count = context.user_data.get("gallery_new_count", 0) + 1
+            context.user_data["gallery_new_count"] = count
+            # Обновляем статусное сообщение
+            msg_id = context.user_data.get("gallery_new_status_msg_id")
+            if msg_id:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id, message_id=msg_id,
+                        text=f"✅ Проект `{project_name}` создан.\n\n"
+                             f"📷 Сохранено фото: {count}.\n"
+                             f"Отправьте ещё или нажмите «Готово».",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("✅ Готово", callback_data="gallery_create_finish")],
+                            [InlineKeyboardButton("❌ Отменить", callback_data="gallery_create_cancel")]
+                        ])
+                    )
+                except BadRequest as e:
+                    if "not modified" not in str(e).lower():
+                        logger.debug(f"edit_message_text при обновлении галереи: {e}")
+                except Exception as e:
+                    logger.debug(f"edit_message_text при обновлении галереи: {e}")
         else:
             await update.message.reply_text("❌ Ошибка сохранения фото. Попробуйте ещё раз.")
     except Exception as e:
@@ -2909,15 +3222,20 @@ async def gallery_create_photos(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ Не удалось скачать фото. Попробуйте ещё раз.")
     return GALLERY_CREATE_PHOTOS
 
+
+# ------------------------- Редактирование проекта -------------------------
 @admin_only
 async def gallery_edit_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     project_name = query.data.split("_", 2)[2]
+    if not get_project_path(project_name).exists():
+        await query.edit_message_text("❌ Проект не найден.")
+        return ConversationHandler.END
     context.user_data["gallery_edit_project"] = project_name
     desc = get_project_description(project_name)
     photo_count = get_project_photo_count(project_name)
-    text = f"✏️ *Редактирование проекта {project_name}*\n\n📝 Описание:\n{desc}\n\n📷 Фото: {photo_count} шт."
+    text = f"✏️ *Редактирование проекта {project_name}*\n\n📝 Описание:\n{desc or '(пусто)'}\n\n📷 Фото: {photo_count} шт."
     keyboard = [
         [InlineKeyboardButton("✏️ Изменить описание", callback_data="gallery_edit_desc")],
         [InlineKeyboardButton("➕ Добавить фото", callback_data="gallery_edit_add_photos")],
@@ -2926,14 +3244,22 @@ async def gallery_edit_project(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("◀ Назад к проекту", callback_data=f"gallery_view_{project_name}")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
     ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    try:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except BadRequest as e:
+        if "not modified" in str(e).lower():
+            pass
+        else:
+            logger.debug(f"gallery_edit_project edit fail: {e}")
     return GALLERY_EDIT
+
 
 async def gallery_edit_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     await query.edit_message_text("Введите новое описание (отправьте '-' чтобы очистить):", reply_markup=CANCEL_KEYBOARD)
     return GALLERY_EDIT_DESC
+
 
 async def gallery_edit_description_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_desc = update.message.text.strip()
@@ -2945,41 +3271,84 @@ async def gallery_edit_description_save(update: Update, context: ContextTypes.DE
         return ConversationHandler.END
     set_project_description(project_name, new_desc)
     await update.message.reply_text("✅ Описание обновлено.")
-    await gallery_edit_project(update, context)
+    # Возвращаемся к экрану редактирования через отправку сообщения
+    await _show_gallery_edit_menu_after_text(update, context, project_name)
     return ConversationHandler.END
+
+
+async def _show_gallery_edit_menu_after_text(update: Update, context, project_name: str):
+    desc = get_project_description(project_name)
+    photo_count = get_project_photo_count(project_name)
+    text = f"✏️ *Редактирование проекта {project_name}*\n\n📝 Описание:\n{desc or '(пусто)'}\n\n📷 Фото: {photo_count} шт."
+    keyboard = [
+        [InlineKeyboardButton("✏️ Изменить описание", callback_data="gallery_edit_desc")],
+        [InlineKeyboardButton("➕ Добавить фото", callback_data="gallery_edit_add_photos")],
+        [InlineKeyboardButton("🗑️ Удалить фото", callback_data="gallery_edit_delete_photo")],
+        [InlineKeyboardButton("🗑️ Удалить проект", callback_data="gallery_edit_delete_project")],
+        [InlineKeyboardButton("◀ Назад к проекту", callback_data=f"gallery_view_{project_name}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+    ]
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
 
 async def gallery_edit_add_photos_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("📸 Отправьте фото для добавления (можно несколько). Когда закончите, нажмите «Готово».",
-                                  reply_markup=InlineKeyboardMarkup([
-                                      [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
-                                      [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
-                                  ]))
+    await safe_answer(query)
+    project_name = context.user_data.get("gallery_edit_project")
+    if not project_name:
+        await query.edit_message_text("❌ Ошибка: проект не найден.")
+        return ConversationHandler.END
+    context.user_data["gallery_add_count"] = 0
+    try:
+        await query.edit_message_text(
+            f"📸 Отправьте фото для добавления в проект `{project_name}` (можно несколько).\n"
+            f"Когда закончите, нажмите «Готово».",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
+                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
+            ]))
+    except Exception as e:
+        logger.debug(f"add_photos_start edit fail: {e}")
     return GALLERY_EDIT_ADD_PHOTOS
+
 
 async def gallery_edit_add_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     project_name = context.user_data.get("gallery_edit_project")
     if not project_name:
-        await update.message.reply_text("❌ Ошибка: проект не найден.")
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text("❌ Ошибка: проект не найден.")
+            except Exception:
+                pass
         return ConversationHandler.END
 
     if update.callback_query:
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         data = query.data
         if data == "gallery_add_finish":
-            await query.edit_message_text("✅ Добавление фото завершено.")
-            await gallery_edit_project(update, context)
+            count = context.user_data.pop("gallery_add_count", 0)
+            try:
+                await query.edit_message_text(f"✅ Добавление фото завершено. Добавлено: {count}.")
+            except Exception as e:
+                logger.debug(f"add_finish edit fail: {e}")
+            await _show_gallery_edit_menu_after_text(update, context, project_name)
             return ConversationHandler.END
         elif data == "gallery_add_cancel":
-            await query.edit_message_text("❌ Добавление фото отменено.")
-            await gallery_edit_project(update, context)
+            context.user_data.pop("gallery_add_count", None)
+            try:
+                await query.edit_message_text("❌ Добавление фото отменено.")
+            except Exception as e:
+                logger.debug(f"add_cancel edit fail: {e}")
+            await _show_gallery_edit_menu_after_text(update, context, project_name)
             return ConversationHandler.END
         else:
-            await query.edit_message_text("Неизвестная команда.")
             return GALLERY_EDIT_ADD_PHOTOS
 
+    if not update.message:
+        return GALLERY_EDIT_ADD_PHOTOS
     if not update.message.photo:
         await update.message.reply_text("❌ Отправьте фото или нажмите кнопку «Готово».",
                                         reply_markup=InlineKeyboardMarkup([
@@ -2992,11 +3361,8 @@ async def gallery_edit_add_photos(update: Update, context: ContextTypes.DEFAULT_
         photo_file = await download_photo_with_retry(update.message.photo[-1])
         success = await save_gallery_photo(photo_file, project_name)
         if success:
-            await update.message.reply_text("📷 Фото сохранено. Отправьте ещё или нажмите «Готово».",
-                                            reply_markup=InlineKeyboardMarkup([
-                                                [InlineKeyboardButton("✅ Готово", callback_data="gallery_add_finish")],
-                                                [InlineKeyboardButton("❌ Отменить", callback_data="gallery_add_cancel")]
-                                            ]))
+            count = context.user_data.get("gallery_add_count", 0) + 1
+            context.user_data["gallery_add_count"] = count
         else:
             await update.message.reply_text("❌ Ошибка сохранения фото.")
     except Exception as e:
@@ -3004,9 +3370,10 @@ async def gallery_edit_add_photos(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("❌ Не удалось скачать фото.")
     return GALLERY_EDIT_ADD_PHOTOS
 
+
 async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     project_name = context.user_data.get("gallery_edit_project")
     if not project_name:
         await query.edit_message_text("❌ Ошибка: проект не найден.")
@@ -3014,16 +3381,11 @@ async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.
     photos = get_project_photo_paths(project_name)
     if not photos:
         await query.edit_message_text("❌ Нет фото для удаления.")
-        await gallery_edit_project(update, context)
+        await _show_gallery_edit_menu_after_text(update, context, project_name)
         return ConversationHandler.END
 
-    media_group = []
-    for p in photos:
-        with open(p, 'rb') as f:
-            media_group.append(InputMediaPhoto(media=f.read()))
-    if media_group:
-        for i in range(0, len(media_group), 10):
-            await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media_group[i:i+10])
+    # Отправляем фото и кнопки
+    await send_project_photos(update.effective_chat.id, project_name, context)
 
     keyboard = []
     for p in photos:
@@ -3033,41 +3395,44 @@ async def gallery_edit_delete_photo_start(update: Update, context: ContextTypes.
     await query.edit_message_text("Выберите номер фото для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
     return GALLERY_EDIT_DELETE
 
+
 async def gallery_edit_delete_photo_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     data = query.data
-    if data == "gallery_del_cancel":
-        await query.edit_message_text("❌ Удаление отменено.")
-        await gallery_edit_project(update, context)
-        return ConversationHandler.END
-
-    parts = data.split("_")
-    if len(parts) != 4 or parts[0] != "gallery" or parts[1] != "del" or parts[2] != "photo":
-        await query.edit_message_text("❌ Неизвестная команда.")
-        return GALLERY_EDIT_DELETE
-    try:
-        num = int(parts[3])
-    except ValueError:
-        await query.edit_message_text("❌ Неверный номер.")
-        return GALLERY_EDIT_DELETE
-
     project_name = context.user_data.get("gallery_edit_project")
     if not project_name:
         await query.edit_message_text("❌ Ошибка: проект не найден.")
         return ConversationHandler.END
+
+    if data == "gallery_del_cancel":
+        await query.edit_message_text("❌ Удаление отменено.")
+        await _show_gallery_edit_menu_after_text(update, context, project_name)
+        return ConversationHandler.END
+
+    # Парсим gallery_del_photo_N
+    prefix = "gallery_del_photo_"
+    if not data.startswith(prefix):
+        await query.edit_message_text("❌ Неизвестная команда.")
+        return GALLERY_EDIT_DELETE
+    try:
+        num = int(data[len(prefix):])
+    except ValueError:
+        await query.edit_message_text("❌ Неверный номер.")
+        return GALLERY_EDIT_DELETE
 
     success = await delete_gallery_photo(project_name, num)
     if success:
         await query.edit_message_text(f"✅ Фото #{num} удалено, остальные перенумерованы.")
     else:
         await query.edit_message_text(f"❌ Фото #{num} не найдено.")
-    await gallery_edit_project(update, context)
+    await _show_gallery_edit_menu_after_text(update, context, project_name)
     return ConversationHandler.END
+
 
 async def gallery_edit_delete_project_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     project_name = context.user_data.get("gallery_edit_project")
     if not project_name:
         await query.edit_message_text("❌ Ошибка: проект не найден.")
@@ -3080,32 +3445,45 @@ async def gallery_edit_delete_project_confirm(update: Update, context: ContextTy
                                   reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return GALLERY_EDIT_DELETE_CONFIRM
 
+
 async def gallery_edit_delete_project_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer(query)
     data = query.data
+    project_name = context.user_data.get("gallery_edit_project")
     if data == "gallery_del_project_yes":
-        project_name = context.user_data.get("gallery_edit_project")
         if project_name:
             await delete_project_folder(project_name)
-            await query.edit_message_text("✅ Проект удалён.")
             context.user_data.pop("gallery_edit_project", None)
+            try:
+                await query.edit_message_text("✅ Проект удалён.")
+            except Exception as e:
+                logger.debug(f"del_project edit fail: {e}")
             await show_gallery(update, context, 0)
         else:
             await query.edit_message_text("❌ Ошибка: проект не найден.")
     else:
-        await query.edit_message_text("❌ Удаление отменено.")
-        await gallery_edit_project(update, context)
+        try:
+            await query.edit_message_text("❌ Удаление отменено.")
+        except Exception:
+            pass
+        if project_name:
+            await _show_gallery_edit_menu_after_text(update, context, project_name)
     return ConversationHandler.END
 
-# ------------------------- Обработчики меню -------------------------
+
+# =====================================================================
+# =======================  ОБРАБОТЧИКИ МЕНЮ  ==========================
+# =====================================================================
 @admin_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context, new_message=True)
 
+
 @admin_only
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context)
+
 
 @admin_only
 async def menu_products_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3114,35 +3492,43 @@ async def menu_products_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("products_flag_ids", None)
     await show_products(update, context)
 
+
 @admin_only
 async def menu_flags_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_flags(update, context, 0)
+
 
 @admin_only
 async def menu_prod_types_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_prod_types(update, context, 0)
 
+
 @admin_only
 async def menu_mat_types_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_mat_types(update, context, 0)
+
 
 @admin_only
 async def menu_materials_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_material_type_choice(update, context, 0)
 
+
 @admin_only
 async def menu_main_features_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_features(update, context, 0)
 
+
 @admin_only
 async def menu_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await search_menu(update, context)
+
 
 # ------------------------- Регистрация обработчиков -------------------------
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reboot", reboot_command))
 
+    # --- Меню ---
     app.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(menu_products_callback, pattern="^menu_products$"))
     app.add_handler(CallbackQueryHandler(menu_flags_callback, pattern="^menu_flags$"))
@@ -3153,10 +3539,15 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(menu_search_callback, pattern="^menu_search$"))
     app.add_handler(CallbackQueryHandler(gallery_menu_callback, pattern="^menu_gallery$"))
 
+    # --- Товары ---
     app.add_handler(CallbackQueryHandler(products_page_callback, pattern="^products_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(product_details_callback, pattern="^prod_details_\\d+$"))
     app.add_handler(CallbackQueryHandler(product_edit_callback, pattern="^prod_edit_\\d+$"))
     app.add_handler(CallbackQueryHandler(refresh_min_cost_callback, pattern="^prod_refresh_mincost_\\d+$"))
+    app.add_handler(CallbackQueryHandler(details_photos_callback, pattern="^details_photos_\\d+$"))
+    app.add_handler(CallbackQueryHandler(delete_product_confirm_callback, pattern="^prod_delete_confirm_\\d+$"))
+    app.add_handler(CallbackQueryHandler(delete_product_execute, pattern="^prod_del_yes_\\d+$"))
+    app.add_handler(CallbackQueryHandler(edit_cancel, pattern="^prod_edit_cancel_\\d+$"))
 
     # Добавление товара
     add_prod_conv = ConversationHandler(
@@ -3173,27 +3564,16 @@ def register_handlers(app: Application):
             CommandHandler("cancel", cancel),
             CallbackQueryHandler(cancel, pattern="^main_menu$"),
             CallbackQueryHandler(cancel, pattern="^menu_products$"),
-            CallbackQueryHandler(cancel, pattern="^menu_flags$"),
-            CallbackQueryHandler(cancel, pattern="^menu_prod_types$"),
-            CallbackQueryHandler(cancel, pattern="^menu_mat_types$"),
-            CallbackQueryHandler(cancel, pattern="^menu_materials$"),
-            CallbackQueryHandler(cancel, pattern="^menu_main_features$"),
-            CallbackQueryHandler(cancel, pattern="^menu_search$"),
-            CallbackQueryHandler(cancel, pattern="^menu_gallery$"),
         ],
         per_message=False,
     )
     app.add_handler(add_prod_conv)
 
-    # Редактирование названия, кода, типа товара
+    # Редактирование названия, кода, типа
     edit_name_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_name_entry, pattern="^prod_edit_name_\\d+$")],
         states={EDIT_PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)]},
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(edit_name_conv)
@@ -3201,11 +3581,7 @@ def register_handlers(app: Application):
     edit_code_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_code_entry, pattern="^prod_edit_code_\\d+$")],
         states={EDIT_PROD_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_code)]},
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(edit_code_conv)
@@ -3218,16 +3594,12 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(edit_cancel, pattern="^prod_edit_cancel_\\d+$"),
             ]
         },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(edit_type_conv)
 
-    # Редактирование флагов
+    # Флаги товара
     edit_flags_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_flags_start, pattern="^prod_edit_flags_\\d+$")],
         states={
@@ -3237,16 +3609,12 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
             ]
         },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(edit_flags_conv)
 
-    # Управление стоимостью
+    # Стоимость
     edit_cost_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_product_costs_menu, pattern="^prod_edit_costs_\\d+$")],
         states={
@@ -3264,16 +3632,12 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(edit_product_cost_cancel, pattern="^prod_cost_cancel_\\d+$"),
             ],
         },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(edit_cost_conv)
 
-    # Управление фото
+    # Фото товара
     photo_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(manage_photos_start, pattern="^prod_manage_photos_\\d+$")],
         states={
@@ -3294,23 +3658,12 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(cancel_to_product_edit, pattern="^prod_edit_cancel_\\d+$"),
             ],
         },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel, pattern="^main_menu$"),
-            CallbackQueryHandler(cancel, pattern="^menu_products$"),
-        ],
+        fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cancel, pattern="^main_menu$")],
         per_message=False,
     )
     app.add_handler(photo_conv)
 
-    app.add_handler(CallbackQueryHandler(details_photos_callback, pattern="^details_photos_\\d+$"))
-
-    # Удаление товара
-    app.add_handler(CallbackQueryHandler(delete_product_confirm_callback, pattern="^prod_delete_confirm_\\d+$"))
-    app.add_handler(CallbackQueryHandler(delete_product_execute, pattern="^prod_del_yes_\\d+$"))
-    app.add_handler(CallbackQueryHandler(edit_cancel, pattern="^prod_edit_cancel_\\d+$"))
-
-    # Управление флагами
+    # --- Флаги ---
     app.add_handler(CallbackQueryHandler(flags_page_callback, pattern="^flags_page_\\d+$"))
     add_flag_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_flag_entry, pattern="^flag_add$")],
@@ -3334,7 +3687,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(delete_flag_conv)
 
-    # Управление типами товаров
+    # --- Типы товаров ---
     app.add_handler(CallbackQueryHandler(prodtypes_page_callback, pattern="^prodtypes_page_\\d+$"))
     add_prodtype_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_prodtype_entry, pattern="^prodtype_add$")],
@@ -3358,7 +3711,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(delete_prodtype_conv)
 
-    # Управление типами материалов
+    # --- Типы материалов ---
     app.add_handler(CallbackQueryHandler(mattypes_page_callback, pattern="^mattypes_page_\\d+$"))
     add_mattype_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_mattype_entry, pattern="^mattype_add$")],
@@ -3382,7 +3735,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(delete_mattype_conv)
 
-    # Управление основными характеристиками
+    # --- Основные характеристики ---
     app.add_handler(CallbackQueryHandler(mainfeat_page_callback, pattern="^mainfeat_page_\\d+$"))
     add_mainfeat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_mainfeat_entry, pattern="^mainfeat_add$")],
@@ -3406,7 +3759,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(delete_mainfeat_conv)
 
-    # Основные характеристики товара
+    # --- Характеристики товара ---
     prod_main_feat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(product_main_features_menu, pattern="^prod_main_features_\\d+$")],
         states={
@@ -3421,7 +3774,6 @@ def register_handlers(app: Application):
     )
     app.add_handler(prod_main_feat_conv)
 
-    # Дополнительные характеристики товара
     prod_extra_feat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(product_extra_features_menu, pattern="^prod_extra_features_\\d+$")],
         states={
@@ -3444,7 +3796,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(prod_extra_feat_conv)
 
-    # Поиск
+    # --- Поиск ---
     search_keyword_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(search_keyword_entry, pattern="^search_keyword$")],
         states={SEARCH_KEYWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_keyword_handle)]},
@@ -3477,7 +3829,7 @@ def register_handlers(app: Application):
     )
     app.add_handler(search_advanced_conv)
 
-    # Управление материалами – выбор типа и просмотр
+    # --- Материалы ---
     app.add_handler(CallbackQueryHandler(material_choice_page_callback, pattern="^mat_choice_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(material_type_chosen, pattern="^mat_choose_type_\\d+$"))
     app.add_handler(CallbackQueryHandler(materials_page_callback, pattern="^materials_page_\\d+$"))
@@ -3485,7 +3837,6 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(material_view_photo, pattern="^mat_view_photo_\\d+_\\d+_\\d+$"))
     app.add_handler(CallbackQueryHandler(show_material_type_choice, pattern="^mat_choice_back$"))
 
-    # Добавление материалов (всегда спрашивает тип)
     add_material_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_add_material, pattern="^mat_add$")],
         states={
@@ -3506,7 +3857,6 @@ def register_handlers(app: Application):
     )
     app.add_handler(add_material_conv)
 
-    # Редактирование материалов
     edit_material_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(material_edit_entry, pattern="^mat_edit_\\d+_\\d+_\\d+$")],
         states={
@@ -3539,10 +3889,9 @@ def register_handlers(app: Application):
     )
     app.add_handler(edit_material_conv)
 
-    # Галерея
-    app.add_handler(CallbackQueryHandler(gallery_page_callback, pattern="^gallery_page_\\d+$"))
-    app.add_handler(CallbackQueryHandler(gallery_back_to_list, pattern="^gallery_back$"))
-    app.add_handler(CallbackQueryHandler(gallery_view_project, pattern="^gallery_view_"))
+    # --- ГАЛЕРЕЯ ---
+    # ВАЖНО: Сначала регистрируем ConversationHandler'ы, потом — простые callback'и,
+    # чтобы избежать конфликтов.
 
     gallery_create_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(gallery_create_start, pattern="^gallery_create$")],
@@ -3550,7 +3899,8 @@ def register_handlers(app: Application):
             GALLERY_CREATE_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, gallery_create_desc)],
             GALLERY_CREATE_PHOTOS: [
                 MessageHandler(filters.PHOTO, gallery_create_photos),
-                CallbackQueryHandler(gallery_create_photos, pattern="^(gallery_create_finish|gallery_create_cancel)$"),
+                CallbackQueryHandler(gallery_create_photos,
+                                     pattern="^(gallery_create_finish|gallery_create_cancel)$"),
             ],
         },
         fallbacks=[
@@ -3584,7 +3934,8 @@ def register_handlers(app: Application):
                 CallbackQueryHandler(gallery_edit_delete_photo_execute, pattern="^gallery_del_cancel$"),
             ],
             GALLERY_EDIT_DELETE_CONFIRM: [
-                CallbackQueryHandler(gallery_edit_delete_project_execute, pattern="^gallery_del_project_(yes|no)$"),
+                CallbackQueryHandler(gallery_edit_delete_project_execute,
+                                     pattern="^gallery_del_project_(yes|no)$"),
             ],
         },
         fallbacks=[
@@ -3595,6 +3946,12 @@ def register_handlers(app: Application):
         per_message=False,
     )
     app.add_handler(gallery_edit_conv)
+
+    # Простые callback'и галереи (должны быть после conversation handler'ов)
+    app.add_handler(CallbackQueryHandler(gallery_page_callback, pattern="^gallery_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(gallery_back_to_list, pattern="^gallery_back$"))
+    app.add_handler(CallbackQueryHandler(gallery_view_project, pattern="^gallery_view_"))
+
 
 # ------------------------- Запуск бота -------------------------
 async def main():
@@ -3623,9 +3980,10 @@ async def main():
 
     await application.initialize()
     await application.start()
-    logging.info("Бот запущен с поддержкой галереи проектов, сортировкой по коду, выбором типа материалов и переработанной функцией добавления материалов.")
+    logging.info("Бот запущен. Версия 3.0 — стабильная галерея проектов с форматом гггг-мм-дд-чч-мм-сс.")
     await application.updater.start_polling()
     await asyncio.Event().wait()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

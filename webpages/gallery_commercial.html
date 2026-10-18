@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Галерея коммерческих проектов | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/gallery.css">
+
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=111271977', 'ym');
+
+        ym(111271977, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/111271977" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+
+</head>
+<body>
+
+<!-- Значок профиля -->
+<div class="profile-icon-wrapper" id="profileIcon">
+    <a href="/profile" class="profile-fixed-link">
+        <img src="/media/interface/profile_icon.svg" alt="Профиль">
+    </a>
+</div>
+
+<!-- Фиксированная корзина -->
+<div class="cart-icon-wrapper">
+    <a href="/cart" class="cart-fixed-link">
+        <img src="/media/interface/cart_icon.svg" alt="Корзина">
+        <span id="cart-count" class="cart-count-badge">0</span>
+    </a>
+</div>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="gallery-page">
+    <h1 class="gallery-title">Галерея коммерческих проектов</h1>
+
+    <div id="gallery-grid" class="gallery-grid"></div>
+    <div id="loader-more" class="loader-more" style="display: none;">Загрузка...</div>
+    <div id="load-more-btn" class="load-more-btn">Показать ещё</div>
+</main>
+
+<!-- Модальное окно для зума -->
+<div id="zoomModal" class="zoom-modal">
+    <span class="zoom-close">&times;</span>
+    <img class="zoom-modal-content" id="zoomImage" src="" alt="Увеличенное изображение">
+</div>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="footer-bottom"><div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div></div>
+</footer>
+
+<script>
+    const cartCountSpan = document.getElementById('cart-count');
+    const grid = document.getElementById('gallery-grid');
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    const loaderMore = document.getElementById('loader-more');
+    const profileIcon = document.getElementById('profileIcon');
+
+    // Базовые пути API для коммерческой галереи
+    const API_PROJECTS = '/api/gallery/commercial/projects';
+    const API_PROJECT = '/api/gallery/commercial/project';
+
+    // ---- Зум ----
+    const zoomModal = document.getElementById('zoomModal');
+    const zoomImage = document.getElementById('zoomImage');
+    const zoomClose = document.querySelector('.zoom-close');
+
+    function openZoom(src) {
+        zoomImage.src = src;
+        zoomModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeZoom() {
+        zoomModal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    zoomClose.addEventListener('click', closeZoom);
+    zoomModal.addEventListener('click', function(e) {
+        if (e.target === zoomModal) closeZoom();
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && zoomModal.style.display === 'flex') closeZoom();
+    });
+
+    // ---- Корзина ----
+    async function updateCartCount() {
+        try {
+            const resp = await fetch('/api/cart');
+            const data = await resp.json();
+            const totalItems = data.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+            if (cartCountSpan) cartCountSpan.textContent = totalItems;
+        } catch(e) { console.error(e); }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    // ---- Создание плитки ----
+    function createProjectTile(proj) {
+        const tile = document.createElement('div');
+        tile.className = 'gallery-tile';
+        tile.dataset.folder = proj.folder;
+
+        // Слайдер
+        const sliderContainer = document.createElement('div');
+        sliderContainer.className = 'tile-slider';
+        const sliderInner = document.createElement('div');
+        sliderInner.className = 'tile-slider-inner';
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'tile-slider-loading';
+        loadingDiv.textContent = 'Загрузка...';
+        sliderInner.appendChild(loadingDiv);
+        sliderContainer.appendChild(sliderInner);
+        tile.appendChild(sliderContainer);
+
+        // Информация
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'tile-info';
+        const countSpan = document.createElement('div');
+        countSpan.className = 'tile-count';
+        countSpan.textContent = `${proj.image_count} фото`;
+        const detailBtn = document.createElement('button');
+        detailBtn.className = 'tile-detail-btn';
+        detailBtn.textContent = 'Подробнее';
+        detailBtn.dataset.folder = proj.folder;
+        infoDiv.appendChild(countSpan);
+        infoDiv.appendChild(detailBtn);
+        tile.appendChild(infoDiv);
+
+        // Описание
+        const descContainer = document.createElement('div');
+        descContainer.className = 'tile-description';
+        descContainer.style.display = 'none';
+        descContainer.dataset.loaded = 'false';
+        tile.appendChild(descContainer);
+
+        // Загружаем изображения для слайдера
+        loadTileImages(proj.folder, sliderInner, sliderContainer);
+
+        // Обработчик кнопки "Подробнее"
+        detailBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const folder = detailBtn.dataset.folder;
+
+            if (descContainer.dataset.loaded === 'true') {
+                const isHidden = descContainer.style.display === 'none';
+                descContainer.style.display = isHidden ? 'block' : 'none';
+                detailBtn.textContent = isHidden ? 'Скрыть' : 'Подробнее';
+                return;
+            }
+
+            try {
+                const resp = await fetch(`${API_PROJECT}/${encodeURIComponent(folder)}`);
+                if (!resp.ok) throw new Error('Failed to load description');
+                const data = await resp.json();
+                const description = data.description || 'Описание отсутствует.';
+                descContainer.textContent = description;
+                descContainer.dataset.loaded = 'true';
+                descContainer.style.display = 'block';
+                detailBtn.textContent = 'Скрыть';
+            } catch (err) {
+                console.error(err);
+                descContainer.textContent = 'Не удалось загрузить описание.';
+                descContainer.style.display = 'block';
+                detailBtn.textContent = 'Скрыть';
+            }
+        });
+
+        return tile;
+    }
+
+    async function loadTileImages(folder, container, sliderContainer) {
+        try {
+            const resp = await fetch(`${API_PROJECT}/${encodeURIComponent(folder)}`);
+            if (!resp.ok) throw new Error('Failed to load images');
+            const data = await resp.json();
+            const images = data.images || [];
+            if (images.length === 0) {
+                container.innerHTML = '<div class="tile-no-images">Нет изображений</div>';
+                return;
+            }
+            container.innerHTML = '';
+            images.forEach((url, idx) => {
+                const slide = document.createElement('div');
+                slide.className = 'tile-slide';
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = `Фото ${idx+1}`;
+                img.loading = 'lazy';
+                slide.appendChild(img);
+                container.appendChild(slide);
+            });
+
+            // Обработчик клика по слайдеру для зума (делегирование)
+            sliderContainer.addEventListener('click', function(e) {
+                const img = e.target.closest('.tile-slide img');
+                if (img) {
+                    openZoom(img.src);
+                }
+            });
+
+            initTileSlider(sliderContainer, images.length);
+        } catch (err) {
+            console.error('Error loading images for', folder, err);
+            container.innerHTML = '<div class="tile-error">Ошибка загрузки</div>';
+        }
+    }
+
+    function initTileSlider(sliderContainer, totalSlides) {
+        if (totalSlides <= 1) return;
+        const inner = sliderContainer.querySelector('.tile-slider-inner');
+        let current = 0;
+        let isDragging = false;
+        let startX = 0;
+
+        function updateSlide(index) {
+            if (index < 0) index = totalSlides - 1;
+            if (index >= totalSlides) index = 0;
+            current = index;
+            inner.style.transform = `translateX(-${current * 100}%)`;
+        }
+
+        sliderContainer.addEventListener('mousemove', (e) => {
+            const rect = sliderContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percent = x / rect.width;
+            let newIndex = Math.floor(percent * totalSlides);
+            if (newIndex < 0) newIndex = 0;
+            if (newIndex >= totalSlides) newIndex = totalSlides - 1;
+            if (newIndex !== current) {
+                updateSlide(newIndex);
+            }
+        });
+
+        sliderContainer.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            isDragging = true;
+        }, { passive: true });
+
+        sliderContainer.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const dx = e.touches[0].clientX - startX;
+            if (Math.abs(dx) > 30) {
+                if (dx > 0 && current > 0) {
+                    updateSlide(current - 1);
+                } else if (dx < 0 && current < totalSlides - 1) {
+                    updateSlide(current + 1);
+                }
+                isDragging = false;
+            }
+        }, { passive: true });
+
+        sliderContainer.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+    }
+
+    // ---- Загрузка проектов ----
+    async function loadProjects(page, append = false) {
+        if (loading) return;
+        loading = true;
+        loadMoreBtn.style.display = 'none';
+        loaderMore.style.display = 'block';
+
+        try {
+            const resp = await fetch(`${API_PROJECTS}?page=${page}&limit=10`);
+            if (!resp.ok) throw new Error('Failed to load projects');
+            const data = await resp.json();
+            totalProjects = data.total;
+            const projects = data.projects;
+
+            if (!append) {
+                grid.innerHTML = '';
+            }
+
+            if (projects.length === 0 && page === 1) {
+                grid.innerHTML = '<p class="empty">Нет проектов в галерее</p>';
+                loadMoreBtn.style.display = 'none';
+                return;
+            }
+
+            for (const proj of projects) {
+                const tile = createProjectTile(proj);
+                grid.appendChild(tile);
+            }
+
+            currentPage = page;
+            if (currentPage * 10 < totalProjects) {
+                loadMoreBtn.style.display = 'block';
+            } else {
+                loadMoreBtn.style.display = 'none';
+            }
+        } catch (err) {
+            console.error(err);
+            if (!append) {
+                grid.innerHTML = '<p class="error-message">Не удалось загрузить галерею</p>';
+            } else {
+                alert('Не удалось загрузить следующие проекты');
+            }
+        } finally {
+            loading = false;
+            loaderMore.style.display = 'none';
+        }
+    }
+
+    let currentPage = 1;
+    let totalProjects = 0;
+    let loading = false;
+
+    loadMoreBtn.addEventListener('click', () => {
+        loadProjects(currentPage + 1, true);
+    });
+
+    // ---- Профиль ----
+    async function updateProfileIcon() {
+        try {
+            const resp = await fetch('/api/auth/me');
+            const data = await resp.json();
+            if (profileIcon) {
+                if (data.authenticated) {
+                    profileIcon.style.background = '#628b35';
+                } else {
+                    profileIcon.style.background = '#e3342f';
+                }
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    // ---- Запуск ----
+    document.addEventListener('DOMContentLoaded', () => {
+        updateProfileIcon();
+        updateCartCount();
+        setInterval(updateCartCount, 5000);
+        loadProjects(1);
+    });
+</script>
+</body>
+</html>

@@ -89,7 +89,18 @@
     </div>
 </section>
 
-<!-- Галерея индивидуальных проектов (перенесена выше текста) -->
+<!-- Галерея коммерческих проектов (первая) -->
+<section class="featured-gallery">
+    <div class="section-header">
+        <h2>Галерея коммерческих проектов</h2>
+        <a href="/gallery_commercial" class="view-all">Смотреть все →</a>
+    </div>
+    <div class="gallery-scroll" id="commercialGalleryPreview">
+        <div class="loader">Загрузка...</div>
+    </div>
+</section>
+
+<!-- Галерея индивидуальных проектов -->
 <section class="featured-gallery">
     <div class="section-header">
         <h2>Галерея индивидуальных проектов</h2>
@@ -292,7 +303,7 @@
         }
     }
 
-    // ===== ЗАГРУЗКА ПРЕВЬЮ ГАЛЕРЕИ =====
+    // ===== ЗАГРУЗКА ПРЕВЬЮ ГАЛЕРЕИ ИНДИВИДУАЛЬНЫХ ПРОЕКТОВ =====
     async function loadGalleryPreview() {
         const container = document.getElementById('galleryPreview');
         try {
@@ -324,10 +335,43 @@
         }
     }
 
+    // ===== ЗАГРУЗКА ПРЕВЬЮ ГАЛЕРЕИ КОММЕРЧЕСКИХ ПРОЕКТОВ =====
+    async function loadCommercialGalleryPreview() {
+        const container = document.getElementById('commercialGalleryPreview');
+        try {
+            const data = await fetchJSON('/api/gallery/commercial/projects?page=1&limit=6');
+            if (!data.projects.length) {
+                container.innerHTML = '<p class="empty">Нет проектов в галерее</p>';
+                return;
+            }
+            let html = '';
+            for (const proj of data.projects) {
+                const preview = proj.preview || '/media/interface/placeholder.png';
+                html += `
+                    <div class="gallery-preview-item">
+                        <a href="/gallery_commercial" class="gallery-preview-link">
+                            <div class="gallery-preview-img">
+                                <img src="${preview}" alt="${escapeHtml(proj.folder)}" loading="lazy">
+                            </div>
+                            <div class="gallery-preview-info">
+                                <div class="gallery-preview-count">${proj.image_count} фото</div>
+                            </div>
+                        </a>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Commercial gallery preview error', err);
+            container.innerHTML = '<p class="error-message">Не удалось загрузить галерею</p>';
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         buildCarousel();
         resetAutoSlide();
         loadFeaturedProducts();
+        loadCommercialGalleryPreview();
         loadGalleryPreview();
     });
 </script>
