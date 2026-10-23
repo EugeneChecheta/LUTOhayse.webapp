@@ -7,14 +7,19 @@
 #   - Исправлено написание: "матрац" -> "матрас" во всех текстах и комментариях
 #   - Добавлена поддержка партнёрских цен из /partners/[код].xlsx
 #   - Добавлен эндпоинт /api/partners/check и страница /partners
-#   - Добавлена галерея коммерческих проектов:
-#       /api/gallery/commercial/projects
-#       /api/gallery/commercial/project/<folder>
-#       /gallery_commercial
-#       папка media/commercial
+#   - Добавлена галерея коммерческих проектов
+#   - Админ-панель: вход по одноразовому паролю из Telegram-бота
+#       * POST /api/admin/request-otp  { telegram_id }  -> отправляет OTP в Telegram
+#       * POST /api/admin/verify-otp   { telegram_id, otp } -> устанавливает сессию
+#       * OTP живёт 10 минут, используется один раз, до 5 попыток ввода
+#   - Хранение OTP перенесено из памяти в базу данных (таблица admin_otps) для защиты от сброса при перезапуске сервера
+#   - Улучшена очистка OTP от невидимых символов на бэкенде (синхронизировано с фронтендом)
 
 import psycopg2
 import os
+import time
+import random
+import re
 from flask import Flask, jsonify, send_from_directory, abort, request, session, redirect
 from flask_cors import CORS
 import glob
@@ -156,6 +161,17 @@ def init_db():
             address TEXT,
             contact_time VARCHAR(100),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # Таблица для OTP администраторов
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_otps (
+            telegram_id VARCHAR(50) PRIMARY KEY,
+            otp VARCHAR(50) NOT NULL,
+            expires_at DOUBLE PRECISION NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            last_request DOUBLE PRECISION DEFAULT 0
         );
     """)
 
@@ -454,7 +470,7 @@ def init_db():
 
 init_db()  # Вызов при старте
 
-# ==================== СУЩЕСТВУЮЩИЕ API (без изменений) ====================
+# ==================== СУЩЕСТВУЮЩИЕ API ====================
 
 @app.route('/api/types')
 def product_types():
@@ -1438,9 +1454,6 @@ def add_topper_to_cart():
         conn.close()
 
 # ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАСОВ =========
-# Возвращают photo_url (/media/layers/CODE.webp, /media/covers/CODE.webp),
-# а также основные и дополнительные характеристики из БД бота.
-# При передаче partner_code цены берутся из /partners/[код].xlsx
 
 MATTRESS_LAYERS_MEDIA = Path(__file__).parent / 'media' / 'layers'
 MATTRESS_COVERS_MEDIA = Path(__file__).parent / 'media' / 'covers'
@@ -1481,10 +1494,7 @@ def mattress_sizes():
 
 @app.route('/api/mattress/layers')
 def mattress_layers():
-    """Возвращает слои матрасов для указанного размера с ценами.
-    Для каждого слоя возвращается photo_url (если файл /media/layers/CODE.webp существует),
-    а также основные и дополнительные характеристики из БД административного бота.
-    Если передан partner_code, цена берётся из /partners/[код].xlsx."""
+    """Возвращает слои матрасов для указанного размера с ценами."""
     size_id = request.args.get('size_id', type=int)
     partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
@@ -1493,7 +1503,6 @@ def mattress_layers():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Получаем название размера
         cur.execute("SELECT name FROM mattress_sizes WHERE id = %s", (size_id,))
         size_row = cur.fetchone()
         if not size_row:
@@ -1520,7 +1529,6 @@ def mattress_layers():
 
         layer_ids = [r[0] for r in rows]
 
-        # Основные характеристики (только те, у которых есть значение)
         main_features = {}
         if layer_ids:
             cur.execute("""
@@ -1538,7 +1546,6 @@ def mattress_layers():
                     'value': fvalue
                 })
 
-        # Дополнительные характеристики
         extra_features = {}
         if layer_ids:
             cur.execute("""
@@ -1585,9 +1592,7 @@ def mattress_layers():
 
 @app.route('/api/mattress/covers')
 def mattress_covers():
-    """Возвращает чехлы матрасов для указанного размера с ценами.
-    Для каждого чехла возвращается photo_url (если файл /media/covers/CODE.webp существует).
-    Если передан partner_code, цена берётся из /partners/[код].xlsx."""
+    """Возвращает чехлы матрасов для указанного размера с ценами."""
     size_id = request.args.get('size_id', type=int)
     partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
@@ -1652,7 +1657,7 @@ def add_mattress_to_cart():
     layer_ids = data.get('layer_ids', [])
     cover_id = data.get('cover_id')
     initial_height = data.get('initial_height', 0)
-    is_new = data.get('is_new', True)  # если true, initial_height = 0
+    is_new = data.get('is_new', True)
     quantity = data.get('quantity', 1)
 
     if not size_id or not layer_ids or cover_id is None:
@@ -1678,14 +1683,12 @@ def add_mattress_to_cart():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Получаем размер
         cur.execute("SELECT id, name FROM mattress_sizes WHERE id = %s", (size_id,))
         size_row = cur.fetchone()
         if not size_row:
             return jsonify({'error': 'Размер не найден'}), 404
         size_name = size_row[1]
 
-        # Получаем информацию о слоях (цены)
         unique_layer_ids = list(set(layer_ids))
         if unique_layer_ids:
             cur.execute("""
@@ -1709,7 +1712,6 @@ def add_mattress_to_cart():
             layers_codes = []
             layers_names = []
 
-        # Получаем цену чехла
         cur.execute("""
             SELECT c.id, c.code, c.name, COALESCE(p.price, 0)
             FROM mattress_cover c
@@ -1764,7 +1766,7 @@ def add_mattress_to_cart():
         cur.close()
         conn.close()
 
-# ========= ОФОРМЛЕНИЕ ЗАКАЗА (обновлённое) =========
+# ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.get_json()
@@ -1786,11 +1788,9 @@ def create_order():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Разделяем элементы корзины на обычные товары, топперы и матрасы
         product_items = [item for item in cart if item.get('type') in ('product', 'topper')]
         mattress_items = [item for item in cart if item.get('type') == 'mattress']
 
-        # Создаём заказ для обычных товаров (если есть)
         order_id = None
         if product_items:
             cur.execute("""
@@ -1822,15 +1822,12 @@ def create_order():
                     """, (order_id, item['product_code'], item['product_name'],
                           item['material_code'], item['material_name'],
                           item['cost'], item.get('quantity', 1)))
-            # Отправляем уведомление для обычного заказа
             if order_id:
                 send_order_notification(order_id, data['user_name'], data['phone'], total_sum, order_type='product')
 
-        # Создаём заказы для матрасов (каждый матрас - отдельный заказ)
         mattress_order_ids = []
         for mattress_item in mattress_items:
             extra = mattress_item.get('extra_data', {})
-            # Извлекаем данные
             size_id = extra.get('size_id')
             initial_height = extra.get('initial_height', 0)
             cover_id = extra.get('cover_id')
@@ -1844,7 +1841,6 @@ def create_order():
                 app.logger.error(f"Некорректные данные матраса в корзине: {extra}")
                 continue
 
-            # Вставляем заказ матраса
             cur.execute("""
                 INSERT INTO mattress_orders
                 (session_id, user_id, user_name, phone, email, address, comment, contact_time, status,
@@ -1857,7 +1853,6 @@ def create_order():
             mattress_order_id = cur.fetchone()[0]
             mattress_order_ids.append(mattress_order_id)
 
-            # Вставляем слои заказа
             total_layers_price = 0
             for idx, layer_id in enumerate(layer_ids):
                 price = layer_prices[idx] if idx < len(layer_prices) else 0
@@ -1869,16 +1864,13 @@ def create_order():
                 """, (mattress_order_id, layer_id, layer_codes[idx] if idx < len(layer_codes) else '',
                       layer_names[idx] if idx < len(layer_names) else '', 1, price, price))
 
-            # Отправляем уведомление для заказа матраса
             total_mattress_price = cover_price + total_layers_price
             send_order_notification(mattress_order_id, data['user_name'], data['phone'], total_mattress_price, order_type='mattress')
 
         conn.commit()
-        # Очищаем корзину
         session.pop('cart', None)
         session.modified = True
 
-        # Возвращаем список id созданных заказов
         response = {'success': True}
         if order_id:
             response['order_id'] = order_id
@@ -1893,6 +1885,284 @@ def create_order():
     finally:
         cur.close()
         conn.close()
+
+# ========= АДМИНИСТРАТИВНАЯ ПАНЕЛЬ =========
+ADMIN_IDS_PATH = Path(__file__).parent / 'tg_ids.txt'
+ADMIN_BOT_TOKEN_PATH = Path(__file__).parent / 'tg_bot_token.txt'
+
+
+def load_admin_ids():
+    """Читает список ID из tg_ids.txt (по одному на строку)."""
+    try:
+        if not ADMIN_IDS_PATH.exists():
+            app.logger.warning(f"Файл {ADMIN_IDS_PATH} не найден")
+            return []
+        with open(ADMIN_IDS_PATH, 'r', encoding='utf-8') as f:
+            return [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        app.logger.error(f"Ошибка чтения tg_ids.txt: {e}")
+        return []
+
+
+def load_admin_bot_token():
+    """Читает токен бота из tg_bot_token.txt для отправки одноразовых паролей."""
+    try:
+        if not ADMIN_BOT_TOKEN_PATH.exists():
+            app.logger.warning(f"Файл {ADMIN_BOT_TOKEN_PATH} не найден")
+            return None
+        with open(ADMIN_BOT_TOKEN_PATH, 'r', encoding='utf-8') as f:
+            return f.read().strip() or None
+    except Exception as e:
+        app.logger.error(f"Ошибка чтения tg_bot_token.txt: {e}")
+        return None
+
+
+OTP_TTL_SECONDS = 600              # 10 минут
+OTP_REQUEST_COOLDOWN_SECONDS = 20  # 20 секунд между запросами
+OTP_MAX_ATTEMPTS = 5               # 5 неверных вводов — сброс пароля
+OTP_LENGTH = 12
+
+# Символы для одноразового пароля (исключены символы, которые часто искажаются при копировании)
+_OTP_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+_OTP_LOWER = "abcdefghijkmnopqrstuvwxyz"
+_OTP_DIGITS = "23456789"
+_OTP_SPECIAL = "!@#$%^&*"
+_OTP_ALL = _OTP_UPPER + _OTP_LOWER + _OTP_DIGITS + _OTP_SPECIAL
+
+
+def _generate_otp(length=OTP_LENGTH):
+    """Генерирует криптостойкий пароль из букв верхнего/нижнего регистра,
+    цифр и спецсимволов. Гарантирует наличие каждого класса символов."""
+    required = [
+        secrets.choice(_OTP_UPPER),
+        secrets.choice(_OTP_LOWER),
+        secrets.choice(_OTP_DIGITS),
+        secrets.choice(_OTP_SPECIAL),
+    ]
+    remaining_count = max(0, length - len(required))
+    remaining = [secrets.choice(_OTP_ALL) for _ in range(remaining_count)]
+    chars = required + remaining
+    random.SystemRandom().shuffle(chars)
+    return ''.join(chars)
+
+
+def _send_telegram_message(chat_id, text):
+    """Отправляет текстовое сообщение через бота.
+    Возвращает (ok, error_message)."""
+    token = load_admin_bot_token()
+    if not token:
+        return False, "Токен бота не настроен (файл tg_bot_token.txt)"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": str(chat_id), "text": text, "parse_mode": "HTML"}
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True, None
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode('utf-8', errors='replace')
+        except Exception:
+            body = ''
+        return False, f"HTTP {e.code}: {body}"
+    except Exception as e:
+        return False, str(e)
+
+
+@app.route('/admin')
+@app.route('/admin.html')
+def admin_page():
+    """Страница администратора — доступна только по прямой ссылке."""
+    return send_from_directory('webpages', 'admin.html')
+
+
+@app.route('/admin.css')
+def admin_css():
+    return send_from_directory('webpages', 'admin.css')
+
+
+@app.route('/api/admin/request-otp', methods=['POST'])
+def admin_request_otp():
+    """Генерирует одноразовый пароль и отправляет его в Telegram-бот."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Неверный формат данных'}), 400
+            
+        tg_id = str(data.get('telegram_id', '')).strip()
+
+        if not tg_id:
+            return jsonify({'error': 'Укажите Telegram ID'}), 400
+
+        if not tg_id.isdigit():
+            return jsonify({'error': 'Telegram ID должен быть числом'}), 400
+
+        admin_ids = load_admin_ids()
+        if not admin_ids:
+            return jsonify({'error': 'Список администраторов не настроен (tg_ids.txt)'}), 503
+
+        if tg_id not in admin_ids:
+            return jsonify({'error': 'ID не найден в списке администраторов'}), 403
+
+        now = time.time()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            # Удаляем истёкшие OTP
+            cur.execute("DELETE FROM admin_otps WHERE expires_at < %s", (now,))
+
+            # Проверка антифлуда
+            cur.execute("SELECT last_request FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+            row = cur.fetchone()
+            if row and now - row[0] < OTP_REQUEST_COOLDOWN_SECONDS:
+                wait = int(OTP_REQUEST_COOLDOWN_SECONDS - (now - row[0])) + 1
+                return jsonify({'error': f'Подождите {wait} сек. перед повторным запросом'}), 429
+
+            otp = _generate_otp()
+            expires_at = now + OTP_TTL_SECONDS
+
+            cur.execute("""
+                INSERT INTO admin_otps (telegram_id, otp, expires_at, attempts, last_request)
+                VALUES (%s, %s, %s, 0, %s)
+                ON CONFLICT (telegram_id) DO UPDATE SET
+                    otp = EXCLUDED.otp,
+                    expires_at = EXCLUDED.expires_at,
+                    attempts = 0,
+                    last_request = EXCLUDED.last_request
+            """, (tg_id, otp, expires_at, now))
+            conn.commit()
+
+            text = (
+                f"🔐 <b>Вход в админ-панель LUTOhayse</b>\n\n"
+                f"Ваш одноразовый пароль:\n"
+                f"<code>{otp}</code>\n\n"
+                f"Действителен <b>10 минут</b>. Используется <b>один раз</b>.\n"
+                f"Если вы не запрашивали пароль — просто проигнорируйте это сообщение."
+            )
+
+            ok, err = _send_telegram_message(tg_id, text)
+            if not ok:
+                # Не оставляем «висящий» OTP, если отправить не удалось
+                cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+                conn.commit()
+                app.logger.error(f"Не удалось отправить OTP админу {tg_id}: {err}")
+                return jsonify({
+                    'error': 'Не удалось отправить сообщение в Telegram. '
+                             'Убедитесь, что вы нажимали /start у бота, и попробуйте снова.'
+                }), 502
+
+            app.logger.info(f"OTP успешно отправлен админу {tg_id}")
+            return jsonify({'success': True, 'message': 'Пароль отправлен в Telegram'})
+
+        finally:
+            cur.close()
+            conn.close()
+
+    except Exception as e:
+        app.logger.error(f"Критическая ошибка в admin_request_otp: {e}")
+        return jsonify({'error': f'Внутренняя ошибка сервера: {str(e)}'}), 500
+
+
+@app.route('/api/admin/verify-otp', methods=['POST'])
+def admin_verify_otp():
+    """Проверяет одноразовый пароль и устанавливает сессию администратора."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Неверный формат данных'}), 400
+            
+        tg_id = str(data.get('telegram_id', '')).strip()
+        otp = str(data.get('otp', '')).strip()
+
+        # Жесткая нормализация OTP: удаляем все непечатные символы (синхронизировано с фронтендом)
+        otp = re.sub(r'[^\x20-\x7E]', '', otp).strip()
+
+        if not tg_id or not otp:
+            return jsonify({'error': 'Укажите Telegram ID и пароль'}), 400
+
+        admin_ids = load_admin_ids()
+        if tg_id not in admin_ids:
+            return jsonify({'error': 'ID не найден в списке администраторов'}), 403
+
+        now = time.time()
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            # Удаляем истёкшие OTP
+            cur.execute("DELETE FROM admin_otps WHERE expires_at < %s", (now,))
+
+            cur.execute("SELECT otp, expires_at, attempts FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+            entry = cur.fetchone()
+
+            if not entry:
+                return jsonify({'error': 'Пароль не запрошен или уже использован. Запросите новый.'}), 400
+
+            db_otp, db_expires, db_attempts = entry
+
+            if db_expires < now:
+                cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+                conn.commit()
+                return jsonify({'error': 'Срок действия пароля истёк. Запросите новый.'}), 400
+
+            # Сравнение без учета регистра (защита от авто-капитализации на мобильных)
+            if not secrets.compare_digest(db_otp.lower(), otp.lower()):
+                new_attempts = db_attempts + 1
+                if new_attempts >= OTP_MAX_ATTEMPTS:
+                    cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+                    conn.commit()
+                    return jsonify({
+                        'error': 'Превышено число попыток. Запросите новый пароль.'
+                    }), 429
+                else:
+                    cur.execute("UPDATE admin_otps SET attempts = %s WHERE telegram_id = %s", (new_attempts, tg_id))
+                    conn.commit()
+                    remaining = OTP_MAX_ATTEMPTS - new_attempts
+                    return jsonify({
+                        'error': f'Неверный пароль. Осталось попыток: {remaining}'
+                    }), 401
+
+            # Успех — удаляем OTP (одноразовый)
+            cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
+            conn.commit()
+
+            session['admin_authenticated'] = True
+            session['admin_id'] = tg_id
+            session.modified = True
+            app.logger.info(f"Успешный вход администратора с ID {tg_id} через OTP")
+            return jsonify({'success': True, 'admin_id': tg_id})
+
+        finally:
+            cur.close()
+            conn.close()
+
+    except Exception as e:
+        app.logger.error(f"Критическая ошибка в admin_verify_otp: {e}")
+        return jsonify({'error': f'Внутренняя ошибка сервера: {str(e)}'}), 500
+
+
+@app.route('/api/admin/logout', methods=['POST'])
+def admin_logout():
+    session.pop('admin_authenticated', None)
+    session.pop('admin_id', None)
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/check')
+def admin_check():
+    authenticated = bool(session.get('admin_authenticated'))
+    return jsonify({
+        'authenticated': authenticated,
+        'admin_id': session.get('admin_id') if authenticated else None
+    })
+
 
 # ========= СТАТИЧЕСКИЕ МАРШРУТЫ =========
 @app.route('/')
@@ -1961,7 +2231,6 @@ def toppers_page():
 def toppers_css():
     return send_from_directory('webpages', 'toppers.css')
 
-# Новые маршруты для конструктора матрасов
 @app.route('/mattress')
 def mattress_page():
     return send_from_directory('webpages', 'mattress.html')
@@ -1970,7 +2239,6 @@ def mattress_page():
 def mattress_css():
     return send_from_directory('webpages', 'mattress.css')
 
-# Партнёрская страница
 @app.route('/partners')
 def partners_page():
     return send_from_directory('webpages', 'partners.html')

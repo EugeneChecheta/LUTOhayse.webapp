@@ -1,0 +1,437 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+:root {
+    --main-color: #000;
+    --accent-color: #628b35;
+    --bg-light: #f9f9f9;
+    --gray-border: #ddd;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Montserrat', sans-serif;
+    background-color: #e9e5e5;
+    color: var(--main-color);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ========== HEADER ========== */
+.main__header {
+    padding: 10px 0;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    background-color: #f9f9f9;
+}
+
+.header__container {
+    max-width: 1920px;
+    margin: 0 auto;
+    padding: 0 55px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.menu__body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.menu__list {
+    display: flex;
+    align-items: center;
+    column-gap: 40px;
+    list-style: none;
+}
+
+.menu__link {
+    text-decoration: none;
+    color: var(--main-color);
+    font-weight: 500;
+    transition: color 0.3s;
+}
+
+.menu__link:hover {
+    color: var(--accent-color);
+}
+
+.logo {
+    font-size: 35px;
+    font-weight: 700;
+}
+
+.logo-link {
+    display: inline-flex;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--main-color);
+}
+
+.logo-sub {
+    font-size: 24px;
+    font-weight: 400;
+    margin-left: 2px;
+}
+
+.site-logo h1 {
+    margin: 0;
+}
+
+@media (max-width: 768px) {
+    .header__container {
+        padding: 0 20px;
+        justify-content: center;
+        gap: 15px;
+    }
+    .menu__list {
+        column-gap: 20px;
+    }
+    .logo-sub {
+        font-size: 18px;
+    }
+}
+
+@media (max-width: 480px) {
+    .logo {
+        font-size: 24px;
+    }
+    .logo-sub {
+        font-size: 14px;
+    }
+    .menu__link {
+        font-size: 14px;
+    }
+}
+
+/* ========== ОСНОВНОЙ БЛОК ========== */
+.admin-main {
+    flex: 1 1 auto;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 40px 20px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+/* ========== КАРТОЧКА ВХОДА ========== */
+.admin-login-card {
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 440px;
+    margin: 40px auto;
+}
+
+.admin-login-card h1 {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #222;
+}
+
+.admin-hint {
+    text-align: center;
+    font-size: 14px;
+    color: #777;
+    margin-bottom: 26px;
+    line-height: 1.5;
+}
+
+.admin-hint strong {
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.admin-hint small {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #999;
+}
+
+.admin-login-card .form-group {
+    margin-bottom: 20px;
+}
+
+.admin-login-card .form-group label {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.admin-login-card .form-group input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-login-card .form-group input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(98, 139, 53, 0.15);
+}
+
+.admin-login-card button[type="submit"] {
+    width: 100%;
+    padding: 12px 24px;
+    background: var(--accent-color);
+    color: #fff;
+    border: none;
+    border-radius: 30px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.admin-login-card button[type="submit"]:hover {
+    background: #4a6b27;
+}
+
+.admin-login-card button[type="submit"]:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Вторичная кнопка (например, «Получить новый пароль») */
+.admin-login-card .secondary-btn {
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px 24px;
+    background: #f0f0f0;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 30px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.admin-login-card .secondary-btn:hover {
+    background: #e0e0e0;
+    border-color: #ccc;
+}
+
+.admin-login-card .secondary-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Текстовая кнопка (например, «Назад») */
+.admin-login-card .text-btn {
+    width: 100%;
+    margin-top: 16px;
+    padding: 8px;
+    background: none;
+    border: none;
+    color: #777;
+    font-family: inherit;
+    font-size: 14px;
+    text-decoration: underline;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.admin-login-card .text-btn:hover {
+    color: #333;
+}
+
+.admin-error {
+    display: none;
+    color: #e3342f;
+    background: #fde8e7;
+    border: 1px solid #f5c6c4;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 18px;
+    font-size: 14px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.admin-error.visible {
+    display: block;
+}
+
+/* ========== ПАНЕЛЬ АДМИНИСТРАТОРА ========== */
+.admin-panel {
+    width: 100%;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+.admin-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 22px 28px;
+    background: #f6f8f2;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.admin-panel-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #222;
+}
+
+.admin-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.admin-id {
+    font-size: 14px;
+    color: #555;
+    background: #fff;
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid #e4e4e4;
+}
+
+.admin-id strong {
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.logout-btn {
+    padding: 8px 20px;
+    background: #e3342f;
+    color: #fff;
+    border: none;
+    border-radius: 30px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.logout-btn:hover {
+    background: #b91c1c;
+}
+
+.admin-panel-body {
+    padding: 40px 28px 60px;
+    min-height: 320px;
+}
+
+.admin-empty {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    padding: 60px 20px;
+    background: #fafafa;
+    border: 2px dashed #e4e4e4;
+    border-radius: 16px;
+    line-height: 1.6;
+}
+
+.admin-empty p {
+    font-size: 15px;
+}
+
+/* ========== FOOTER ========== */
+footer {
+    background: #fff;
+    border-top: 1px solid var(--gray-border);
+    padding: 40px 20px 20px;
+    margin-top: 40px;
+}
+
+.footer-top {
+    max-width: 1200px;
+    margin: 0 auto 30px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.footer-left .logo {
+    font-size: 28px;
+    margin-bottom: 10px;
+}
+
+.phone-label {
+    font-size: 12px;
+    color: #999;
+}
+
+.phone-number {
+    font-size: 22px;
+    font-weight: 500;
+    margin: 8px 0 15px;
+    display: inline-block;
+    color: #000;
+    text-decoration: none;
+}
+
+.footer-bottom {
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+    border-top: 1px solid var(--gray-border);
+    padding-top: 20px;
+}
+
+@media (max-width: 768px) {
+    .admin-panel-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 18px 20px;
+    }
+    .admin-panel-header h1 {
+        font-size: 18px;
+    }
+    .admin-panel-body {
+        padding: 24px 18px 40px;
+    }
+    .footer-top {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 20px;
+    }
+}
+
+@media (max-width: 480px) {
+    .admin-login-card {
+        padding: 26px 20px;
+        border-radius: 16px;
+    }
+    .admin-login-card h1 {
+        font-size: 20px;
+    }
+    .admin-panel-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+}

@@ -1,0 +1,375 @@
+<!-- admin.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Администрирование | LUTOhayse</title>
+    <link rel="icon" type="image/png" href="/media/interface/favicon.png">
+    <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+
+<header>
+    <section class="main__header">
+        <div class="header__container">
+            <div class="menu__body">
+                <nav class="menu__body menu__body-main">
+                    <ul class="menu__list">
+                        <li class="menu__item site-logo">
+                            <h1 class="logo">
+                                <a href="/" class="menu__link logo-link">LUTO<span class="logo-sub">hayse</span></a>
+                            </h1>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main class="admin-main">
+
+    <!-- Шаг 1. Ввод Telegram ID -->
+    <div id="adminStep1" class="admin-login-card">
+        <h1>Вход в административную панель</h1>
+        <div class="admin-error" id="step1Error"></div>
+        <form id="requestOtpForm" autocomplete="off">
+            <div class="form-group">
+                <input type="text" id="telegramId" name="telegram_id"
+                       placeholder="ID" autocomplete="off" inputmode="numeric" required aria-label="Telegram ID">
+            </div>
+            <button type="submit" id="requestOtpBtn">Получить пароль</button>
+        </form>
+    </div>
+
+    <!-- Шаг 2. Ввод одноразового пароля -->
+    <div id="adminStep2" class="admin-login-card" style="display:none;">
+        <h1>Введите пароль</h1>
+        <p class="admin-hint">
+            Пароль отправлен в Telegram для ID <strong id="sentToId">—</strong>.<br>
+            Действителен 10 минут, используется один раз.
+        </p>
+        <div class="admin-error" id="step2Error"></div>
+        <form id="verifyOtpForm" autocomplete="off">
+            <div class="form-group">
+                <label for="otpInput">Одноразовый пароль</label>
+                <input type="text" id="otpInput" name="otp"
+                       placeholder="Введите пароль из Telegram" 
+                       autocomplete="off" 
+                       autocapitalize="none" 
+                       autocorrect="off" 
+                       spellcheck="false" 
+                       required>
+            </div>
+            <button type="submit" id="verifyOtpBtn">Войти</button>
+            <button type="button" id="resendOtpBtn" class="secondary-btn">Получить новый пароль</button>
+            <button type="button" id="backBtn" class="text-btn">Назад</button>
+        </form>
+    </div>
+
+    <!-- Панель (изначально скрыта) -->
+    <div id="adminPanel" class="admin-panel" style="display:none;">
+        <div class="admin-panel-header">
+            <h1>Административная панель</h1>
+            <div class="admin-panel-actions">
+                <span class="admin-id">ID: <strong id="currentAdminId">—</strong></span>
+                <button type="button" class="logout-btn" id="adminLogout">Выйти</button>
+            </div>
+        </div>
+        <div class="admin-panel-body">
+            <div class="admin-empty">
+                <p>Панель администратора готова к наполнению.</p>
+                <p>Здесь будет размещён функционал управления сайтом.</p>
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<footer>
+    <div class="footer-top">
+        <div class="footer-left">
+            <div class="logo">LUTO<span class="logo-sub">hayse</span></div>
+            <div class="phone-label">Звонок по России бесплатный</div>
+            <div class="phone-number">8 (999) 700-05-50</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #555;">
+                Email: <a href="mailto:luto.house@mail.ru" style="color: #628b35; text-decoration: none;">luto.house@mail.ru</a>
+            </div>
+            <div style="margin-top: 12px;">
+                <a href="https://vk.ru/lutohay" target="_blank" style="text-decoration: none; color: #628b35; font-weight: 500;">
+                    <img src="/media/interface/vk_icon.svg" alt="ВКонтакте" style="width: 32px; height: 32px; vertical-align: middle; margin-right: 6px;">
+                    ВКонтакте
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <div class="copyright">© Интернет магазин LUTOhayse мебель от производителя</div>
+    </div>
+</footer>
+
+<script>
+    (function () {
+        'use strict';
+
+        const step1Block = document.getElementById('adminStep1');
+        const step2Block = document.getElementById('adminStep2');
+        const panelBlock = document.getElementById('adminPanel');
+
+        const requestOtpForm = document.getElementById('requestOtpForm');
+        const verifyOtpForm = document.getElementById('verifyOtpForm');
+
+        const telegramIdInput = document.getElementById('telegramId');
+        const otpInput = document.getElementById('otpInput');
+
+        const requestOtpBtn = document.getElementById('requestOtpBtn');
+        const verifyOtpBtn = document.getElementById('verifyOtpBtn');
+        const resendOtpBtn = document.getElementById('resendOtpBtn');
+        const backBtn = document.getElementById('backBtn');
+
+        const step1Error = document.getElementById('step1Error');
+        const step2Error = document.getElementById('step2Error');
+
+        const sentToIdSpan = document.getElementById('sentToId');
+        const currentAdminIdSpan = document.getElementById('currentAdminId');
+        const logoutBtn = document.getElementById('adminLogout');
+
+        let currentTelegramId = '';
+
+        function showError(el, text, isSuccess = false) {
+            if (!el) return;
+            el.textContent = text || '';
+            el.classList.toggle('visible', !!text);
+            
+            if (isSuccess) {
+                el.style.color = '#628b35';
+                el.style.background = '#e8f5e9';
+                el.style.borderColor = '#c8e6c9';
+            } else {
+                el.style.color = '';
+                el.style.background = '';
+                el.style.borderColor = '';
+            }
+        }
+
+        function clearErrors() {
+            showError(step1Error, '');
+            showError(step2Error, '');
+        }
+
+        function showStep1() {
+            step2Block.style.display = 'none';
+            panelBlock.style.display = 'none';
+            step1Block.style.display = '';
+            clearErrors();
+            otpInput.value = '';
+            currentTelegramId = '';
+            telegramIdInput.focus();
+        }
+
+        function showStep2(tgId) {
+            step1Block.style.display = 'none';
+            panelBlock.style.display = 'none';
+            step2Block.style.display = '';
+            clearErrors();
+            sentToIdSpan.textContent = tgId;
+            otpInput.value = '';
+            otpInput.focus();
+        }
+
+        function showPanel(adminId) {
+            step1Block.style.display = 'none';
+            step2Block.style.display = 'none';
+            panelBlock.style.display = 'block';
+            clearErrors();
+            currentAdminIdSpan.textContent = adminId || '—';
+        }
+
+        async function readJson(resp) {
+            try { return await resp.json(); } catch (_) { return null; }
+        }
+
+        // Проверка активной сессии
+        async function checkSession() {
+            try {
+                const resp = await fetch('/api/admin/check', { credentials: 'include' });
+                if (!resp.ok) { showStep1(); return; }
+                const data = await readJson(resp);
+                if (data && data.authenticated) {
+                    showPanel(data.admin_id || '');
+                } else {
+                    showStep1();
+                }
+            } catch (e) {
+                console.error('Ошибка проверки сессии:', e);
+                showStep1();
+            }
+        }
+
+        // Шаг 1: запрос OTP
+        requestOtpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showError(step1Error, '');
+
+            const tgId = telegramIdInput.value.trim();
+            if (!tgId) {
+                showError(step1Error, 'Введите Telegram ID');
+                telegramIdInput.focus();
+                return;
+            }
+            if (!/^\d+$/.test(tgId)) {
+                showError(step1Error, 'Telegram ID должен состоять только из цифр');
+                telegramIdInput.focus();
+                return;
+            }
+
+            requestOtpBtn.disabled = true;
+            const originalText = requestOtpBtn.textContent;
+            requestOtpBtn.textContent = 'Отправка...';
+
+            try {
+                const resp = await fetch('/api/admin/request-otp', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telegram_id: tgId })
+                });
+                const data = await readJson(resp);
+
+                if (resp.ok && data && data.success) {
+                    currentTelegramId = tgId;
+                    showStep2(tgId);
+                } else {
+                    const msg = (data && data.error) ? data.error : 'Не удалось получить пароль';
+                    showError(step1Error, msg);
+                }
+            } catch (err) {
+                console.error('Ошибка запроса OTP:', err);
+                showError(step1Error, 'Ошибка соединения с сервером');
+            } finally {
+                requestOtpBtn.disabled = false;
+                requestOtpBtn.textContent = originalText;
+            }
+        });
+
+        // Шаг 2: проверка OTP
+        verifyOtpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showError(step2Error, '');
+
+            // Очищаем от невидимых символов и пробелов на стороне клиента
+            const otp = otpInput.value.replace(/[^\x20-\x7E]/g, '').trim();
+            if (!otp) {
+                showError(step2Error, 'Введите пароль');
+                otpInput.focus();
+                return;
+            }
+            if (!currentTelegramId) {
+                showStep1();
+                return;
+            }
+
+            verifyOtpBtn.disabled = true;
+            const originalText = verifyOtpBtn.textContent;
+            verifyOtpBtn.textContent = 'Проверка...';
+
+            try {
+                const resp = await fetch('/api/admin/verify-otp', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telegram_id: currentTelegramId, otp: otp })
+                });
+                const data = await readJson(resp);
+
+                if (resp.ok && data && data.success) {
+                    const adminId = data.admin_id || currentTelegramId;
+                    currentTelegramId = '';
+                    showPanel(adminId);
+                } else {
+                    const msg = (data && data.error) ? data.error : 'Неверный пароль';
+                    showError(step2Error, msg);
+                    otpInput.value = '';
+                    otpInput.focus();
+                }
+            } catch (err) {
+                console.error('Ошибка проверки OTP:', err);
+                showError(step2Error, 'Ошибка соединения с сервером');
+            } finally {
+                verifyOtpBtn.disabled = false;
+                verifyOtpBtn.textContent = originalText;
+            }
+        });
+
+        // Кнопка «Получить новый пароль»
+        resendOtpBtn.addEventListener('click', async () => {
+            if (!currentTelegramId) {
+                showStep1();
+                return;
+            }
+            
+            resendOtpBtn.disabled = true;
+            const originalText = resendOtpBtn.textContent;
+            resendOtpBtn.textContent = 'Отправка...';
+            showError(step2Error, '');
+
+            try {
+                const resp = await fetch('/api/admin/request-otp', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telegram_id: currentTelegramId })
+                });
+                const data = await readJson(resp);
+
+                if (resp.ok && data && data.success) {
+                    showError(step2Error, 'Новый пароль отправлен в Telegram', true);
+                    otpInput.value = '';
+                    otpInput.focus();
+                    
+                    setTimeout(() => {
+                        showError(step2Error, '');
+                    }, 3000);
+                } else {
+                    const msg = (data && data.error) ? data.error : 'Не удалось получить пароль';
+                    showError(step2Error, msg);
+                }
+            } catch (err) {
+                console.error('Ошибка запроса OTP:', err);
+                showError(step2Error, 'Ошибка соединения с сервером');
+            } finally {
+                resendOtpBtn.disabled = false;
+                resendOtpBtn.textContent = originalText;
+            }
+        });
+
+        // Кнопка «Назад» на шаге 2
+        backBtn.addEventListener('click', () => {
+            showStep1();
+        });
+
+        // Выход
+        logoutBtn.addEventListener('click', async () => {
+            logoutBtn.disabled = true;
+            logoutBtn.textContent = 'Выход...';
+            try {
+                await fetch('/api/admin/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+            } catch (e) {
+                console.error('Ошибка выхода:', e);
+            } finally {
+                logoutBtn.disabled = false;
+                logoutBtn.textContent = 'Выйти';
+                showStep1();
+            }
+        });
+
+        checkSession();
+    })();
+</script>
+</body>
+</html>
