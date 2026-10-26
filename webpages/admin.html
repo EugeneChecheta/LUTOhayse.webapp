@@ -56,11 +56,11 @@
             <div class="form-group">
                 <label for="otpInput">Одноразовый пароль</label>
                 <input type="text" id="otpInput" name="otp"
-                       placeholder="Введите пароль из Telegram" 
-                       autocomplete="off" 
-                       autocapitalize="none" 
-                       autocorrect="off" 
-                       spellcheck="false" 
+                       placeholder="Введите пароль из Telegram"
+                       autocomplete="off"
+                       autocapitalize="none"
+                       autocorrect="off"
+                       spellcheck="false"
                        required>
             </div>
             <button type="submit" id="verifyOtpBtn">Войти</button>
@@ -79,10 +79,128 @@
             </div>
         </div>
         <div class="admin-panel-body">
-            <div class="admin-empty">
-                <p>Панель администратора готова к наполнению.</p>
-                <p>Здесь будет размещён функционал управления сайтом.</p>
+
+            <!-- Главное меню -->
+            <div id="viewMenu" class="admin-view">
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" id="btnOpenOrders">
+                        <span class="admin-menu-icon">📋</span>
+                        <span class="admin-menu-title">Заказы</span>
+                        <span class="admin-menu-desc">Управление заказами продуктов и матрасов</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" id="btnOpenClients">
+                        <span class="admin-menu-icon">👥</span>
+                        <span class="admin-menu-title">Клиенты</span>
+                        <span class="admin-menu-desc">Управление аккаунтами клиентов</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" id="btnOpenGallery">
+                        <span class="admin-menu-icon">🎨</span>
+                        <span class="admin-menu-title">Галерея</span>
+                        <span class="admin-menu-desc">Управление индивидуальной и коммерческой галереей</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" id="btnOpenMattresses">
+                        <span class="admin-menu-icon">🛏️</span>
+                        <span class="admin-menu-title">Матрасы</span>
+                        <span class="admin-menu-desc">Слои, чехлы, размеры, цены, характеристики</span>
+                    </button>
+                </div>
             </div>
+
+            <!-- Подменю «Заказы» -->
+            <div id="viewOrdersMenu" class="admin-view" style="display:none;">
+                <button type="button" class="back-button" id="btnOrdersMenuBack">← В главное меню</button>
+                <h2 class="view-title">📋 Заказы</h2>
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" data-action="open-products">
+                        <span class="admin-menu-icon">📦</span>
+                        <span class="admin-menu-title">Заказы продуктов</span>
+                        <span class="admin-menu-desc">Просмотр и управление</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-mattresses">
+                        <span class="admin-menu-icon">🛏️</span>
+                        <span class="admin-menu-title">Заказы матрасов</span>
+                        <span class="admin-menu-desc">Просмотр и управление</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Подменю «Клиенты» -->
+            <div id="viewClientsMenu" class="admin-view" style="display:none;">
+                <button type="button" class="back-button" id="btnClientsMenuBack">← В главное меню</button>
+                <h2 class="view-title">👥 Клиенты</h2>
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" data-action="open-clients-list">
+                        <span class="admin-menu-icon">📋</span>
+                        <span class="admin-menu-title">Список клиентов</span>
+                        <span class="admin-menu-desc">Просмотр и управление</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-clients-search">
+                        <span class="admin-menu-icon">🔍</span>
+                        <span class="admin-menu-title">Поиск по телефону</span>
+                        <span class="admin-menu-desc">Найти клиента по номеру</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Подменю «Галерея» -->
+            <div id="viewGalleryMenu" class="admin-view" style="display:none;">
+                <button type="button" class="back-button" id="btnGalleryMenuBack">← В главное меню</button>
+                <h2 class="view-title">🎨 Галерея</h2>
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" data-action="open-gallery-gallery">
+                        <span class="admin-menu-icon">🖼️</span>
+                        <span class="admin-menu-title">Индивидуальная галерея</span>
+                        <span class="admin-menu-desc">Проекты индивидуальных работ</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-gallery-commercial">
+                        <span class="admin-menu-icon">💼</span>
+                        <span class="admin-menu-title">Коммерческая галерея</span>
+                        <span class="admin-menu-desc">Коммерческие проекты</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Подменю «Матрасы» -->
+            <div id="viewMattressesMenu" class="admin-view" style="display:none;">
+                <button type="button" class="back-button" id="btnMattressesMenuBack">← В главное меню</button>
+                <h2 class="view-title">🛏️ Конструктор матрасов</h2>
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" data-action="open-mattress-layers">
+                        <span class="admin-menu-icon">🧩</span>
+                        <span class="admin-menu-title">Слои</span>
+                        <span class="admin-menu-desc">Управление слоями матрасов</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-mattress-covers">
+                        <span class="admin-menu-icon">🧵</span>
+                        <span class="admin-menu-title">Чехлы</span>
+                        <span class="admin-menu-desc">Управление чехлами</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-mattress-sizes">
+                        <span class="admin-menu-icon">📐</span>
+                        <span class="admin-menu-title">Размеры</span>
+                        <span class="admin-menu-desc">Управление размерами матрасов</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-mattress-prices">
+                        <span class="admin-menu-icon">💰</span>
+                        <span class="admin-menu-title">Цены</span>
+                        <span class="admin-menu-desc">Цены слоёв и чехлов по размерам</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="open-mattress-features">
+                        <span class="admin-menu-icon">📋</span>
+                        <span class="admin-menu-title">Характеристики</span>
+                        <span class="admin-menu-desc">Справочник основных характеристик</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="download-mattress-excel">
+                        <span class="admin-menu-icon">📥</span>
+                        <span class="admin-menu-title">Скачать 000000.xlsx</span>
+                        <span class="admin-menu-desc">Таблица цен (аналог /partner0)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Динамический контент -->
+            <div id="viewContent" class="admin-view" style="display:none;"></div>
+
         </div>
     </div>
 
@@ -111,6 +229,9 @@
 </footer>
 
 <script>
+    // ============================================================
+    // Авторизация (OTP) — без изменений
+    // ============================================================
     (function () {
         'use strict';
 
@@ -142,7 +263,6 @@
             if (!el) return;
             el.textContent = text || '';
             el.classList.toggle('visible', !!text);
-            
             if (isSuccess) {
                 el.style.color = '#628b35';
                 el.style.background = '#e8f5e9';
@@ -185,13 +305,15 @@
             panelBlock.style.display = 'block';
             clearErrors();
             currentAdminIdSpan.textContent = adminId || '—';
+            if (window.AdminOrders && typeof window.AdminOrders.init === 'function') {
+                window.AdminOrders.init();
+            }
         }
 
         async function readJson(resp) {
             try { return await resp.json(); } catch (_) { return null; }
         }
 
-        // Проверка активной сессии
         async function checkSession() {
             try {
                 const resp = await fetch('/api/admin/check', { credentials: 'include' });
@@ -208,11 +330,9 @@
             }
         }
 
-        // Шаг 1: запрос OTP
         requestOtpForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             showError(step1Error, '');
-
             const tgId = telegramIdInput.value.trim();
             if (!tgId) {
                 showError(step1Error, 'Введите Telegram ID');
@@ -224,11 +344,9 @@
                 telegramIdInput.focus();
                 return;
             }
-
             requestOtpBtn.disabled = true;
             const originalText = requestOtpBtn.textContent;
             requestOtpBtn.textContent = 'Отправка...';
-
             try {
                 const resp = await fetch('/api/admin/request-otp', {
                     method: 'POST',
@@ -237,7 +355,6 @@
                     body: JSON.stringify({ telegram_id: tgId })
                 });
                 const data = await readJson(resp);
-
                 if (resp.ok && data && data.success) {
                     currentTelegramId = tgId;
                     showStep2(tgId);
@@ -254,12 +371,9 @@
             }
         });
 
-        // Шаг 2: проверка OTP
         verifyOtpForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             showError(step2Error, '');
-
-            // Очищаем от невидимых символов и пробелов на стороне клиента
             const otp = otpInput.value.replace(/[^\x20-\x7E]/g, '').trim();
             if (!otp) {
                 showError(step2Error, 'Введите пароль');
@@ -270,11 +384,9 @@
                 showStep1();
                 return;
             }
-
             verifyOtpBtn.disabled = true;
             const originalText = verifyOtpBtn.textContent;
             verifyOtpBtn.textContent = 'Проверка...';
-
             try {
                 const resp = await fetch('/api/admin/verify-otp', {
                     method: 'POST',
@@ -283,7 +395,6 @@
                     body: JSON.stringify({ telegram_id: currentTelegramId, otp: otp })
                 });
                 const data = await readJson(resp);
-
                 if (resp.ok && data && data.success) {
                     const adminId = data.admin_id || currentTelegramId;
                     currentTelegramId = '';
@@ -303,18 +414,15 @@
             }
         });
 
-        // Кнопка «Получить новый пароль»
         resendOtpBtn.addEventListener('click', async () => {
             if (!currentTelegramId) {
                 showStep1();
                 return;
             }
-            
             resendOtpBtn.disabled = true;
             const originalText = resendOtpBtn.textContent;
             resendOtpBtn.textContent = 'Отправка...';
             showError(step2Error, '');
-
             try {
                 const resp = await fetch('/api/admin/request-otp', {
                     method: 'POST',
@@ -323,15 +431,11 @@
                     body: JSON.stringify({ telegram_id: currentTelegramId })
                 });
                 const data = await readJson(resp);
-
                 if (resp.ok && data && data.success) {
                     showError(step2Error, 'Новый пароль отправлен в Telegram', true);
                     otpInput.value = '';
                     otpInput.focus();
-                    
-                    setTimeout(() => {
-                        showError(step2Error, '');
-                    }, 3000);
+                    setTimeout(() => showError(step2Error, ''), 3000);
                 } else {
                     const msg = (data && data.error) ? data.error : 'Не удалось получить пароль';
                     showError(step2Error, msg);
@@ -345,20 +449,13 @@
             }
         });
 
-        // Кнопка «Назад» на шаге 2
-        backBtn.addEventListener('click', () => {
-            showStep1();
-        });
+        backBtn.addEventListener('click', () => showStep1());
 
-        // Выход
         logoutBtn.addEventListener('click', async () => {
             logoutBtn.disabled = true;
             logoutBtn.textContent = 'Выход...';
             try {
-                await fetch('/api/admin/logout', {
-                    method: 'POST',
-                    credentials: 'include'
-                });
+                await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
             } catch (e) {
                 console.error('Ошибка выхода:', e);
             } finally {
@@ -369,6 +466,2418 @@
         });
 
         checkSession();
+    })();
+
+
+    // ============================================================
+    // МИНИ-ПРИЛОЖЕНИЕ «ЗАКАЗЫ, КЛИЕНТЫ, ГАЛЕРЕЯ, МАТРАСЫ»
+    // ============================================================
+    (function () {
+        'use strict';
+
+        const state = {
+            statuses: [],
+            pendingType: null,
+            pendingId: null,
+            pendingPage: 0,
+            customerPhone: null,
+            customerExcludeType: null,
+            customerExcludeId: null,
+            customerBackType: null,
+            customerBackPage: 0,
+            clientId: null,
+            clientListPage: 0,
+            clientOrdersPage: 0,
+            gallerySection: null,
+            galleryProjectName: null,
+            galleryListPage: 0,
+            // Mattress state
+            mattressLayersPage: 0,
+            mattressCoversPage: 0,
+            mattressSizesPage: 0,
+            mattressFeatureTypesPage: 0,
+            editLayerId: null,
+            editLayerPage: 0,
+            editCoverId: null,
+            editCoverPage: 0,
+            priceType: null,
+            priceEntityId: null,
+        };
+
+        let views = {
+            menu: null,
+            ordersMenu: null,
+            clientsMenu: null,
+            galleryMenu: null,
+            mattressesMenu: null,
+            content: null,
+        };
+
+        // ------------------------- Утилиты -------------------------
+        function esc(s) {
+            if (s === null || s === undefined) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function apiGet(url) {
+            const resp = await fetch(url, { credentials: 'include' });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+            return data;
+        }
+
+        async function apiPost(url, body) {
+            const resp = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {})
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+            return data;
+        }
+
+        async function apiPut(url, body) {
+            const resp = await fetch(url, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {})
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+            return data;
+        }
+
+        async function apiDelete(url) {
+            const resp = await fetch(url, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+            return data;
+        }
+
+        async function apiUpload(url, formData, method = 'POST') {
+            const resp = await fetch(url, {
+                method: method,
+                credentials: 'include',
+                body: formData
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Ошибка запроса');
+            return data;
+        }
+
+        // ------------------------- Навигация -------------------------
+        function showOnly(viewName) {
+            ['viewMenu', 'viewOrdersMenu', 'viewClientsMenu', 'viewGalleryMenu', 'viewMattressesMenu', 'viewContent']
+                .forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+            const el = document.getElementById(viewName);
+            if (el) el.style.display = '';
+        }
+
+        function showMainMenu() { showOnly('viewMenu'); }
+        function showOrdersMenu() { showOnly('viewOrdersMenu'); }
+        function showClientsMenu() { showOnly('viewClientsMenu'); }
+        function showGalleryMenu() { showOnly('viewGalleryMenu'); }
+        function showMattressesMenu() { showOnly('viewMattressesMenu'); }
+        function showContent() { showOnly('viewContent'); }
+
+        function renderLoading() {
+            views.content.innerHTML = '<div class="loading">Загрузка…</div>';
+        }
+
+        function renderError(msg) {
+            views.content.innerHTML = `<div class="error-box">⚠️ ${esc(msg)}</div>`;
+        }
+
+        // ============================================================
+        //                    ЗАКАЗЫ ПРОДУКТОВ
+        // ============================================================
+        async function loadProductsList(page) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/orders/products?page=${page}`);
+                renderProductsList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderProductsList(data) {
+            const { orders, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="orders_menu">← К заказам</button>
+                    <h2 class="view-title">📦 Заказы продуктов</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+
+            if (!orders.length) {
+                html += '<div class="orders-empty">Нет заказов.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const o of orders) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">#${esc(o.id)}</span> <span class="order-name">${esc(o.user_name)}</span></div>
+                                <div class="order-row"><span class="order-label">📞</span> ${esc(o.phone)}</div>
+                                <div class="order-row"><span class="order-label">📅</span> ${esc(o.order_date || '—')}</div>
+                                <div class="order-row"><span class="order-label">🏷️</span> ${esc(o.status)}</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view" data-type="product" data-id="${o.id}" data-page="${page}">📄 Детали</button>
+                                <button type="button" class="action-btn" data-action="status" data-type="product" data-id="${o.id}" data-page="${page}">✏️ Статус</button>
+                                <button type="button" class="action-btn danger" data-action="delete" data-type="product" data-id="${o.id}" data-page="${page}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="products" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="products" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        // ============================================================
+        //                    ЗАКАЗЫ МАТРАСОВ
+        // ============================================================
+        async function loadMattressesList(page) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/orders/mattresses?page=${page}`);
+                renderMattressesList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderMattressesList(data) {
+            const { orders, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="orders_menu">← К заказам</button>
+                    <h2 class="view-title">🛏️ Заказы матрасов</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+
+            if (!orders.length) {
+                html += '<div class="orders-empty">Нет заказов.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const o of orders) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">#${esc(o.id)}</span> <span class="order-name">${esc(o.user_name)}</span></div>
+                                <div class="order-row"><span class="order-label">📞</span> ${esc(o.phone)}</div>
+                                <div class="order-row"><span class="order-label">📐</span> ${esc(o.size_name)}</div>
+                                <div class="order-row"><span class="order-label">📅</span> ${esc(o.order_date || '—')}</div>
+                                <div class="order-row"><span class="order-label">🏷️</span> ${esc(o.status)}</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view" data-type="mattress" data-id="${o.id}" data-page="${page}">📄 Детали</button>
+                                <button type="button" class="action-btn" data-action="status" data-type="mattress" data-id="${o.id}" data-page="${page}">✏️ Статус</button>
+                                <button type="button" class="action-btn danger" data-action="delete" data-type="mattress" data-id="${o.id}" data-page="${page}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="mattresses" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="mattresses" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        // ============================================================
+        //                ДЕТАЛИ ЗАКАЗА ПРОДУКТА
+        // ============================================================
+        async function loadProductDetails(orderId, page, opts = {}) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/orders/products/${orderId}`);
+                renderProductDetails(data, page, opts);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderProductDetails(data, page, opts = {}) {
+            const { order, items, total_sum } = data;
+            const fromClient = !!opts.fromClientId;
+
+            let itemsHtml = '';
+            for (const it of items) {
+                if (it.is_topper && it.extra_data) {
+                    const ex = it.extra_data;
+                    const layers = (ex.layer_names || []).join(', ') || '—';
+                    itemsHtml += `
+                        <div class="detail-item">
+                            <div class="detail-item-title">🛏️ Топпер (${esc(ex.size_name || '—')})</div>
+                            <div class="detail-item-sub">Слои: ${esc(layers)}</div>
+                            <div class="detail-item-sub">Чехол: ${esc(ex.cover_name || '—')}</div>
+                            <div class="detail-item-cost">${it.quantity} шт × ${it.cost}₽ = ${it.total}₽</div>
+                        </div>
+                    `;
+                } else {
+                    itemsHtml += `
+                        <div class="detail-item">
+                            <div class="detail-item-title">${esc(it.product_name)} (${esc(it.material_name)})</div>
+                            <div class="detail-item-cost">${it.quantity} шт × ${it.cost}₽ = ${it.total}₽</div>
+                        </div>
+                    `;
+                }
+            }
+
+            const backBtn = fromClient
+                ? `<button type="button" class="back-button" data-back="client_orders" data-client-id="${opts.fromClientId}">← К заказам клиента</button>`
+                : `<button type="button" class="back-button" data-back="products_list" data-page="${page}">← К списку</button>`;
+
+            let actionsHtml = '';
+            if (!fromClient) {
+                actionsHtml = `
+                    <div class="detail-actions">
+                        <button type="button" class="action-btn primary" data-action="status" data-type="product" data-id="${order.id}" data-page="${page}">✏️ Изменить статус</button>
+                        <button type="button" class="action-btn danger" data-action="delete" data-type="product" data-id="${order.id}" data-page="${page}">🗑️ Удалить заказ</button>
+                        <button type="button" class="action-btn" data-action="customer" data-type="product" data-id="${order.id}" data-page="${page}" data-phone="${esc(order.phone)}">👥 Другие заказы клиента</button>
+                    </div>
+                `;
+            }
+
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    ${backBtn}
+                    <h2 class="view-title">📦 Заказ продукта #${esc(order.id)}</h2>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">👤 Клиент:</span><span class="detail-value">${esc(order.user_name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">📞 Телефон:</span><span class="detail-value">${esc(order.phone)}</span></div>
+                    <div class="detail-row"><span class="detail-label">✉️ Email:</span><span class="detail-value">${esc(order.email) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🏠 Адрес:</span><span class="detail-value">${esc(order.address) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">💬 Комментарий:</span><span class="detail-value">${esc(order.comment) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">⏰ Удобное время:</span><span class="detail-value">${esc(order.contact_time) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">📅 Дата заказа:</span><span class="detail-value">${esc(order.order_date) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🏷️ Статус:</span><span class="detail-value"><strong>${esc(order.status)}</strong></span></div>
+                </div>
+
+                <h3 class="detail-subtitle">Товары</h3>
+                <div class="detail-items">${itemsHtml}</div>
+
+                <div class="detail-total">💰 Итого: <strong>${total_sum}₽</strong></div>
+
+                ${actionsHtml}
+            `;
+        }
+
+        // ============================================================
+        //                ДЕТАЛИ ЗАКАЗА МАТРАСА
+        // ============================================================
+        async function loadMattressDetails(orderId, page) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/orders/mattresses/${orderId}`);
+                renderMattressDetails(data, page);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderMattressDetails(data, page) {
+            const { order, items, layers_height, total_height, grand_total } = data;
+            let layersHtml = '';
+            for (const it of items) {
+                layersHtml += `
+                    <div class="detail-item">
+                        <div class="detail-item-title">${esc(it.layer_name)} (${esc(it.layer_code)})</div>
+                        <div class="detail-item-cost">${it.quantity} шт × ${it.price_per_unit}₽ = ${it.total_price}₽</div>
+                    </div>
+                `;
+            }
+
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_list" data-page="${page}">← К списку</button>
+                    <h2 class="view-title">🛏️ Заказ матраса #${esc(order.id)}</h2>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">👤 Клиент:</span><span class="detail-value">${esc(order.user_name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">📞 Телефон:</span><span class="detail-value">${esc(order.phone)}</span></div>
+                    <div class="detail-row"><span class="detail-label">✉️ Email:</span><span class="detail-value">${esc(order.email) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🏠 Адрес:</span><span class="detail-value">${esc(order.address) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">💬 Комментарий:</span><span class="detail-value">${esc(order.comment) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">⏰ Удобное время:</span><span class="detail-value">${esc(order.contact_time) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">📅 Дата заказа:</span><span class="detail-value">${esc(order.order_date) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🏷️ Статус:</span><span class="detail-value"><strong>${esc(order.status)}</strong></span></div>
+                    <div class="detail-row"><span class="detail-label">📐 Размер:</span><span class="detail-value">${esc(order.size_name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">📏 Изначальная высота:</span><span class="detail-value">${order.initial_height} см</span></div>
+                    <div class="detail-row"><span class="detail-label">🛏️ Чехол:</span><span class="detail-value">${esc(order.cover_name)} (${order.cover_price}₽)</span></div>
+                </div>
+
+                <h3 class="detail-subtitle">Слои</h3>
+                <div class="detail-items">${layersHtml}</div>
+
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📊 Высота слоёв:</span><span class="detail-value">${layers_height} см</span></div>
+                    <div class="detail-row"><span class="detail-label">📏 Итоговая высота:</span><span class="detail-value">${total_height} см</span></div>
+                </div>
+
+                <div class="detail-total">💰 Итого: <strong>${grand_total}₽</strong></div>
+
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="status" data-type="mattress" data-id="${order.id}" data-page="${page}">✏️ Изменить статус</button>
+                    <button type="button" class="action-btn danger" data-action="delete" data-type="mattress" data-id="${order.id}" data-page="${page}">🗑️ Удалить заказ</button>
+                    <button type="button" class="action-btn" data-action="customer" data-type="mattress" data-id="${order.id}" data-page="${page}" data-phone="${esc(order.phone)}">👥 Другие заказы клиента</button>
+                </div>
+            `;
+        }
+
+        // ============================================================
+        //                    СМЕНА СТАТУСА / УДАЛЕНИЕ
+        // ============================================================
+        function showStatusSelect(orderType, orderId, page) {
+            state.pendingType = orderType;
+            state.pendingId = orderId;
+            state.pendingPage = page;
+            const label = orderType === 'mattress' ? 'матраса' : 'продукта';
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="${orderType}_details" data-id="${orderId}" data-page="${page}">← Назад</button>
+                    <h2 class="view-title">✏️ Статус заказа ${label} #${orderId}</h2>
+                </div>
+                <div class="status-list">
+            `;
+            for (const s of state.statuses) {
+                html += `<button type="button" class="status-btn" data-status="${esc(s)}">${esc(s)}</button>`;
+            }
+            html += '</div>';
+            views.content.innerHTML = html;
+            showContent();
+        }
+
+        async function applyStatus(newStatus) {
+            if (!state.pendingType || !state.pendingId) return;
+            try {
+                const endpoint = state.pendingType === 'mattress'
+                    ? `/api/admin/orders/mattresses/${state.pendingId}/status`
+                    : `/api/admin/orders/products/${state.pendingId}/status`;
+                await apiPut(endpoint, { status: newStatus });
+                if (state.pendingType === 'mattress') {
+                    await loadMattressesList(state.pendingPage);
+                } else {
+                    await loadProductsList(state.pendingPage);
+                }
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function showDeleteConfirm(orderType, orderId, page) {
+            state.pendingType = orderType;
+            state.pendingId = orderId;
+            state.pendingPage = page;
+            const label = orderType === 'mattress' ? 'матраса' : 'продукта';
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="${orderType}_details" data-id="${orderId}" data-page="${page}">← Назад</button>
+                    <h2 class="view-title">🗑️ Удаление</h2>
+                </div>
+                <div class="confirm-box">
+                    <p>⚠️ Удалить заказ ${label} <strong>#${orderId}</strong> навсегда?</p>
+                    <div class="confirm-actions">
+                        <button type="button" class="action-btn danger" data-confirm-delete="yes">✅ Да, удалить</button>
+                        <button type="button" class="action-btn" data-back="${orderType}_details" data-id="${orderId}" data-page="${page}">❌ Нет</button>
+                    </div>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function applyDelete() {
+            if (!state.pendingType || !state.pendingId) return;
+            try {
+                const endpoint = state.pendingType === 'mattress'
+                    ? `/api/admin/orders/mattresses/${state.pendingId}`
+                    : `/api/admin/orders/products/${state.pendingId}`;
+                await apiDelete(endpoint);
+                if (state.pendingType === 'mattress') {
+                    await loadMattressesList(state.pendingPage);
+                } else {
+                    await loadProductsList(state.pendingPage);
+                }
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //            ДРУГИЕ ЗАКАЗЫ КЛИЕНТА
+        // ============================================================
+        async function loadCustomerOrders(phone, excludeType, excludeId, backType, backPage) {
+            showContent();
+            renderLoading();
+            state.customerPhone = phone;
+            state.customerExcludeType = excludeType;
+            state.customerExcludeId = excludeId;
+            state.customerBackType = backType;
+            state.customerBackPage = backPage;
+            try {
+                const url = `/api/admin/orders/customer/${encodeURIComponent(phone)}` +
+                    `?exclude_type=${encodeURIComponent(excludeType)}&exclude_id=${excludeId}`;
+                const data = await apiGet(url);
+                renderCustomerOrders(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderCustomerOrders(data) {
+            const { phone, products, mattresses } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="customer_back">← Назад</button>
+                    <h2 class="view-title">👥 Другие заказы клиента</h2>
+                </div>
+                <div class="customer-phone">📞 ${esc(phone)}</div>
+            `;
+
+            if (!products.length && !mattresses.length) {
+                html += '<div class="orders-empty">Других заказов не найдено.</div>';
+            } else {
+                if (products.length) {
+                    html += '<h3 class="detail-subtitle">📦 Продукты</h3><div class="orders-list">';
+                    for (const o of products) {
+                        html += `
+                            <div class="order-card compact">
+                                <div class="order-card-info">
+                                    <div class="order-row"><span class="order-id">#${esc(o.id)}</span></div>
+                                    <div class="order-row"><span class="order-label">📅</span> ${esc(o.order_date || '—')}</div>
+                                    <div class="order-row"><span class="order-label">🏷️</span> ${esc(o.status)}</div>
+                                </div>
+                                <div class="order-card-actions">
+                                    <button type="button" class="action-btn primary" data-action="view" data-type="product" data-id="${o.id}" data-page="0">📄 Открыть</button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    html += '</div>';
+                }
+                if (mattresses.length) {
+                    html += '<h3 class="detail-subtitle">🛏️ Матрасы</h3><div class="orders-list">';
+                    for (const o of mattresses) {
+                        html += `
+                            <div class="order-card compact">
+                                <div class="order-card-info">
+                                    <div class="order-row"><span class="order-id">#${esc(o.id)}</span></div>
+                                    <div class="order-row"><span class="order-label">📐</span> ${esc(o.size_name)}</div>
+                                    <div class="order-row"><span class="order-label">📅</span> ${esc(o.order_date || '—')}</div>
+                                    <div class="order-row"><span class="order-label">🏷️</span> ${esc(o.status)}</div>
+                                </div>
+                                <div class="order-card-actions">
+                                    <button type="button" class="action-btn primary" data-action="view" data-type="mattress" data-id="${o.id}" data-page="0">📄 Открыть</button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    html += '</div>';
+                }
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        // ============================================================
+        //                    КЛИЕНТЫ
+        // ============================================================
+        async function loadClientsList(page = 0) {
+            showContent();
+            renderLoading();
+            state.clientListPage = page;
+            try {
+                const data = await apiGet(`/api/admin/clients?page=${page}`);
+                renderClientsList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderClientsList(data) {
+            const { clients, page, total, total_pages } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="clients_menu">← К клиентам</button>
+                    <h2 class="view-title">📋 Список клиентов</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+
+            if (!clients.length) {
+                html += '<div class="orders-empty">Нет зарегистрированных клиентов.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const c of clients) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">#${esc(c.id)}</span> <span class="order-name">${esc(c.full_name) || 'Без имени'}</span></div>
+                                <div class="order-row"><span class="order-label">📞</span> ${esc(c.phone) || 'не указан'}</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-client" data-id="${c.id}">📄 Открыть</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="clients" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="clients" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        async function loadClientDetail(clientId) {
+            showContent();
+            renderLoading();
+            state.clientId = clientId;
+            state.clientOrdersPage = 0;
+            try {
+                const data = await apiGet(`/api/admin/clients/${clientId}`);
+                renderClientDetail(data.client);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderClientDetail(c) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="clients_list">← К списку</button>
+                    <h2 class="view-title">👤 Клиент #${esc(c.id)}</h2>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📞 Телефон:</span><span class="detail-value">${esc(c.phone) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">👤 Имя:</span><span class="detail-value">${esc(c.full_name) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">📧 Email:</span><span class="detail-value">${esc(c.email) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🏠 Адрес:</span><span class="detail-value">${esc(c.address) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🕒 Время связи:</span><span class="detail-value">${esc(c.contact_time) || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">🔑 Пароль (хэш):</span><span class="detail-value"><span class="password-hash">${esc(c.password_hash) || '—'}</span></span></div>
+                    <div class="detail-row"><span class="detail-label">📅 Дата регистрации:</span><span class="detail-value">${esc(c.created_at) || '—'}</span></div>
+                </div>
+
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="edit-client" data-id="${c.id}">✏️ Редактировать</button>
+                    <button type="button" class="action-btn danger" data-action="delete-client" data-id="${c.id}" data-phone="${esc(c.phone)}">🗑️ Удалить</button>
+                    <button type="button" class="action-btn" data-action="view-client-orders" data-id="${c.id}">📦 Заказы</button>
+                    <button type="button" class="action-btn" data-back="main_menu">🏠 Главное меню</button>
+                </div>
+            `;
+        }
+
+        async function loadClientEdit(clientId) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/clients/${clientId}`);
+                renderClientEdit(data.client);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderClientEdit(c) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="client_detail">← Отмена</button>
+                    <h2 class="view-title">✏️ Редактирование клиента #${esc(c.id)}</h2>
+                </div>
+
+                <div class="detail-section edit-form">
+                    <div class="detail-row"><span class="detail-label">📞 Телефон:</span><span class="detail-value"><input type="text" class="edit-input" data-field="phone" value="${esc(c.phone || '')}"></span></div>
+                    <div class="detail-row"><span class="detail-label">👤 Имя:</span><span class="detail-value"><input type="text" class="edit-input" data-field="full_name" value="${esc(c.full_name || '')}"></span></div>
+                    <div class="detail-row"><span class="detail-label">📧 Email:</span><span class="detail-value"><input type="email" class="edit-input" data-field="email" value="${esc(c.email || '')}"></span></div>
+                    <div class="detail-row"><span class="detail-label">🏠 Адрес:</span><span class="detail-value"><input type="text" class="edit-input" data-field="address" value="${esc(c.address || '')}"></span></div>
+                    <div class="detail-row"><span class="detail-label">🕒 Время связи:</span><span class="detail-value"><input type="text" class="edit-input" data-field="contact_time" value="${esc(c.contact_time || '')}"></span></div>
+                    <div class="detail-row"><span class="detail-label">🔑 Новый пароль:</span><span class="detail-value"><input type="password" class="edit-input" data-field="password" placeholder="Оставьте пустым, чтобы не менять"></span></div>
+                </div>
+
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="save-client" data-id="${c.id}">💾 Сохранить</button>
+                    <button type="button" class="action-btn" data-back="client_detail">❌ Отмена</button>
+                </div>
+            `;
+        }
+
+        async function saveClientEdit(clientId) {
+            const inputs = views.content.querySelectorAll('.edit-form input[data-field]');
+            const updates = {};
+            inputs.forEach(inp => {
+                const field = inp.dataset.field;
+                const val = inp.value.trim();
+                if (field === 'password') {
+                    if (val) updates.password = val;
+                } else {
+                    updates[field] = val;
+                }
+            });
+            if (Object.keys(updates).length === 0) {
+                alert('Нет изменений для сохранения.');
+                return;
+            }
+            try {
+                await apiPut(`/api/admin/clients/${clientId}`, updates);
+                await loadClientDetail(clientId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function showClientDeleteConfirm(clientId, phone) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="client_detail">← Назад</button>
+                    <h2 class="view-title">🗑️ Удаление клиента</h2>
+                </div>
+                <div class="confirm-box">
+                    <p>⚠️ Удалить клиента <strong>${esc(phone)}</strong>?<br>
+                    Все заказы клиента останутся, но связь с пользователем будет удалена.</p>
+                    <div class="confirm-actions">
+                        <button type="button" class="action-btn danger" data-action="confirm-delete-client" data-id="${clientId}">✅ Да, удалить</button>
+                        <button type="button" class="action-btn" data-back="client_detail">❌ Нет, отмена</button>
+                    </div>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function applyClientDelete(clientId) {
+            try {
+                await apiDelete(`/api/admin/clients/${clientId}`);
+                await loadClientsList(0);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadClientOrders(clientId, page = 0) {
+            showContent();
+            renderLoading();
+            state.clientOrdersPage = page;
+            try {
+                const data = await apiGet(`/api/admin/clients/${clientId}/orders?page=${page}`);
+                renderClientOrders(data, clientId, page);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderClientOrders(data, clientId, page) {
+            const { orders, total, total_pages } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="client_detail">← К клиенту</button>
+                    <h2 class="view-title">📦 Заказы клиента #${esc(clientId)}</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+
+            if (!orders.length) {
+                html += '<div class="orders-empty">У этого клиента нет заказов.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const o of orders) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">#${esc(o.id)}</span></div>
+                                <div class="order-row"><span class="order-label">📅</span> ${esc(o.order_date || '—')}</div>
+                                <div class="order-row"><span class="order-label">🏷️</span> ${esc(o.status)}</div>
+                                <div class="order-row"><span class="order-label">💰</span> ${o.total}₽</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-client-order" data-id="${o.id}" data-client-id="${clientId}">📄 Детали</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="client-orders" data-page="${Math.max(0, page - 1)}" data-client-id="${clientId}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="client-orders" data-page="${Math.min(total_pages - 1, page + 1)}" data-client-id="${clientId}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        async function loadClientOrderDetail(orderId, clientId) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/orders/products/${orderId}`);
+                renderProductDetails(data, 0, { fromClientId: clientId });
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function showClientSearch() {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="clients_menu">← К клиентам</button>
+                    <h2 class="view-title">🔍 Поиск по телефону</h2>
+                </div>
+                <div class="search-form">
+                    <input type="tel" id="clientSearchInput" placeholder="Введите номер телефона (или его часть)">
+                    <button type="button" class="action-btn primary" data-action="do-client-search">🔍 Найти</button>
+                </div>
+            `;
+            showContent();
+            const input = document.getElementById('clientSearchInput');
+            if (input) input.focus();
+        }
+
+        async function searchClients(phone) {
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/clients/search?phone=${encodeURIComponent(phone)}`);
+                renderSearchResults(data.clients || [], phone);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderSearchResults(clients, phone) {
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="clients_menu">← К клиентам</button>
+                    <h2 class="view-title">🔍 Результаты поиска</h2>
+                </div>
+                <div class="search-form">
+                    <input type="tel" id="clientSearchInput" placeholder="Введите номер телефона" value="${esc(phone)}">
+                    <button type="button" class="action-btn primary" data-action="do-client-search">🔍 Найти</button>
+                </div>
+            `;
+
+            if (!clients.length) {
+                html += '<div class="orders-empty">Клиенты не найдены.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const c of clients) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">#${esc(c.id)}</span> <span class="order-name">${esc(c.full_name) || 'Без имени'}</span></div>
+                                <div class="order-row"><span class="order-label">📞</span> ${esc(c.phone) || '—'}</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-client" data-id="${c.id}">📄 Открыть</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            views.content.innerHTML = html;
+        }
+
+        // ============================================================
+        //                    ГАЛЕРЕЯ
+        // ============================================================
+        async function loadGalleryList(section, page = 0) {
+            showContent();
+            renderLoading();
+            state.gallerySection = section;
+            state.galleryListPage = page;
+            try {
+                const data = await apiGet(`/api/admin/gallery/${section}/projects?page=${page}`);
+                renderGalleryList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderGalleryList(data) {
+            const { section, title, projects, page, total, total_pages } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="gallery_menu">← К разделам</button>
+                    <h2 class="view-title">🎨 ${esc(title)}</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+
+            if (!projects.length) {
+                html += '<div class="orders-empty">Проектов пока нет. Создайте первый!</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const p of projects) {
+                    const shortDesc = p.description
+                        ? (p.description.length > 60 ? p.description.slice(0, 60) + '…' : p.description)
+                        : '(без описания)';
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">📁</span> <span class="order-name">${esc(p.name)}</span></div>
+                                <div class="order-row"><span class="order-label">📷</span> ${p.photo_count} фото</div>
+                                <div class="order-row"><span class="order-label">📝</span> ${esc(shortDesc)}</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-gallery-project" data-name="${esc(p.name)}">📄 Открыть</button>
+                                <button type="button" class="action-btn danger" data-action="delete-gallery-project" data-name="${esc(p.name)}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="gallery" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="gallery" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+
+            html += `
+                <div class="detail-actions" style="margin-top: 20px;">
+                    <button type="button" class="action-btn primary" data-action="new-gallery-project">➕ Создать проект</button>
+                </div>
+            `;
+
+            views.content.innerHTML = html;
+        }
+
+        function showGalleryCreateForm() {
+            const section = state.gallerySection;
+            if (!section) { showGalleryMenu(); return; }
+            const sectionTitle = section === 'commercial' ? 'Коммерческая галерея' : 'Индивидуальная галерея';
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="gallery_list">← К списку</button>
+                    <h2 class="view-title">➕ Новый проект — ${esc(sectionTitle)}</h2>
+                </div>
+                <div class="detail-section">
+                    <label class="detail-label" for="galleryCreateDesc">📝 Описание (необязательно):</label>
+                    <textarea class="edit-input" id="galleryCreateDesc" rows="4" placeholder="Описание проекта..."></textarea>
+                    <label class="detail-label" for="galleryCreateFiles" style="margin-top: 14px;">📷 Фотографии (можно несколько):</label>
+                    <input type="file" id="galleryCreateFiles" accept="image/*" multiple>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="create-gallery-project">✅ Создать</button>
+                    <button type="button" class="action-btn" data-back="gallery_list">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function submitGalleryCreate() {
+            const section = state.gallerySection;
+            if (!section) return;
+            const descEl = document.getElementById('galleryCreateDesc');
+            const fileEl = document.getElementById('galleryCreateFiles');
+            const description = descEl ? descEl.value : '';
+            const files = fileEl ? fileEl.files : [];
+
+            const btn = views.content.querySelector('[data-action="create-gallery-project"]');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Создание...'; }
+
+            const fd = new FormData();
+            if (description) fd.append('description', description);
+            for (let i = 0; i < files.length; i++) {
+                fd.append('photos', files[i]);
+            }
+            try {
+                const data = await apiUpload(`/api/admin/gallery/${section}/projects`, fd);
+                await loadGalleryProject(section, data.name);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = '✅ Создать'; }
+            }
+        }
+
+        async function loadGalleryProject(section, name) {
+            showContent();
+            renderLoading();
+            state.gallerySection = section;
+            state.galleryProjectName = name;
+            try {
+                const data = await apiGet(`/api/admin/gallery/${section}/projects/${encodeURIComponent(name)}`);
+                renderGalleryProject(data.project);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderGalleryProject(project) {
+            const { name, description, photos } = project;
+            let photosHtml = '';
+            if (!photos.length) {
+                photosHtml = '<div class="orders-empty">Фото пока нет. Добавьте первые!</div>';
+            } else {
+                photosHtml = '<div class="gallery-grid">';
+                for (const p of photos) {
+                    photosHtml += `
+                        <div class="gallery-photo">
+                            <img src="${esc(p.url)}" alt="Фото #${p.index}" loading="lazy">
+                            <div class="gallery-photo-caption">
+                                <input type="text" class="edit-input"
+                                       data-caption-index="${p.index}"
+                                       placeholder="Подпись к фото..."
+                                       value="${esc(p.caption)}">
+                            </div>
+                            <div class="gallery-photo-actions">
+                                <button type="button" class="action-btn primary"
+                                        data-action="save-gallery-caption"
+                                        data-index="${p.index}">💾 Сохранить</button>
+                                <button type="button" class="action-btn danger"
+                                        data-action="delete-gallery-photo"
+                                        data-index="${p.index}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                photosHtml += '</div>';
+            }
+
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="gallery_list">← К списку</button>
+                    <h2 class="view-title">📁 ${esc(name)}</h2>
+                </div>
+
+                <div class="detail-section">
+                    <label class="detail-label" for="galleryProjectDesc">📝 Описание проекта:</label>
+                    <textarea class="edit-input" id="galleryProjectDesc" rows="4"
+                              placeholder="Описание проекта...">${esc(description)}</textarea>
+                    <div style="margin-top: 10px;">
+                        <button type="button" class="action-btn primary"
+                                data-action="save-gallery-description">💾 Сохранить описание</button>
+                    </div>
+                </div>
+
+                <h3 class="detail-subtitle">📷 Фотографии (${photos.length})</h3>
+                ${photosHtml}
+
+                <div class="detail-actions" style="margin-top: 20px;">
+                    <button type="button" class="action-btn primary" data-action="upload-gallery-photos">➕ Добавить фото</button>
+                    <button type="button" class="action-btn danger" data-action="delete-gallery-project" data-name="${esc(name)}">🗑️ Удалить проект</button>
+                    <button type="button" class="action-btn" data-back="main_menu">🏠 Главное меню</button>
+                    <input type="file" id="galleryUploadInput" accept="image/*" multiple style="display:none;">
+                </div>
+            `;
+        }
+
+        async function saveGalleryDescription(name, description) {
+            const btn = views.content.querySelector('[data-action="save-gallery-description"]');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Сохранение...'; }
+            try {
+                await apiPut(
+                    `/api/admin/gallery/${state.gallerySection}/projects/${encodeURIComponent(name)}/description`,
+                    { description }
+                );
+                if (btn) {
+                    btn.textContent = '✅ Сохранено';
+                    setTimeout(() => { btn.disabled = false; btn.textContent = '💾 Сохранить описание'; }, 1500);
+                }
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '💾 Сохранить описание'; }
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function saveGalleryCaption(name, index, caption) {
+            const btn = views.content.querySelector(`[data-action="save-gallery-caption"][data-index="${index}"]`);
+            if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+            try {
+                await apiPut(
+                    `/api/admin/gallery/${state.gallerySection}/projects/${encodeURIComponent(name)}/photos/${index}/caption`,
+                    { caption }
+                );
+                if (btn) {
+                    btn.textContent = '✅';
+                    setTimeout(() => { btn.disabled = false; btn.textContent = '💾 Сохранить'; }, 1200);
+                }
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '💾 Сохранить'; }
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteGalleryPhoto(name, index) {
+            if (!confirm(`Удалить фото #${index}? Все последующие фото будут перенумерованы.`)) return;
+            try {
+                await apiDelete(
+                    `/api/admin/gallery/${state.gallerySection}/projects/${encodeURIComponent(name)}/photos/${index}`
+                );
+                await loadGalleryProject(state.gallerySection, name);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function uploadGalleryPhotos(name, files) {
+            if (!files || !files.length) return;
+            const fd = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                fd.append('photos', files[i]);
+            }
+            try {
+                await apiUpload(
+                    `/api/admin/gallery/${state.gallerySection}/projects/${encodeURIComponent(name)}/photos`,
+                    fd
+                );
+                await loadGalleryProject(state.gallerySection, name);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function showGalleryDeleteConfirm(name) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="gallery_project">← Назад</button>
+                    <h2 class="view-title">🗑️ Удаление проекта</h2>
+                </div>
+                <div class="confirm-box">
+                    <p>⚠️ Удалить проект <strong>${esc(name)}</strong> и все его фото навсегда?</p>
+                    <div class="confirm-actions">
+                        <button type="button" class="action-btn danger" data-action="confirm-delete-gallery-project">✅ Да, удалить</button>
+                        <button type="button" class="action-btn" data-back="gallery_project">❌ Нет, отмена</button>
+                    </div>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function applyGalleryDeleteProject() {
+            const section = state.gallerySection;
+            const name = state.galleryProjectName;
+            if (!section || !name) return;
+            try {
+                await apiDelete(`/api/admin/gallery/${section}/projects/${encodeURIComponent(name)}`);
+                state.galleryProjectName = null;
+                await loadGalleryList(section, state.galleryListPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                  МАТРАСЫ: СЛОИ
+        // ============================================================
+        async function loadLayersList(page = 0) {
+            showContent();
+            renderLoading();
+            state.mattressLayersPage = page;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers?page=${page}`);
+                renderLayersList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderLayersList(data) {
+            const { layers, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">🧩 Слои</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+            if (!layers.length) {
+                html += '<div class="orders-empty">Слоёв пока нет.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const l of layers) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">${esc(l.code)}</span> <span class="order-name">${esc(l.name)}</span></div>
+                                <div class="order-row"><span class="order-label">📝</span> ${esc(l.description) || '—'}</div>
+                                ${l.has_photo ? '<div class="order-row"><span class="order-label">📸</span> фото есть</div>' : ''}
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-layer" data-id="${l.id}">📄 Открыть</button>
+                                <button type="button" class="action-btn danger" data-action="delete-layer" data-id="${l.id}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="layers" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="layers" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+            html += `
+                <div class="detail-actions" style="margin-top:20px;">
+                    <button type="button" class="action-btn primary" data-action="new-layer">➕ Добавить слой</button>
+                </div>
+            `;
+            views.content.innerHTML = html;
+        }
+
+        function showLayerCreateForm() {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layers_list">← Отмена</button>
+                    <h2 class="view-title">➕ Новый слой</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value"><input class="edit-input" id="newLayerName" type="text" placeholder="Название слоя"></span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value"><input class="edit-input" id="newLayerCode" type="text" placeholder="Уникальный код"></span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value"><textarea class="edit-input" id="newLayerDesc" rows="3"></textarea></span></div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="create-layer">💾 Создать</button>
+                    <button type="button" class="action-btn" data-back="layers_list">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function createLayer() {
+            const name = (document.getElementById('newLayerName') || {}).value || '';
+            const code = (document.getElementById('newLayerCode') || {}).value || '';
+            const desc = (document.getElementById('newLayerDesc') || {}).value || '';
+            if (!name.trim() || !code.trim()) {
+                alert('Заполните код и название');
+                return;
+            }
+            try {
+                await apiPost('/api/admin/mattresses/layers', { name: name.trim(), code: code.trim(), description: desc.trim() });
+                await loadLayersList(state.mattressLayersPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadLayerDetail(layerId) {
+            showContent();
+            renderLoading();
+            state.editLayerId = layerId;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers/${layerId}`);
+                renderLayerDetail(data.layer);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderLayerDetail(layer) {
+            let photoHtml = '';
+            if (layer.has_photo && layer.photo_url) {
+                photoHtml = `<div class="detail-row"><span class="detail-label">📸 Фото:</span><span class="detail-value"><img src="${esc(layer.photo_url)}" class="mattress-photo-preview" alt="Фото слоя"></span></div>`;
+            } else {
+                photoHtml = `<div class="detail-row"><span class="detail-label">📸 Фото:</span><span class="detail-value">отсутствует</span></div>`;
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layers_list">← К списку</button>
+                    <h2 class="view-title">🧩 Слой ${esc(layer.code)}</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value">${esc(layer.name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value">${esc(layer.code)}</span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value">${esc(layer.description) || '—'}</span></div>
+                    ${photoHtml}
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="edit-layer" data-id="${layer.id}">✏️ Редактировать</button>
+                    <button type="button" class="action-btn" data-action="layer-photo" data-id="${layer.id}">📸 Управление фото</button>
+                    <button type="button" class="action-btn" data-action="layer-main-features" data-id="${layer.id}">📋 Осн. характеристики</button>
+                    <button type="button" class="action-btn" data-action="layer-extra-features" data-id="${layer.id}">➕ Доп. характеристики</button>
+                    <button type="button" class="action-btn danger" data-action="delete-layer" data-id="${layer.id}">🗑️ Удалить</button>
+                    <button type="button" class="action-btn" data-back="layers_list">◀ К списку</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        function renderLayerEdit(layer) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layer_detail">← Отмена</button>
+                    <h2 class="view-title">✏️ Редактирование слоя ${esc(layer.code)}</h2>
+                </div>
+                <div class="detail-section edit-form">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value"><input class="edit-input" id="editLayerName" type="text" value="${esc(layer.name)}"></span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value"><input class="edit-input" id="editLayerCode" type="text" value="${esc(layer.code)}"></span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value"><textarea class="edit-input" id="editLayerDesc" rows="3">${esc(layer.description)}</textarea></span></div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="save-layer" data-id="${layer.id}">💾 Сохранить</button>
+                    <button type="button" class="action-btn" data-back="layer_detail">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function loadLayerEdit(layerId) {
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers/${layerId}`);
+                renderLayerEdit(data.layer);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        async function saveLayerEdit(layerId) {
+            const name = (document.getElementById('editLayerName') || {}).value || '';
+            const code = (document.getElementById('editLayerCode') || {}).value || '';
+            const desc = (document.getElementById('editLayerDesc') || {}).value || '';
+            if (!name.trim() || !code.trim()) { alert('Заполните код и название'); return; }
+            try {
+                await apiPut(`/api/admin/mattresses/layers/${layerId}`, { name: name.trim(), code: code.trim(), description: desc.trim() });
+                await loadLayerDetail(layerId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadLayerPhoto(layerId) {
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers/${layerId}`);
+                renderLayerPhoto(data.layer);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderLayerPhoto(layer) {
+            let preview = layer.has_photo && layer.photo_url
+                ? `<img src="${esc(layer.photo_url)}" class="mattress-photo-preview" alt="Фото слоя">`
+                : '<div class="orders-empty">Фото отсутствует</div>';
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layer_detail">← Назад</button>
+                    <h2 class="view-title">📸 Фото слоя ${esc(layer.code)}</h2>
+                </div>
+                <div class="detail-section">
+                    ${preview}
+                </div>
+                <div class="detail-actions">
+                    <input type="file" id="layerPhotoInput" accept="image/*" style="display:none;">
+                    <button type="button" class="action-btn primary" data-action="upload-layer-photo" data-id="${layer.id}">➕ Загрузить фото</button>
+                    ${layer.has_photo ? `<button type="button" class="action-btn danger" data-action="remove-layer-photo" data-id="${layer.id}">🗑️ Удалить фото</button>` : ''}
+                    <button type="button" class="action-btn" data-back="layer_detail">◀ К слою</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function uploadLayerPhoto(layerId) {
+            const fileEl = document.getElementById('layerPhotoInput');
+            if (!fileEl || !fileEl.files || !fileEl.files[0]) return;
+            const fd = new FormData();
+            fd.append('photo', fileEl.files[0]);
+            try {
+                await apiUpload(`/api/admin/mattresses/layers/${layerId}/photo`, fd);
+                await loadLayerPhoto(layerId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function removeLayerPhoto(layerId) {
+            if (!confirm('Удалить фото слоя?')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/layers/${layerId}/photo`);
+                await loadLayerPhoto(layerId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteLayer(layerId) {
+            if (!confirm('Удалить слой навсегда? Все связанные цены и характеристики будут удалены.')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/layers/${layerId}`);
+                await loadLayersList(state.mattressLayersPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadLayerMainFeatures(layerId) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers/${layerId}/main-features`);
+                renderLayerMainFeatures(data.features, layerId);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderLayerMainFeatures(features, layerId) {
+            let rows = '';
+            if (!features.length) {
+                rows = '<div class="orders-empty">Нет основных характеристик в справочнике.</div>';
+            } else {
+                for (const f of features) {
+                    rows += `
+                        <div class="detail-row">
+                            <span class="detail-label">${esc(f.feature_name)}:</span>
+                            <span class="detail-value"><input class="edit-input" type="text" data-main-feat-id="${f.feature_id}" data-layer-id="${layerId}" value="${esc(f.value)}"></span>
+                            <button type="button" class="action-btn primary" data-action="save-main-feature" data-layer-id="${layerId}" data-feature-id="${f.feature_id}">💾</button>
+                        </div>
+                    `;
+                }
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layer_detail">← К слою</button>
+                    <h2 class="view-title">📋 Основные характеристики слоя</h2>
+                </div>
+                <div class="detail-section">${rows}</div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn" data-back="layer_detail">◀ Назад к слою</button>
+                </div>
+            `;
+        }
+
+        async function saveMainFeature(layerId, featureId) {
+            const input = views.content.querySelector(`input[data-main-feat-id="${featureId}"]`);
+            const value = input ? input.value : '';
+            try {
+                await apiPut(`/api/admin/mattresses/layers/${layerId}/main-features/${featureId}`, { value });
+                alert('Сохранено');
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadLayerExtraFeatures(layerId) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/layers/${layerId}/extra-features`);
+                renderLayerExtraFeatures(data.features, layerId);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderLayerExtraFeatures(features, layerId) {
+            let rows = '';
+            if (!features.length) {
+                rows = '<div class="orders-empty">Дополнительных характеристик пока нет.</div>';
+            } else {
+                for (const f of features) {
+                    rows += `
+                        <div class="detail-row">
+                            <span class="detail-label">${esc(f.name)}:</span>
+                            <span class="detail-value"><input class="edit-input" type="text" data-extra-id="${f.id}" value="${esc(f.value)}"></span>
+                            <button type="button" class="action-btn primary" data-action="save-extra-feature" data-id="${f.id}">💾</button>
+                            <button type="button" class="action-btn danger" data-action="delete-extra-feature" data-id="${f.id}" data-layer-id="${layerId}">🗑️</button>
+                        </div>
+                    `;
+                }
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="layer_detail">← К слою</button>
+                    <h2 class="view-title">➕ Дополнительные характеристики слоя</h2>
+                </div>
+                <div class="detail-section">${rows}</div>
+                <div class="detail-section">
+                    <h3 class="detail-subtitle">Добавить новую</h3>
+                    <div class="detail-row"><span class="detail-label">Название:</span><span class="detail-value"><input class="edit-input" id="newExtraName" type="text"></span></div>
+                    <div class="detail-row"><span class="detail-label">Значение:</span><span class="detail-value"><input class="edit-input" id="newExtraValue" type="text"></span></div>
+                    <button type="button" class="action-btn primary" data-action="add-extra-feature" data-layer-id="${layerId}">➕ Добавить</button>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn" data-back="layer_detail">◀ Назад к слою</button>
+                </div>
+            `;
+        }
+
+        async function saveExtraFeature(featId) {
+            const input = views.content.querySelector(`input[data-extra-id="${featId}"]`);
+            const value = input ? input.value : '';
+            try {
+                await apiPut(`/api/admin/mattresses/extra-features/${featId}`, { value });
+                alert('Сохранено');
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteExtraFeature(featId, layerId) {
+            if (!confirm('Удалить характеристику?')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/extra-features/${featId}`);
+                await loadLayerExtraFeatures(layerId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function addExtraFeature(layerId) {
+            const name = (document.getElementById('newExtraName') || {}).value || '';
+            const value = (document.getElementById('newExtraValue') || {}).value || '';
+            if (!name.trim()) { alert('Введите название'); return; }
+            try {
+                await apiPost(`/api/admin/mattresses/layers/${layerId}/extra-features`, { name: name.trim(), value: value.trim() });
+                await loadLayerExtraFeatures(layerId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                  МАТРАСЫ: ЧЕХЛЫ
+        // ============================================================
+        async function loadCoversList(page = 0) {
+            showContent();
+            renderLoading();
+            state.mattressCoversPage = page;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/covers?page=${page}`);
+                renderCoversList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderCoversList(data) {
+            const { covers, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">🧵 Чехлы</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+            if (!covers.length) {
+                html += '<div class="orders-empty">Чехлов пока нет.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const c of covers) {
+                    html += `
+                        <div class="order-card">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">${esc(c.code)}</span> <span class="order-name">${esc(c.name)}</span></div>
+                                <div class="order-row"><span class="order-label">📝</span> ${esc(c.description) || '—'}</div>
+                                ${c.has_photo ? '<div class="order-row"><span class="order-label">📸</span> фото есть</div>' : ''}
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="view-cover" data-id="${c.id}">📄 Открыть</button>
+                                <button type="button" class="action-btn danger" data-action="delete-cover" data-id="${c.id}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="covers" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="covers" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+            html += `
+                <div class="detail-actions" style="margin-top:20px;">
+                    <button type="button" class="action-btn primary" data-action="new-cover">➕ Добавить чехол</button>
+                </div>
+            `;
+            views.content.innerHTML = html;
+        }
+
+        function showCoverCreateForm() {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="covers_list">← Отмена</button>
+                    <h2 class="view-title">➕ Новый чехол</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value"><input class="edit-input" id="newCoverName" type="text" placeholder="Название чехла"></span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value"><input class="edit-input" id="newCoverCode" type="text" placeholder="Уникальный код"></span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value"><textarea class="edit-input" id="newCoverDesc" rows="3"></textarea></span></div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="create-cover">💾 Создать</button>
+                    <button type="button" class="action-btn" data-back="covers_list">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function createCover() {
+            const name = (document.getElementById('newCoverName') || {}).value || '';
+            const code = (document.getElementById('newCoverCode') || {}).value || '';
+            const desc = (document.getElementById('newCoverDesc') || {}).value || '';
+            if (!name.trim() || !code.trim()) { alert('Заполните код и название'); return; }
+            try {
+                await apiPost('/api/admin/mattresses/covers', { name: name.trim(), code: code.trim(), description: desc.trim() });
+                await loadCoversList(state.mattressCoversPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadCoverDetail(coverId) {
+            showContent();
+            renderLoading();
+            state.editCoverId = coverId;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/covers/${coverId}`);
+                renderCoverDetail(data.cover);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderCoverDetail(cover) {
+            let photoHtml = cover.has_photo && cover.photo_url
+                ? `<div class="detail-row"><span class="detail-label">📸 Фото:</span><span class="detail-value"><img src="${esc(cover.photo_url)}" class="mattress-photo-preview" alt="Фото чехла"></span></div>`
+                : `<div class="detail-row"><span class="detail-label">📸 Фото:</span><span class="detail-value">отсутствует</span></div>`;
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="covers_list">← К списку</button>
+                    <h2 class="view-title">🧵 Чехол ${esc(cover.code)}</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value">${esc(cover.name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value">${esc(cover.code)}</span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value">${esc(cover.description) || '—'}</span></div>
+                    ${photoHtml}
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="edit-cover" data-id="${cover.id}">✏️ Редактировать</button>
+                    <button type="button" class="action-btn" data-action="cover-photo" data-id="${cover.id}">📸 Управление фото</button>
+                    <button type="button" class="action-btn danger" data-action="delete-cover" data-id="${cover.id}">🗑️ Удалить</button>
+                    <button type="button" class="action-btn" data-back="covers_list">◀ К списку</button>
+                </div>
+            `;
+        }
+
+        function renderCoverEdit(cover) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="cover_detail">← Отмена</button>
+                    <h2 class="view-title">✏️ Редактирование чехла ${esc(cover.code)}</h2>
+                </div>
+                <div class="detail-section edit-form">
+                    <div class="detail-row"><span class="detail-label">📛 Название:</span><span class="detail-value"><input class="edit-input" id="editCoverName" type="text" value="${esc(cover.name)}"></span></div>
+                    <div class="detail-row"><span class="detail-label">🔢 Код:</span><span class="detail-value"><input class="edit-input" id="editCoverCode" type="text" value="${esc(cover.code)}"></span></div>
+                    <div class="detail-row"><span class="detail-label">📝 Описание:</span><span class="detail-value"><textarea class="edit-input" id="editCoverDesc" rows="3">${esc(cover.description)}</textarea></span></div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="save-cover" data-id="${cover.id}">💾 Сохранить</button>
+                    <button type="button" class="action-btn" data-back="cover_detail">❌ Отмена</button>
+                </div>
+            `;
+        }
+
+        async function loadCoverEdit(coverId) {
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/covers/${coverId}`);
+                renderCoverEdit(data.cover);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        async function saveCoverEdit(coverId) {
+            const name = (document.getElementById('editCoverName') || {}).value || '';
+            const code = (document.getElementById('editCoverCode') || {}).value || '';
+            const desc = (document.getElementById('editCoverDesc') || {}).value || '';
+            if (!name.trim() || !code.trim()) { alert('Заполните код и название'); return; }
+            try {
+                await apiPut(`/api/admin/mattresses/covers/${coverId}`, { name: name.trim(), code: code.trim(), description: desc.trim() });
+                await loadCoverDetail(coverId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function loadCoverPhoto(coverId) {
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/mattresses/covers/${coverId}`);
+                renderCoverPhoto(data.cover);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderCoverPhoto(cover) {
+            let preview = cover.has_photo && cover.photo_url
+                ? `<img src="${esc(cover.photo_url)}" class="mattress-photo-preview" alt="Фото чехла">`
+                : '<div class="orders-empty">Фото отсутствует</div>';
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="cover_detail">← Назад</button>
+                    <h2 class="view-title">📸 Фото чехла ${esc(cover.code)}</h2>
+                </div>
+                <div class="detail-section">${preview}</div>
+                <div class="detail-actions">
+                    <input type="file" id="coverPhotoInput" accept="image/*" style="display:none;">
+                    <button type="button" class="action-btn primary" data-action="upload-cover-photo" data-id="${cover.id}">➕ Загрузить фото</button>
+                    ${cover.has_photo ? `<button type="button" class="action-btn danger" data-action="remove-cover-photo" data-id="${cover.id}">🗑️ Удалить фото</button>` : ''}
+                    <button type="button" class="action-btn" data-back="cover_detail">◀ К чехлу</button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function uploadCoverPhoto(coverId) {
+            const fileEl = document.getElementById('coverPhotoInput');
+            if (!fileEl || !fileEl.files || !fileEl.files[0]) return;
+            const fd = new FormData();
+            fd.append('photo', fileEl.files[0]);
+            try {
+                await apiUpload(`/api/admin/mattresses/covers/${coverId}/photo`, fd);
+                await loadCoverPhoto(coverId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function removeCoverPhoto(coverId) {
+            if (!confirm('Удалить фото чехла?')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/covers/${coverId}/photo`);
+                await loadCoverPhoto(coverId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteCover(coverId) {
+            if (!confirm('Удалить чехол навсегда? Все связанные цены будут удалены.')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/covers/${coverId}`);
+                await loadCoversList(state.mattressCoversPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                  МАТРАСЫ: РАЗМЕРЫ
+        // ============================================================
+        async function loadSizesList(page = 0) {
+            showContent();
+            renderLoading();
+            state.mattressSizesPage = page;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/sizes?page=${page}`);
+                renderSizesList(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderSizesList(data) {
+            const { sizes, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">📐 Размеры</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+            if (!sizes.length) {
+                html += '<div class="orders-empty">Размеров пока нет.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const s of sizes) {
+                    html += `
+                        <div class="order-card compact">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-name">📏 ${esc(s.name)}</span></div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn" data-action="edit-size" data-id="${s.id}" data-name="${esc(s.name)}">✏️</button>
+                                <button type="button" class="action-btn danger" data-action="delete-size" data-id="${s.id}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="sizes" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="sizes" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+            html += `
+                <div class="detail-section" style="margin-top:20px;">
+                    <h3 class="detail-subtitle">Добавить размер</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Название:</span>
+                        <span class="detail-value"><input class="edit-input" id="newSizeName" type="text" placeholder="например 140x70"></span>
+                        <button type="button" class="action-btn primary" data-action="create-size">➕ Добавить</button>
+                    </div>
+                </div>
+            `;
+            views.content.innerHTML = html;
+        }
+
+        async function createSize() {
+            const name = (document.getElementById('newSizeName') || {}).value || '';
+            if (!name.trim()) { alert('Введите название'); return; }
+            try {
+                await apiPost('/api/admin/mattresses/sizes', { name: name.trim() });
+                await loadSizesList(state.mattressSizesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function editSize(sizeId, currentName) {
+            const newName = prompt('Введите новое название размера:', currentName || '');
+            if (newName === null) return;
+            try {
+                await apiPut(`/api/admin/mattresses/sizes/${sizeId}`, { name: newName.trim() });
+                await loadSizesList(state.mattressSizesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteSize(sizeId) {
+            if (!confirm('Удалить размер? Связанные цены будут удалены.')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/sizes/${sizeId}`);
+                await loadSizesList(state.mattressSizesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                  МАТРАСЫ: ЦЕНЫ
+        // ============================================================
+        function loadPricesMenu() {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">💰 Управление ценами</h2>
+                </div>
+                <div class="admin-menu-grid">
+                    <button type="button" class="admin-menu-card" data-action="price-type" data-type="layers">
+                        <span class="admin-menu-icon">🧩</span>
+                        <span class="admin-menu-title">Цены слоёв</span>
+                    </button>
+                    <button type="button" class="admin-menu-card" data-action="price-type" data-type="covers">
+                        <span class="admin-menu-icon">🧵</span>
+                        <span class="admin-menu-title">Цены чехлов</span>
+                    </button>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function loadPriceType(type) {
+            showContent();
+            renderLoading();
+            try {
+                let items = [];
+                if (type === 'layers') {
+                    const data = await apiGet('/api/admin/mattresses/layers?page=0');
+                    items = data.layers;
+                } else {
+                    const data = await apiGet('/api/admin/mattresses/covers?page=0');
+                    items = data.covers;
+                }
+                renderPriceTypeMenu(items, type);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderPriceTypeMenu(items, type) {
+            const title = type === 'layers' ? 'слоя' : 'чехла';
+            let buttons = '';
+            if (!items.length) {
+                buttons = '<div class="orders-empty">Нет записей. Сначала создайте.</div>';
+            } else {
+                buttons = '<div class="orders-list">';
+                for (const it of items) {
+                    buttons += `
+                        <div class="order-card compact">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">${esc(it.code)}</span> <span class="order-name">${esc(it.name)}</span></div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="price-entity" data-type="${type}" data-id="${it.id}">💰 Цены</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                buttons += '</div>';
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="prices_menu">← Назад</button>
+                    <h2 class="view-title">💰 Цены ${type === 'layers' ? 'слоёв' : 'чехлов'}</h2>
+                </div>
+                <p style="margin-bottom:16px;color:#777;">Выберите ${title} для управления ценами:</p>
+                ${buttons}
+            `;
+        }
+
+        async function loadPriceEntity(type, entityId) {
+            showContent();
+            renderLoading();
+            state.priceType = type;
+            state.priceEntityId = entityId;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/prices/${type}/${entityId}`);
+                renderPriceEntity(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderPriceEntity(data) {
+            const { prices, price_type, entity_id } = data;
+            let rows = '';
+            if (!prices.length) {
+                rows = '<div class="orders-empty">Сначала создайте размеры.</div>';
+            } else {
+                for (const p of prices) {
+                    rows += `
+                        <div class="price-row">
+                            <span class="price-label">${esc(p.size_name)}:</span>
+                            <input type="number" class="edit-input price-input" data-size-id="${p.size_id}" value="${p.price !== null && p.price !== undefined ? p.price : ''}" placeholder="—">
+                            <button type="button" class="action-btn primary" data-action="save-price" data-type="${price_type}" data-entity-id="${entity_id}" data-size-id="${p.size_id}">💾</button>
+                        </div>
+                    `;
+                }
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="price_type" data-type="${price_type}">← Назад</button>
+                    <h2 class="view-title">💰 Цены</h2>
+                </div>
+                <div class="detail-section">${rows}</div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn" data-back="prices_menu">◀ К ценам</button>
+                </div>
+            `;
+        }
+
+        async function savePrice(type, entityId, sizeId) {
+            const input = views.content.querySelector(`input.price-input[data-size-id="${sizeId}"]`);
+            const val = input ? input.value.trim() : '';
+            const body = { price: val === '' ? null : parseInt(val, 10) };
+            if (body.price !== null && (isNaN(body.price) || body.price < 0)) {
+                alert('Введите положительное целое число или оставьте пустым для удаления');
+                return;
+            }
+            try {
+                await apiPut(`/api/admin/mattresses/prices/${type}/${entityId}/${sizeId}`, body);
+                await loadPriceEntity(type, entityId);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //            МАТРАСЫ: СПРАВОЧНИК ХАРАКТЕРИСТИК
+        // ============================================================
+        async function loadFeatureTypes(page = 0) {
+            showContent();
+            renderLoading();
+            state.mattressFeatureTypesPage = page;
+            try {
+                const data = await apiGet(`/api/admin/mattresses/feature-types?page=${page}`);
+                renderFeatureTypes(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderFeatureTypes(data) {
+            const { types, page, total_pages, total } = data;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">📋 Основные характеристики (справочник)</h2>
+                    <span class="orders-count">Всего: ${total}</span>
+                </div>
+            `;
+            if (!types.length) {
+                html += '<div class="orders-empty">Характеристик пока нет.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const t of types) {
+                    html += `
+                        <div class="order-card compact">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-name">${esc(t.name)}</span></div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn" data-action="edit-feature-type" data-id="${t.id}" data-name="${esc(t.name)}">✏️</button>
+                                <button type="button" class="action-btn danger" data-action="delete-feature-type" data-id="${t.id}">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            if (total_pages > 1) {
+                html += '<div class="pagination">';
+                html += `<button type="button" class="page-btn" data-page-nav="feature-types" data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>◀ Назад</button>`;
+                html += `<span class="page-info">Стр. ${page + 1} из ${total_pages}</span>`;
+                html += `<button type="button" class="page-btn" data-page-nav="feature-types" data-page="${Math.min(total_pages - 1, page + 1)}" ${page >= total_pages - 1 ? 'disabled' : ''}>Вперёд ▶</button>`;
+                html += '</div>';
+            }
+            html += `
+                <div class="detail-section" style="margin-top:20px;">
+                    <h3 class="detail-subtitle">Добавить характеристику</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Название:</span>
+                        <span class="detail-value"><input class="edit-input" id="newFeatureTypeName" type="text"></span>
+                        <button type="button" class="action-btn primary" data-action="create-feature-type">➕ Добавить</button>
+                    </div>
+                </div>
+            `;
+            views.content.innerHTML = html;
+        }
+
+        async function createFeatureType() {
+            const name = (document.getElementById('newFeatureTypeName') || {}).value || '';
+            if (!name.trim()) { alert('Введите название'); return; }
+            try {
+                await apiPost('/api/admin/mattresses/feature-types', { name: name.trim() });
+                await loadFeatureTypes(state.mattressFeatureTypesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function editFeatureType(featId, currentName) {
+            const newName = prompt('Введите новое название:', currentName || '');
+            if (newName === null) return;
+            try {
+                await apiPut(`/api/admin/mattresses/feature-types/${featId}`, { name: newName.trim() });
+                await loadFeatureTypes(state.mattressFeatureTypesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function deleteFeatureType(featId) {
+            if (!confirm('Удалить характеристику? Значения для всех слоёв будут удалены.')) return;
+            try {
+                await apiDelete(`/api/admin/mattresses/feature-types/${featId}`);
+                await loadFeatureTypes(state.mattressFeatureTypesPage);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                    ЭКСПОРТ EXCEL
+        // ============================================================
+        async function downloadExcel() {
+            try {
+                const resp = await fetch('/api/admin/mattresses/export', { credentials: 'include' });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || 'Ошибка экспорта');
+                }
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '000000.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
+        //                    ОБРАБОТКА «НАЗАД»
+        // ============================================================
+        function handleBack(el) {
+            const target = el.dataset.back;
+            const id = parseInt(el.dataset.id || '0', 10);
+            const page = parseInt(el.dataset.page || '0', 10);
+            const type = el.dataset.type;
+
+            switch (target) {
+                case 'orders_menu': showOrdersMenu(); break;
+                case 'clients_menu': showClientsMenu(); break;
+                case 'gallery_menu': showGalleryMenu(); break;
+                case 'mattresses_menu': showMattressesMenu(); break;
+                case 'main_menu': showMainMenu(); break;
+                case 'products_list': loadProductsList(page); break;
+                case 'mattresses_list': loadMattressesList(page); break;
+                case 'product_details': loadProductDetails(id, page); break;
+                case 'mattress_details': loadMattressDetails(id, page); break;
+                case 'clients_list': loadClientsList(state.clientListPage); break;
+                case 'client_detail': loadClientDetail(state.clientId); break;
+                case 'client_orders': {
+                    const cid = parseInt(el.dataset.clientId || state.clientId || '0', 10);
+                    if (cid) loadClientOrders(cid, state.clientOrdersPage);
+                    else showClientsMenu();
+                    break;
+                }
+                case 'customer_back':
+                    if (state.customerBackType === 'product') {
+                        loadProductDetails(state.customerExcludeId, state.customerBackPage);
+                    } else if (state.customerBackType === 'mattress') {
+                        loadMattressDetails(state.customerExcludeId, state.customerBackPage);
+                    } else {
+                        showOrdersMenu();
+                    }
+                    break;
+                case 'gallery_list':
+                    if (state.gallerySection) loadGalleryList(state.gallerySection, state.galleryListPage);
+                    else showGalleryMenu();
+                    break;
+                case 'gallery_project':
+                    if (state.gallerySection && state.galleryProjectName) loadGalleryProject(state.gallerySection, state.galleryProjectName);
+                    else showGalleryMenu();
+                    break;
+                // Mattress section backs
+                case 'layers_list': loadLayersList(state.mattressLayersPage); break;
+                case 'layer_detail':
+                    if (state.editLayerId) loadLayerDetail(state.editLayerId);
+                    else loadLayersList(state.mattressLayersPage);
+                    break;
+                case 'covers_list': loadCoversList(state.mattressCoversPage); break;
+                case 'cover_detail':
+                    if (state.editCoverId) loadCoverDetail(state.editCoverId);
+                    else loadCoversList(state.mattressCoversPage);
+                    break;
+                case 'sizes_list': loadSizesList(state.mattressSizesPage); break;
+                case 'prices_menu': loadPricesMenu(); break;
+                case 'price_type': loadPriceType(type || 'layers'); break;
+                default: showOrdersMenu();
+            }
+        }
+
+        // ============================================================
+        //          ДЕЛЕГИРОВАНИЕ КЛИКА ПО КОНТЕНТУ
+        // ============================================================
+        function onContentClick(e) {
+            const el = e.target.closest(
+                '[data-back], [data-page-nav], [data-action], [data-status], [data-confirm-delete]'
+            );
+            if (!el) return;
+
+            if (el.dataset.back !== undefined) { handleBack(el); return; }
+
+            if (el.dataset.pageNav) {
+                const nav = el.dataset.pageNav;
+                const page = parseInt(el.dataset.page || '0', 10);
+                if (nav === 'products') loadProductsList(page);
+                else if (nav === 'mattresses') loadMattressesList(page);
+                else if (nav === 'clients') loadClientsList(page);
+                else if (nav === 'client-orders') {
+                    const cid = parseInt(el.dataset.clientId || state.clientId || '0', 10);
+                    if (cid) loadClientOrders(cid, page);
+                }
+                else if (nav === 'gallery') { if (state.gallerySection) loadGalleryList(state.gallerySection, page); }
+                else if (nav === 'layers') loadLayersList(page);
+                else if (nav === 'covers') loadCoversList(page);
+                else if (nav === 'sizes') loadSizesList(page);
+                else if (nav === 'feature-types') loadFeatureTypes(page);
+                return;
+            }
+
+            if (el.dataset.action) {
+                const action = el.dataset.action;
+                const type = el.dataset.type;
+                const id = parseInt(el.dataset.id, 10);
+                const page = parseInt(el.dataset.page || '0', 10);
+
+                if (action === 'view') {
+                    if (type === 'product') loadProductDetails(id, page);
+                    else if (type === 'mattress') loadMattressDetails(id, page);
+                } else if (action === 'status') {
+                    showStatusSelect(type, id, page);
+                } else if (action === 'delete') {
+                    showDeleteConfirm(type, id, page);
+                } else if (action === 'customer') {
+                    const phone = el.dataset.phone || '';
+                    loadCustomerOrders(phone, type, id, type, page);
+                } else if (action === 'view-client') {
+                    loadClientDetail(id);
+                } else if (action === 'edit-client') {
+                    loadClientEdit(id);
+                } else if (action === 'save-client') {
+                    saveClientEdit(id);
+                } else if (action === 'delete-client') {
+                    showClientDeleteConfirm(id, el.dataset.phone || '');
+                } else if (action === 'confirm-delete-client') {
+                    applyClientDelete(id);
+                } else if (action === 'view-client-orders') {
+                    loadClientOrders(id, 0);
+                } else if (action === 'view-client-order') {
+                    const cid = parseInt(el.dataset.clientId || state.clientId || '0', 10);
+                    if (cid) loadClientOrderDetail(id, cid);
+                } else if (action === 'do-client-search') {
+                    const input = document.getElementById('clientSearchInput');
+                    const phone = input ? input.value.trim() : '';
+                    if (!phone) { if (input) input.focus(); return; }
+                    searchClients(phone);
+                }
+                // --- Галерея ---
+                else if (action === 'new-gallery-project') { showGalleryCreateForm(); }
+                else if (action === 'create-gallery-project') { submitGalleryCreate(); }
+                else if (action === 'view-gallery-project') {
+                    const name = el.dataset.name;
+                    if (name) loadGalleryProject(state.gallerySection, name);
+                } else if (action === 'save-gallery-description') {
+                    const ta = document.getElementById('galleryProjectDesc');
+                    if (state.galleryProjectName) saveGalleryDescription(state.galleryProjectName, ta ? ta.value : '');
+                } else if (action === 'save-gallery-caption') {
+                    const idx = parseInt(el.dataset.index, 10);
+                    const input = views.content.querySelector(`input[data-caption-index="${idx}"]`);
+                    if (state.galleryProjectName) saveGalleryCaption(state.galleryProjectName, idx, input ? input.value : '');
+                } else if (action === 'delete-gallery-photo') {
+                    const idx = parseInt(el.dataset.index, 10);
+                    if (state.galleryProjectName) deleteGalleryPhoto(state.galleryProjectName, idx);
+                } else if (action === 'upload-gallery-photos') {
+                    const input = document.getElementById('galleryUploadInput');
+                    if (input) input.click();
+                } else if (action === 'delete-gallery-project') {
+                    const name = el.dataset.name || state.galleryProjectName;
+                    if (name) { state.galleryProjectName = name; showGalleryDeleteConfirm(name); }
+                } else if (action === 'confirm-delete-gallery-project') {
+                    applyGalleryDeleteProject();
+                }
+                // --- Слои ---
+                else if (action === 'new-layer') { showLayerCreateForm(); }
+                else if (action === 'create-layer') { createLayer(); }
+                else if (action === 'view-layer') { loadLayerDetail(id); }
+                else if (action === 'edit-layer') { loadLayerEdit(id); }
+                else if (action === 'save-layer') { saveLayerEdit(id); }
+                else if (action === 'layer-photo') { loadLayerPhoto(id); }
+                else if (action === 'upload-layer-photo') {
+                    const fileEl = document.getElementById('layerPhotoInput');
+                    if (fileEl) { fileEl.onchange = () => uploadLayerPhoto(id); fileEl.click(); }
+                }
+                else if (action === 'remove-layer-photo') { removeLayerPhoto(id); }
+                else if (action === 'delete-layer') { deleteLayer(id); }
+                else if (action === 'layer-main-features') { loadLayerMainFeatures(id); }
+                else if (action === 'layer-extra-features') { loadLayerExtraFeatures(id); }
+                else if (action === 'save-main-feature') {
+                    const layerId = parseInt(el.dataset.layerId, 10);
+                    const featureId = parseInt(el.dataset.featureId, 10);
+                    saveMainFeature(layerId, featureId);
+                }
+                else if (action === 'add-extra-feature') { addExtraFeature(parseInt(el.dataset.layerId, 10)); }
+                else if (action === 'save-extra-feature') { saveExtraFeature(id); }
+                else if (action === 'delete-extra-feature') {
+                    const layerId = parseInt(el.dataset.layerId, 10);
+                    deleteExtraFeature(id, layerId);
+                }
+                // --- Чехлы ---
+                else if (action === 'new-cover') { showCoverCreateForm(); }
+                else if (action === 'create-cover') { createCover(); }
+                else if (action === 'view-cover') { loadCoverDetail(id); }
+                else if (action === 'edit-cover') { loadCoverEdit(id); }
+                else if (action === 'save-cover') { saveCoverEdit(id); }
+                else if (action === 'cover-photo') { loadCoverPhoto(id); }
+                else if (action === 'upload-cover-photo') {
+                    const fileEl = document.getElementById('coverPhotoInput');
+                    if (fileEl) { fileEl.onchange = () => uploadCoverPhoto(id); fileEl.click(); }
+                }
+                else if (action === 'remove-cover-photo') { removeCoverPhoto(id); }
+                else if (action === 'delete-cover') { deleteCover(id); }
+                // --- Размеры ---
+                else if (action === 'create-size') { createSize(); }
+                else if (action === 'edit-size') { editSize(id, el.dataset.name || ''); }
+                else if (action === 'delete-size') { deleteSize(id); }
+                // --- Цены ---
+                else if (action === 'price-type') { loadPriceType(el.dataset.type); }
+                else if (action === 'price-entity') {
+                    loadPriceEntity(el.dataset.type, id);
+                } else if (action === 'save-price') {
+                    const entityId = parseInt(el.dataset.entityId, 10);
+                    const sizeId = parseInt(el.dataset.sizeId, 10);
+                    savePrice(el.dataset.type, entityId, sizeId);
+                }
+                // --- Характеристики (справочник) ---
+                else if (action === 'create-feature-type') { createFeatureType(); }
+                else if (action === 'edit-feature-type') { editFeatureType(id, el.dataset.name || ''); }
+                else if (action === 'delete-feature-type') { deleteFeatureType(id); }
+                // --- Excel ---
+                else if (action === 'download-mattress-excel') { downloadExcel(); }
+                return;
+            }
+
+            if (el.dataset.status) { applyStatus(el.dataset.status); return; }
+            if (el.dataset.confirmDelete !== undefined) { applyDelete(); return; }
+        }
+
+        // ============================================================
+        //                    ИНИЦИАЛИЗАЦИЯ
+        // ============================================================
+        async function init() {
+            views.menu = document.getElementById('viewMenu');
+            views.ordersMenu = document.getElementById('viewOrdersMenu');
+            views.clientsMenu = document.getElementById('viewClientsMenu');
+            views.galleryMenu = document.getElementById('viewGalleryMenu');
+            views.mattressesMenu = document.getElementById('viewMattressesMenu');
+            views.content = document.getElementById('viewContent');
+
+            try {
+                const data = await apiGet('/api/admin/orders/statuses');
+                state.statuses = data.statuses || [];
+            } catch (e) {
+                console.error('Не удалось загрузить статусы:', e);
+            }
+
+            const btnOpenOrders = document.getElementById('btnOpenOrders');
+            if (btnOpenOrders) btnOpenOrders.addEventListener('click', showOrdersMenu);
+            const btnOpenClients = document.getElementById('btnOpenClients');
+            if (btnOpenClients) btnOpenClients.addEventListener('click', showClientsMenu);
+            const btnOpenGallery = document.getElementById('btnOpenGallery');
+            if (btnOpenGallery) btnOpenGallery.addEventListener('click', showGalleryMenu);
+            const btnOpenMattresses = document.getElementById('btnOpenMattresses');
+            if (btnOpenMattresses) btnOpenMattresses.addEventListener('click', showMattressesMenu);
+
+            const btnOrdersMenuBack = document.getElementById('btnOrdersMenuBack');
+            if (btnOrdersMenuBack) btnOrdersMenuBack.addEventListener('click', showMainMenu);
+            const btnClientsMenuBack = document.getElementById('btnClientsMenuBack');
+            if (btnClientsMenuBack) btnClientsMenuBack.addEventListener('click', showMainMenu);
+            const btnGalleryMenuBack = document.getElementById('btnGalleryMenuBack');
+            if (btnGalleryMenuBack) btnGalleryMenuBack.addEventListener('click', showMainMenu);
+            const btnMattressesMenuBack = document.getElementById('btnMattressesMenuBack');
+            if (btnMattressesMenuBack) btnMattressesMenuBack.addEventListener('click', showMainMenu);
+
+            if (views.ordersMenu) {
+                views.ordersMenu.addEventListener('click', (e) => {
+                    const card = e.target.closest('[data-action]');
+                    if (!card) return;
+                    if (card.dataset.action === 'open-products') loadProductsList(0);
+                    else if (card.dataset.action === 'open-mattresses') loadMattressesList(0);
+                });
+            }
+
+            if (views.clientsMenu) {
+                views.clientsMenu.addEventListener('click', (e) => {
+                    const card = e.target.closest('[data-action]');
+                    if (!card) return;
+                    if (card.dataset.action === 'open-clients-list') loadClientsList(0);
+                    else if (card.dataset.action === 'open-clients-search') showClientSearch();
+                });
+            }
+
+            if (views.galleryMenu) {
+                views.galleryMenu.addEventListener('click', (e) => {
+                    const card = e.target.closest('[data-action]');
+                    if (!card) return;
+                    if (card.dataset.action === 'open-gallery-gallery') loadGalleryList('gallery', 0);
+                    else if (card.dataset.action === 'open-gallery-commercial') loadGalleryList('commercial', 0);
+                });
+            }
+
+            if (views.mattressesMenu) {
+                views.mattressesMenu.addEventListener('click', (e) => {
+                    const card = e.target.closest('[data-action]');
+                    if (!card) return;
+                    const action = card.dataset.action;
+                    if (action === 'open-mattress-layers') loadLayersList(0);
+                    else if (action === 'open-mattress-covers') loadCoversList(0);
+                    else if (action === 'open-mattress-sizes') loadSizesList(0);
+                    else if (action === 'open-mattress-prices') loadPricesMenu();
+                    else if (action === 'open-mattress-features') loadFeatureTypes(0);
+                    else if (action === 'download-mattress-excel') downloadExcel();
+                });
+            }
+
+            if (views.content) {
+                views.content.addEventListener('click', onContentClick);
+
+                views.content.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && e.target.id === 'clientSearchInput') {
+                        e.preventDefault();
+                        const phone = e.target.value.trim();
+                        if (phone) searchClients(phone);
+                    }
+                });
+
+                views.content.addEventListener('change', (e) => {
+                    if (e.target.id === 'galleryUploadInput') {
+                        const files = e.target.files;
+                        e.target.value = '';
+                        if (state.gallerySection && state.galleryProjectName) {
+                            uploadGalleryPhotos(state.galleryProjectName, files);
+                        }
+                    }
+                });
+            }
+
+            showMainMenu();
+        }
+
+        window.AdminOrders = { init };
     })();
 </script>
 </body>

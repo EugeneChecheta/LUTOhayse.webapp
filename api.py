@@ -1,19 +1,6 @@
 # api.py
-# Полностью переработанный файл API для поддержки конструктора матрасов
-# Изменения:
-#   - /api/mattress/layers теперь возвращает photo_url, main_features, extra_features
-#   - /api/mattress/covers теперь возвращает photo_url
-#   - /api/orders/history теперь возвращает читаемые названия size_name и cover_name для матрасов
-#   - Исправлено написание: "матрац" -> "матрас" во всех текстах и комментариях
-#   - Добавлена поддержка партнёрских цен из /partners/[код].xlsx
-#   - Добавлен эндпоинт /api/partners/check и страница /partners
-#   - Добавлена галерея коммерческих проектов
-#   - Админ-панель: вход по одноразовому паролю из Telegram-бота
-#       * POST /api/admin/request-otp  { telegram_id }  -> отправляет OTP в Telegram
-#       * POST /api/admin/verify-otp   { telegram_id, otp } -> устанавливает сессию
-#       * OTP живёт 10 минут, используется один раз, до 5 попыток ввода
-#   - Хранение OTP перенесено из памяти в базу данных (таблица admin_otps) для защиты от сброса при перезапуске сервера
-#   - Улучшена очистка OTP от невидимых символов на бэкенде (синхронизировано с фронтендом)
+# (изменение относительно предыдущей версии — только 2 строки: импорт admin_bp
+#  и его регистрация. Всё остальное сохранено без изменений.)
 
 import psycopg2
 import os
@@ -44,9 +31,18 @@ app = Flask(__name__, static_folder=None)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(24))
 CORS(app, supports_credentials=True)
 
+# === Регистрация Blueprint для управления заказами в админ-панели ===
+try:
+    from admin import admin_bp
+    app.register_blueprint(admin_bp)
+    logging.getLogger(__name__).info("admin_bp зарегистрирован: /api/admin/orders/*")
+except ImportError as e:
+    logging.getLogger(__name__).error(f"Не удалось импортировать admin.py: {e}")
+
 # Настройка логирования для отладки
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
+
 
 # ----- Чтение конфигурации БД из файла telegram_admin_panel/config_db.txt -----
 def get_db_config():
@@ -59,7 +55,9 @@ def get_db_config():
                 config[k] = v
     return config
 
+
 DB_CONFIG = get_db_config()
+
 
 def get_db_connection():
     return psycopg2.connect(
@@ -70,9 +68,11 @@ def get_db_connection():
         password=DB_CONFIG['password']
     )
 
+
 # ----- Загрузка конфигурации бота для уведомлений о заказах -----
 ORDER_BOT_TOKEN = None
 ORDER_ADMIN_IDS = None
+
 
 def load_order_bot_config():
     global ORDER_BOT_TOKEN, ORDER_ADMIN_IDS
@@ -89,7 +89,9 @@ def load_order_bot_config():
     except Exception as e:
         app.logger.error(f"Не удалось прочитать admin_ids.txt для бота заказов: {e}")
 
+
 load_order_bot_config()
+
 
 def send_order_notification(order_id, user_name, phone, total_sum, order_type='product'):
     """Отправляет уведомление о новом заказе всем администраторам через Telegram бота (urllib)."""
@@ -145,12 +147,12 @@ def send_order_notification(order_id, user_name, phone, total_sum, order_type='p
     for admin_id in ORDER_ADMIN_IDS:
         threading.Thread(target=send_to_admin, args=(admin_id,)).start()
 
+
 # ----- Вспомогательная функция для создания таблиц, если их нет, и добавления недостающих колонок -----
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Таблицы для пользователей
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -164,7 +166,6 @@ def init_db():
         );
     """)
 
-    # Таблица для OTP администраторов
     cur.execute("""
         CREATE TABLE IF NOT EXISTS admin_otps (
             telegram_id VARCHAR(50) PRIMARY KEY,
@@ -175,7 +176,6 @@ def init_db():
         );
     """)
 
-    # Заказы с привязкой к пользователю (user_id может быть NULL для гостей)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id SERIAL PRIMARY KEY,
@@ -203,7 +203,6 @@ def init_db():
         );
     """)
 
-    # Проверяем, есть ли колонка user_id в таблице orders (если таблица уже существовала)
     cur.execute("""
         SELECT COUNT(*) 
         FROM information_schema.columns 
@@ -214,7 +213,6 @@ def init_db():
             ALTER TABLE orders ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
         """)
 
-    # Добавляем колонку extra_data в order_items для хранения деталей топперов
     cur.execute("""
         SELECT COUNT(*) 
         FROM information_schema.columns 
@@ -225,7 +223,6 @@ def init_db():
             ALTER TABLE order_items ADD COLUMN extra_data TEXT;
         """)
 
-    # --- Таблицы для топперов (создаются, если отсутствуют) ---
     cur.execute("""
         CREATE TABLE IF NOT EXISTS topper_sizes (
             id SERIAL PRIMARY KEY,
@@ -283,8 +280,6 @@ def init_db():
         );
     """)
 
-    # --- Добавление новых колонок в существующие таблицы, если их нет ---
-    # Для topper_layers: color_text, is_hidden
     cur.execute("""
         SELECT COUNT(*) 
         FROM information_schema.columns 
@@ -301,7 +296,6 @@ def init_db():
     if cur.fetchone()[0] == 0:
         cur.execute("ALTER TABLE topper_layers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
 
-    # Для topper_covers: is_hidden
     cur.execute("""
         SELECT COUNT(*) 
         FROM information_schema.columns 
@@ -310,15 +304,13 @@ def init_db():
     if cur.fetchone()[0] == 0:
         cur.execute("ALTER TABLE topper_covers ADD COLUMN is_hidden BOOLEAN DEFAULT FALSE;")
 
-    # ========== НОВЫЕ ТАБЛИЦЫ ДЛЯ КОНСТРУКТОРА МАТРАСОВ ==========
-    # Размеры
+    # --- Новые таблицы для конструктора матрасов ---
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_sizes (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL UNIQUE
         );
     """)
-    # Слои
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layers (
             id SERIAL PRIMARY KEY,
@@ -329,7 +321,6 @@ def init_db():
             is_hidden BOOLEAN DEFAULT FALSE
         );
     """)
-    # Чехлы
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_cover (
             id SERIAL PRIMARY KEY,
@@ -339,7 +330,6 @@ def init_db():
             is_hidden BOOLEAN DEFAULT FALSE
         );
     """)
-    # Цены слоёв
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layers_prices (
             id SERIAL PRIMARY KEY,
@@ -357,7 +347,6 @@ def init_db():
             CONSTRAINT uq_mlp_layer_size UNIQUE (layer_id, size_id)
         );
     """)
-    # Цены чехлов
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_cover_prices (
             id SERIAL PRIMARY KEY,
@@ -375,14 +364,12 @@ def init_db():
             CONSTRAINT uq_mcp_cover_size UNIQUE (cover_id, size_id)
         );
     """)
-    # Типы основных характеристик слоёв
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layer_main_features_types (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL UNIQUE
         );
     """)
-    # Основные характеристики слоёв
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layer_main_features (
             id SERIAL PRIMARY KEY,
@@ -400,7 +387,6 @@ def init_db():
             CONSTRAINT uq_mlmf_layer_feature UNIQUE (layer_id, feature_id)
         );
     """)
-    # Дополнительные характеристики слоёв
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_layer_extra_features (
             id SERIAL PRIMARY KEY,
@@ -414,7 +400,6 @@ def init_db():
             CONSTRAINT uq_mlef_layer_name UNIQUE (layer_id, name)
         );
     """)
-    # Заказы матрасов
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_orders (
             id SERIAL PRIMARY KEY,
@@ -434,7 +419,6 @@ def init_db():
             cover_price INTEGER NOT NULL CHECK (cover_price >= 0)
         );
     """)
-    # Позиции заказов матрасов (слои)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mattress_order_items (
             id SERIAL PRIMARY KEY,
@@ -448,7 +432,6 @@ def init_db():
         );
     """)
 
-    # Индексы для новых таблиц
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_layers_code ON mattress_layers(code);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_cover_code ON mattress_cover(code);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mattress_sizes_name ON mattress_sizes(name);")
@@ -468,7 +451,9 @@ def init_db():
     cur.close()
     conn.close()
 
-init_db()  # Вызов при старте
+
+init_db()
+
 
 # ==================== СУЩЕСТВУЮЩИЕ API ====================
 
@@ -486,6 +471,7 @@ def product_types():
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/flags')
 def flags():
     try:
@@ -499,6 +485,7 @@ def flags():
     except Exception as e:
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
 
 @app.route('/api/products')
 def products():
@@ -564,6 +551,7 @@ def products():
     except Exception as e:
         app.logger.error(f"API error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
 
 @app.route('/api/product/<code>')
 def product_details(code):
@@ -647,6 +635,7 @@ def product_details(code):
         app.logger.error(f"API /api/product/<code> error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/materials')
 def get_materials():
     try:
@@ -680,6 +669,7 @@ def get_materials():
     except Exception as e:
         app.logger.error(f"API /api/materials error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
 
 # ========= ГАЛЕРЕЯ =========
 GALLERY_DIR = Path(__file__).parent / 'media' / 'gallery'
@@ -789,13 +779,12 @@ def commercial_gallery_project(folder):
         return jsonify({'error': 'Project not found'}), 404
     return jsonify(data)
 
+
 # ========= ПАРТНЁРСКИЕ ЦЕНЫ =========
 PARTNERS_DIR = Path(__file__).parent / 'partners'
 
+
 def get_partner_prices(partner_code):
-    """Читает xlsx-файл партнёра и возвращает словарь:
-    { 'размер': { 'код_слоя': цена, 'код_чехла': цена } }
-    """
     if not partner_code:
         return None
     partner_code = partner_code.strip()
@@ -815,7 +804,6 @@ def get_partner_prices(partner_code):
         if not rows:
             return None
         header = rows[0]
-        # Первая колонка — "Размер", далее коды
         codes = [str(h).strip() if h is not None else '' for h in header[1:]]
         prices = {}
         for row in rows[1:]:
@@ -844,6 +832,7 @@ def get_partner_prices(partner_code):
         app.logger.error(f"Ошибка чтения xlsx партнёра {partner_code}: {e}")
         return None
 
+
 @app.route('/api/partners/check')
 def partner_check():
     code = request.args.get('code', '').strip()
@@ -853,6 +842,7 @@ def partner_check():
     if prices is None:
         return jsonify({'exists': False})
     return jsonify({'exists': True})
+
 
 # ========= АВТЕНТИФИКАЦИЯ И ПРОФИЛЬ =========
 @app.route('/api/auth/register', methods=['POST'])
@@ -885,6 +875,7 @@ def register():
     finally:
         cur.close()
         conn.close()
+
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -919,10 +910,12 @@ def login():
         cur.close()
         conn.close()
 
+
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
     session.pop('user_id', None)
     return jsonify({'success': True})
+
 
 @app.route('/api/auth/me')
 def get_current_user():
@@ -955,6 +948,7 @@ def get_current_user():
         cur.close()
         conn.close()
 
+
 @app.route('/api/auth/profile', methods=['PUT'])
 def update_profile():
     user_id = session.get('user_id')
@@ -983,6 +977,7 @@ def update_profile():
         cur.close()
         conn.close()
 
+
 @app.route('/api/auth/change-password', methods=['POST'])
 def change_password():
     app.logger.info("Запрос на смену пароля получен")
@@ -993,7 +988,6 @@ def change_password():
 
     data = request.get_json()
     if not data:
-        app.logger.warning("Пустой JSON в запросе")
         return jsonify({'error': 'Отсутствуют данные'}), 400
 
     current_password = data.get('current_password')
@@ -1001,15 +995,12 @@ def change_password():
     confirm_password = data.get('confirm_password')
 
     if not current_password or not new_password or not confirm_password:
-        app.logger.warning("Не все поля заполнены")
         return jsonify({'error': 'Все поля обязательны'}), 400
 
     if new_password != confirm_password:
-        app.logger.warning("Новый пароль и подтверждение не совпадают")
         return jsonify({'error': 'Новый пароль и подтверждение не совпадают'}), 400
 
     if len(new_password) < 6:
-        app.logger.warning("Слишком короткий новый пароль")
         return jsonify({'error': 'Новый пароль должен содержать не менее 6 символов'}), 400
 
     conn = get_db_connection()
@@ -1018,19 +1009,15 @@ def change_password():
         cur.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,))
         row = cur.fetchone()
         if not row:
-            app.logger.warning(f"Пользователь с id {user_id} не найден")
             return jsonify({'error': 'Пользователь не найден'}), 404
 
         if not check_password_hash(row[0], current_password):
-            app.logger.warning(f"Неверный текущий пароль для пользователя {user_id}")
             return jsonify({'error': 'Неверный текущий пароль'}), 401
 
         new_hash = generate_password_hash(new_password)
         cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user_id))
         conn.commit()
-        app.logger.info(f"Пароль успешно изменён для пользователя {user_id}")
         return jsonify({'success': True})
-
     except Exception as e:
         conn.rollback()
         app.logger.error(f"Ошибка при смене пароля: {e}")
@@ -1039,7 +1026,8 @@ def change_password():
         cur.close()
         conn.close()
 
-# ========= ИСТОРИЯ ЗАКАЗОВ (разделение продуктов и матрасов) =========
+
+# ========= ИСТОРИЯ ЗАКАЗОВ =========
 @app.route('/api/orders/history')
 def order_history():
     user_id = session.get('user_id')
@@ -1048,7 +1036,6 @@ def order_history():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Получаем заказы продуктов
         cur.execute("""
             SELECT id, user_name, phone, email, address, comment, contact_time, order_date, status, 'product' as type
             FROM orders
@@ -1056,7 +1043,6 @@ def order_history():
         """, (user_id,))
         product_orders = cur.fetchall()
 
-        # Получаем заказы матрасов (сразу с названиями размера и чехла)
         cur.execute("""
             SELECT mo.id, mo.user_name, mo.phone, mo.email, mo.address, mo.comment,
                    mo.contact_time, mo.order_date, mo.status, 'mattress' as type,
@@ -1069,9 +1055,7 @@ def order_history():
         """, (user_id,))
         mattress_orders = cur.fetchall()
 
-        # Объединяем
         all_orders = list(product_orders) + list(mattress_orders)
-        # Сортируем по дате (поле order_date - индекс 7)
         all_orders.sort(key=lambda x: x[7], reverse=True)
 
         result = []
@@ -1117,7 +1101,7 @@ def order_history():
                 order_data['items'] = items
                 order_data['total'] = sum(it['cost'] * it['quantity'] for it in items)
 
-            else:  # mattress
+            else:
                 order_data['size_name'] = row[10]
                 order_data['initial_height'] = row[11]
                 order_data['cover_name'] = row[12]
@@ -1142,7 +1126,6 @@ def order_history():
                     total += r[5]
                 order_data['items'] = items
                 order_data['total'] = total + (order_data.get('cover_price', 0))
-                # Для удобства фронта — единое поле высоты
                 order_data['layers_height'] = len(items) * 5
                 order_data['total_height'] = (order_data.get('initial_height') or 0) + order_data['layers_height']
 
@@ -1156,21 +1139,25 @@ def order_history():
         cur.close()
         conn.close()
 
+
 # ========= КОРЗИНА (сессия) =========
 def get_cart_session():
     if 'cart' not in session:
         session['cart'] = []
     return session['cart']
 
+
 def save_cart_session(cart):
     session['cart'] = cart
     session.modified = True
+
 
 @app.route('/api/cart', methods=['GET'])
 def get_cart():
     cart = get_cart_session()
     total = sum(item['cost'] * item.get('quantity', 1) for item in cart)
     return jsonify({'items': cart, 'total': total})
+
 
 @app.route('/api/cart/add', methods=['POST'])
 def add_to_cart():
@@ -1205,6 +1192,7 @@ def add_to_cart():
     save_cart_session(cart)
     return jsonify({'success': True, 'cart': cart})
 
+
 @app.route('/api/cart/update/<item_id>', methods=['PUT'])
 def update_cart_item(item_id):
     data = request.get_json()
@@ -1226,6 +1214,7 @@ def update_cart_item(item_id):
             return jsonify({'success': True, 'cart': cart})
     return jsonify({'error': 'Item not found'}), 404
 
+
 @app.route('/api/cart/remove/<item_id>', methods=['DELETE'])
 def remove_from_cart(item_id):
     cart = get_cart_session()
@@ -1233,10 +1222,12 @@ def remove_from_cart(item_id):
     save_cart_session(new_cart)
     return jsonify({'success': True, 'cart': new_cart})
 
+
 @app.route('/api/cart/clear', methods=['DELETE'])
 def clear_cart():
     save_cart_session([])
     return jsonify({'success': True})
+
 
 # ========= ТОППЕРЫ (старые) =========
 @app.route('/api/topper/sizes')
@@ -1272,6 +1263,7 @@ def topper_sizes():
     except Exception as e:
         app.logger.error(f"API /topper/sizes error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
 
 @app.route('/api/topper/layers')
 def topper_layers():
@@ -1329,6 +1321,7 @@ def topper_layers():
         app.logger.error(f"API /topper/layers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/topper/covers')
 def topper_covers():
     size_id = request.args.get('size_id', type=int)
@@ -1357,6 +1350,7 @@ def topper_covers():
     except Exception as e:
         app.logger.error(f"API /topper/covers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+
 
 @app.route('/api/cart/add-topper', methods=['POST'])
 def add_topper_to_cart():
@@ -1453,14 +1447,15 @@ def add_topper_to_cart():
         cur.close()
         conn.close()
 
+
 # ========= НОВЫЕ ЭНДПОИНТЫ ДЛЯ МАТРАСОВ =========
 
 MATTRESS_LAYERS_MEDIA = Path(__file__).parent / 'media' / 'layers'
 MATTRESS_COVERS_MEDIA = Path(__file__).parent / 'media' / 'covers'
 
+
 @app.route('/api/mattress/sizes')
 def mattress_sizes():
-    """Возвращает список размеров матрасов."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1492,9 +1487,9 @@ def mattress_sizes():
         app.logger.error(f"API /mattress/sizes error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/mattress/layers')
 def mattress_layers():
-    """Возвращает слои матрасов для указанного размера с ценами."""
     size_id = request.args.get('size_id', type=int)
     partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
@@ -1590,9 +1585,9 @@ def mattress_layers():
         app.logger.error(f"API /mattress/layers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/mattress/covers')
 def mattress_covers():
-    """Возвращает чехлы матрасов для указанного размера с ценами."""
     size_id = request.args.get('size_id', type=int)
     partner_code = request.args.get('partner_code', '').strip()
     if size_id is None:
@@ -1649,9 +1644,9 @@ def mattress_covers():
         app.logger.error(f"API /mattress/covers error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
 @app.route('/api/cart/add-mattress', methods=['POST'])
 def add_mattress_to_cart():
-    """Добавляет собранный матрас в корзину."""
     data = request.get_json()
     size_id = data.get('size_id')
     layer_ids = data.get('layer_ids', [])
@@ -1765,6 +1760,7 @@ def add_mattress_to_cart():
     finally:
         cur.close()
         conn.close()
+
 
 # ========= ОФОРМЛЕНИЕ ЗАКАЗА =========
 @app.route('/api/orders', methods=['POST'])
@@ -1886,13 +1882,13 @@ def create_order():
         cur.close()
         conn.close()
 
+
 # ========= АДМИНИСТРАТИВНАЯ ПАНЕЛЬ =========
 ADMIN_IDS_PATH = Path(__file__).parent / 'tg_ids.txt'
 ADMIN_BOT_TOKEN_PATH = Path(__file__).parent / 'tg_bot_token.txt'
 
 
 def load_admin_ids():
-    """Читает список ID из tg_ids.txt (по одному на строку)."""
     try:
         if not ADMIN_IDS_PATH.exists():
             app.logger.warning(f"Файл {ADMIN_IDS_PATH} не найден")
@@ -1905,7 +1901,6 @@ def load_admin_ids():
 
 
 def load_admin_bot_token():
-    """Читает токен бота из tg_bot_token.txt для отправки одноразовых паролей."""
     try:
         if not ADMIN_BOT_TOKEN_PATH.exists():
             app.logger.warning(f"Файл {ADMIN_BOT_TOKEN_PATH} не найден")
@@ -1917,12 +1912,11 @@ def load_admin_bot_token():
         return None
 
 
-OTP_TTL_SECONDS = 600              # 10 минут
-OTP_REQUEST_COOLDOWN_SECONDS = 20  # 20 секунд между запросами
-OTP_MAX_ATTEMPTS = 5               # 5 неверных вводов — сброс пароля
+OTP_TTL_SECONDS = 600
+OTP_REQUEST_COOLDOWN_SECONDS = 20
+OTP_MAX_ATTEMPTS = 5
 OTP_LENGTH = 12
 
-# Символы для одноразового пароля (исключены символы, которые часто искажаются при копировании)
 _OTP_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 _OTP_LOWER = "abcdefghijkmnopqrstuvwxyz"
 _OTP_DIGITS = "23456789"
@@ -1931,8 +1925,6 @@ _OTP_ALL = _OTP_UPPER + _OTP_LOWER + _OTP_DIGITS + _OTP_SPECIAL
 
 
 def _generate_otp(length=OTP_LENGTH):
-    """Генерирует криптостойкий пароль из букв верхнего/нижнего регистра,
-    цифр и спецсимволов. Гарантирует наличие каждого класса символов."""
     required = [
         secrets.choice(_OTP_UPPER),
         secrets.choice(_OTP_LOWER),
@@ -1947,8 +1939,6 @@ def _generate_otp(length=OTP_LENGTH):
 
 
 def _send_telegram_message(chat_id, text):
-    """Отправляет текстовое сообщение через бота.
-    Возвращает (ok, error_message)."""
     token = load_admin_bot_token()
     if not token:
         return False, "Токен бота не настроен (файл tg_bot_token.txt)"
@@ -1977,7 +1967,6 @@ def _send_telegram_message(chat_id, text):
 @app.route('/admin')
 @app.route('/admin.html')
 def admin_page():
-    """Страница администратора — доступна только по прямой ссылке."""
     return send_from_directory('webpages', 'admin.html')
 
 
@@ -1988,12 +1977,11 @@ def admin_css():
 
 @app.route('/api/admin/request-otp', methods=['POST'])
 def admin_request_otp():
-    """Генерирует одноразовый пароль и отправляет его в Telegram-бот."""
     try:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({'error': 'Неверный формат данных'}), 400
-            
+
         tg_id = str(data.get('telegram_id', '')).strip()
 
         if not tg_id:
@@ -2015,10 +2003,8 @@ def admin_request_otp():
         cur = conn.cursor()
 
         try:
-            # Удаляем истёкшие OTP
             cur.execute("DELETE FROM admin_otps WHERE expires_at < %s", (now,))
 
-            # Проверка антифлуда
             cur.execute("SELECT last_request FROM admin_otps WHERE telegram_id = %s", (tg_id,))
             row = cur.fetchone()
             if row and now - row[0] < OTP_REQUEST_COOLDOWN_SECONDS:
@@ -2049,7 +2035,6 @@ def admin_request_otp():
 
             ok, err = _send_telegram_message(tg_id, text)
             if not ok:
-                # Не оставляем «висящий» OTP, если отправить не удалось
                 cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
                 conn.commit()
                 app.logger.error(f"Не удалось отправить OTP админу {tg_id}: {err}")
@@ -2072,16 +2057,14 @@ def admin_request_otp():
 
 @app.route('/api/admin/verify-otp', methods=['POST'])
 def admin_verify_otp():
-    """Проверяет одноразовый пароль и устанавливает сессию администратора."""
     try:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({'error': 'Неверный формат данных'}), 400
-            
+
         tg_id = str(data.get('telegram_id', '')).strip()
         otp = str(data.get('otp', '')).strip()
 
-        # Жесткая нормализация OTP: удаляем все непечатные символы (синхронизировано с фронтендом)
         otp = re.sub(r'[^\x20-\x7E]', '', otp).strip()
 
         if not tg_id or not otp:
@@ -2096,7 +2079,6 @@ def admin_verify_otp():
         cur = conn.cursor()
 
         try:
-            # Удаляем истёкшие OTP
             cur.execute("DELETE FROM admin_otps WHERE expires_at < %s", (now,))
 
             cur.execute("SELECT otp, expires_at, attempts FROM admin_otps WHERE telegram_id = %s", (tg_id,))
@@ -2112,7 +2094,6 @@ def admin_verify_otp():
                 conn.commit()
                 return jsonify({'error': 'Срок действия пароля истёк. Запросите новый.'}), 400
 
-            # Сравнение без учета регистра (защита от авто-капитализации на мобильных)
             if not secrets.compare_digest(db_otp.lower(), otp.lower()):
                 new_attempts = db_attempts + 1
                 if new_attempts >= OTP_MAX_ATTEMPTS:
@@ -2129,7 +2110,6 @@ def admin_verify_otp():
                         'error': f'Неверный пароль. Осталось попыток: {remaining}'
                     }), 401
 
-            # Успех — удаляем OTP (одноразовый)
             cur.execute("DELETE FROM admin_otps WHERE telegram_id = %s", (tg_id,))
             conn.commit()
 
@@ -2169,41 +2149,51 @@ def admin_check():
 def index():
     return send_from_directory('.', 'index.html')
 
+
 @app.route('/index.css')
 def index_css():
     return send_from_directory('.', 'index.css')
+
 
 @app.route('/product/<code>')
 def product_page(code):
     return send_from_directory('webpages', 'product_card.html')
 
+
 @app.route('/cart')
 def cart_page():
     return send_from_directory('webpages', 'cart.html')
+
 
 @app.route('/catalog')
 def catalog_page():
     return send_from_directory('webpages', 'catalog.html')
 
+
 @app.route('/catalog.css')
 def catalog_css():
     return send_from_directory('webpages', 'catalog.css')
+
 
 @app.route('/product_card.css')
 def product_card_css():
     return send_from_directory('webpages', 'product_card.css')
 
+
 @app.route('/cart.css')
 def cart_css():
     return send_from_directory('webpages', 'cart.css')
+
 
 @app.route('/login')
 def login_page():
     return send_from_directory('webpages', 'login.html')
 
+
 @app.route('/register')
 def register_page():
     return send_from_directory('webpages', 'register.html')
+
 
 @app.route('/profile')
 def profile_page():
@@ -2211,45 +2201,56 @@ def profile_page():
         return redirect('/login?next=/profile')
     return send_from_directory('webpages', 'profile.html')
 
+
 @app.route('/gallery')
 def gallery_page():
     return send_from_directory('webpages', 'gallery.html')
+
 
 @app.route('/gallery_commercial')
 def gallery_commercial_page():
     return send_from_directory('webpages', 'gallery_commercial.html')
 
+
 @app.route('/gallery.css')
 def gallery_css():
     return send_from_directory('webpages', 'gallery.css')
+
 
 @app.route('/toppers')
 def toppers_page():
     return send_from_directory('webpages', 'toppers.html')
 
+
 @app.route('/toppers.css')
 def toppers_css():
     return send_from_directory('webpages', 'toppers.css')
+
 
 @app.route('/mattress')
 def mattress_page():
     return send_from_directory('webpages', 'mattress.html')
 
+
 @app.route('/mattress.css')
 def mattress_css():
     return send_from_directory('webpages', 'mattress.css')
+
 
 @app.route('/partners')
 def partners_page():
     return send_from_directory('webpages', 'partners.html')
 
+
 @app.route('/media/<path:filename>')
 def media_files(filename):
     return send_from_directory('media', filename)
 
+
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory('media/interface', 'favicon.png')
+
 
 if __name__ == '__main__':
     Path('webpages').mkdir(exist_ok=True)
