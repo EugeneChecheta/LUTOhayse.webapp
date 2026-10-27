@@ -1,16 +1,29 @@
 # admin.py
 #!/usr/bin/env python3
 """
-Flask Blueprint для управления заказами (продукты и матрасы), клиентами, галереей
-и конструктором матрасов (слои, чехлы, размеры, цены, характеристики) в админ-панели.
+Flask Blueprint для управления заказами (продукты, матрасы), клиентами,
+галереей и конструктором матрасов в админ-панели.
+
+Функциональность матрасов (слои, чехлы, размеры, цены, характеристики,
+фото, экспорт Excel) перенесена из Telegram-бота toppers_bot.py.
+
+Раздел «Партнёрские цены» (аналог partners_prices_bot.py):
+  * список файлов цен партнёров в каталоге partners/,
+  * генерация/скачивание шаблона 000000.xlsx из БД,
+  * создание копии из 000000.xlsx,
+  * изменение всех цен на процент,
+  * изменение одной цены (set/mul/add/sub),
+  * переименование и удаление файлов,
+  * загрузка своего xlsx с валидацией структуры.
 """
 
 import io
 import json
 import logging
 import os
+import re
 import shutil
-import stat
+import tempfile
 from decimal import Decimal
 from datetime import datetime, date, time
 from pathlib import Path
@@ -28,14 +41,13 @@ except ImportError:  # pragma: no cover
     PIL_AVAILABLE = False
 
 try:
-    from openpyxl import Workbook as _XLWorkbook
-    from openpyxl.styles import (
-        Font as _XLFont, Alignment as _XLAlign,
-        Border as _XLBorder, Side as _XLSide, PatternFill as _XLFill,
-    )
-    from openpyxl.utils import get_column_letter as _xl_col_letter
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
     OPENPYXL_AVAILABLE = True
 except ImportError:  # pragma: no cover
+    Workbook = None
+    load_workbook = None
     OPENPYXL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -43,7 +55,6 @@ logger = logging.getLogger(__name__)
 
 # ------------------------- JSON-сериализация -------------------------
 def _json_safe(obj):
-    """Рекурсивно приводит значения из БД к JSON-сериализуемым типам."""
     if isinstance(obj, Decimal):
         if obj == obj.to_integral_value():
             return int(obj)
@@ -62,39 +73,7 @@ def _json_safe(obj):
 
 
 def jsonify(data):
-    """Обёртка над flask.jsonify, предварительно приводящая данные к JSON-типам."""
     return _flask_jsonify(_json_safe(data))
-
-
-def _to_str(value, default=""):
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _send_excel_bytes(data: io.BytesIO, filename: str):
-    """Совместимость send_file между версиями Flask."""
-    data.seek(0)
-    mimetype = (
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    try:
-        return send_file(
-            data,
-            mimetype=mimetype,
-            as_attachment=True,
-            download_name=filename,
-        )
-    except TypeError:
-        # Flask < 2.0
-        return send_file(
-            data,
-            mimetype=mimetype,
-            as_attachment=True,
-            attachment_filename=filename,
-        )
 
 
 # ------------------------- Конфигурация -------------------------
@@ -117,13 +96,16 @@ STATUSES = [
 MEDIA_BASE = BASE_DIR.parent / "media" if (BASE_DIR.parent / "media").exists() else BASE_DIR / "media"
 GALLERY_BASE = MEDIA_BASE / "gallery"
 COMMERCIAL_BASE = MEDIA_BASE / "commercial"
-MATTRESS_LAYERS_MEDIA = MEDIA_BASE / "layers"
-MATTRESS_COVERS_MEDIA = MEDIA_BASE / "covers"
+LAYERS_MEDIA = MEDIA_BASE / "layers"
+COVERS_MEDIA = MEDIA_BASE / "covers"
 
-GALLERY_BASE.mkdir(parents=True, exist_ok=True)
-COMMERCIAL_BASE.mkdir(parents=True, exist_ok=True)
-MATTRESS_LAYERS_MEDIA.mkdir(parents=True, exist_ok=True)
-MATTRESS_COVERS_MEDIA.mkdir(parents=True, exist_ok=True)
+for _d in (GALLERY_BASE, COMMERCIAL_BASE, LAYERS_MEDIA, COVERS_MEDIA):
+    _d.mkdir(parents=True, exist_ok=True)
+
+# Партнёрские цены — та же логика поиска каталога, что и у media
+PARTNERS_BASE = BASE_DIR.parent / "partners" if (BASE_DIR.parent / "partners").exists() else BASE_DIR / "partners"
+PARTNERS_BASE.mkdir(parents=True, exist_ok=True)
+ORIGINAL_PARTNER_NAME = "000000"
 
 GALLERY_SECTIONS = {
     'gallery':    {'base': GALLERY_BASE,    'title': 'Индивидуальная галерея'},
@@ -152,7 +134,6 @@ def _read_db_config():
             logger.info(f"admin.py: использую конфиг БД {config_path}")
             return config
         logger.warning(f"admin.py: в {config_path} не хватает обязательных ключей {required}")
-
     raise FileNotFoundError(
         "config_db.txt не найден ни по одному из путей: "
         + ", ".join(str(p) for p in candidates)
@@ -170,79 +151,6 @@ def _get_db_connection():
         user=_DB_CONFIG['user'],
         password=_DB_CONFIG['password'],
     )
-
-
-def _ensure_mattress_tables():
-    """
-    Проверяет и создает необходимые таблицы и колонки для раздела матрасов,
-    чтобы предотвратить ошибки 500 при отсутствии структуры в БД.
-    """
-    try:
-        conn = _get_db_connection()
-        cur = conn.cursor()
-        
-        # 1. Таблицы заказов матрасов
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mattress_orders (
-                id SERIAL PRIMARY KEY,
-                user_name TEXT,
-                phone TEXT,
-                email TEXT,
-                address TEXT,
-                comment TEXT,
-                contact_time TEXT,
-                order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'Ожидает подтверждения'
-            );
-        """)
-        cur.execute("ALTER TABLE mattress_orders ADD COLUMN IF NOT EXISTS size_id INTEGER REFERENCES mattress_sizes(id) ON DELETE SET NULL;")
-        cur.execute("ALTER TABLE mattress_orders ADD COLUMN IF NOT EXISTS cover_id INTEGER REFERENCES mattress_cover(id) ON DELETE SET NULL;")
-        cur.execute("ALTER TABLE mattress_orders ADD COLUMN IF NOT EXISTS initial_height NUMERIC DEFAULT 0;")
-        cur.execute("ALTER TABLE mattress_orders ADD COLUMN IF NOT EXISTS cover_price NUMERIC DEFAULT 0;")
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mattress_order_items (
-                id SERIAL PRIMARY KEY,
-                order_id INTEGER REFERENCES mattress_orders(id) ON DELETE CASCADE,
-                layer_code TEXT,
-                layer_name TEXT,
-                quantity INTEGER DEFAULT 1,
-                price_per_unit NUMERIC DEFAULT 0,
-                total_price NUMERIC DEFAULT 0
-            );
-        """)
-
-        # 2. Таблицы характеристик (аналогично toppers_bot.py)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mattress_layer_main_features_types (
-                id SERIAL PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mattress_layer_main_features (
-                id SERIAL PRIMARY KEY,
-                layer_id INTEGER REFERENCES mattress_layers(id) ON DELETE CASCADE,
-                feature_id INTEGER REFERENCES mattress_layer_main_features_types(id) ON DELETE CASCADE,
-                value TEXT NOT NULL,
-                UNIQUE(layer_id, feature_id)
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mattress_layer_extra_features (
-                id SERIAL PRIMARY KEY,
-                layer_id INTEGER REFERENCES mattress_layers(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                value TEXT NOT NULL
-            );
-        """)
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        logger.info("admin.py: Схема таблиц матрасов успешно проверена/обновлена.")
-    except Exception as e:
-        logger.error(f"admin.py: Ошибка при инициализации таблиц матрасов: {e}")
 
 
 # ------------------------- Blueprint -------------------------
@@ -274,6 +182,24 @@ def _json_body():
     if data is None:
         data = {}
     return data
+
+
+def _table_exists(cur, table_name):
+    cur.execute(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema='public' AND table_name=%s)",
+        (table_name,),
+    )
+    return bool(cur.fetchone()[0])
+
+
+def _table_columns(cur, table_name):
+    cur.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema='public' AND table_name=%s",
+        (table_name,),
+    )
+    return {r[0] for r in cur.fetchall()}
 
 
 # ============================================================
@@ -313,14 +239,13 @@ def list_product_orders():
             "ORDER BY order_date DESC OFFSET %s LIMIT %s",
             (offset, PAGE_SIZE),
         )
-        rows = cur.fetchall()
         orders = [{
             'id': r[0],
             'user_name': r[1],
             'phone': r[2],
             'order_date': _format_dt(r[3]),
             'status': r[4],
-        } for r in rows]
+        } for r in cur.fetchall()]
 
         return jsonify({
             'orders': orders,
@@ -431,144 +356,6 @@ def product_order_details(order_id):
         conn.close()
 
 
-# ============================================================
-#                    ЗАКАЗЫ МАТРАСОВ
-# ============================================================
-@admin_bp.route('/api/admin/orders/mattresses')
-def list_mattress_orders():
-    if not _require_admin():
-        return _unauthorized()
-    page = max(0, request.args.get('page', 0, type=int))
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        logger.exception("admin.py: ошибка подключения к БД")
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT COUNT(*) FROM mattress_orders")
-        total = cur.fetchone()[0]
-        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-        if page >= total_pages:
-            page = total_pages - 1
-        offset = page * PAGE_SIZE
-
-        cur.execute("""
-            SELECT mo.id, mo.user_name, mo.phone, mo.order_date, mo.status,
-                   ms.name AS size_name
-            FROM mattress_orders mo
-            LEFT JOIN mattress_sizes ms ON mo.size_id = ms.id
-            ORDER BY mo.order_date DESC OFFSET %s LIMIT %s
-        """, (offset, PAGE_SIZE))
-        rows = cur.fetchall()
-        orders = [{
-            'id': r[0],
-            'user_name': r[1],
-            'phone': r[2],
-            'order_date': _format_dt(r[3]),
-            'status': r[4],
-            'size_name': r[5] or '—',
-        } for r in rows]
-
-        return jsonify({
-            'orders': orders,
-            'total': total,
-            'page': page,
-            'page_size': PAGE_SIZE,
-            'total_pages': total_pages,
-        })
-    except Exception as e:
-        logger.exception("admin.py: list_mattress_orders")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-@admin_bp.route('/api/admin/orders/mattresses/<int:order_id>')
-def mattress_order_details(order_id):
-    if not _require_admin():
-        return _unauthorized()
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        logger.exception("admin.py: ошибка подключения к БД")
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            SELECT mo.id, mo.user_name, mo.phone, mo.email, mo.address, mo.comment,
-                   mo.contact_time, mo.order_date, mo.status, mo.initial_height,
-                   mo.cover_price, ms.name AS size_name,
-                   mc.name AS cover_name, mc.code AS cover_code
-            FROM mattress_orders mo
-            LEFT JOIN mattress_sizes ms ON mo.size_id = ms.id
-            LEFT JOIN mattress_cover mc ON mo.cover_id = mc.id
-            WHERE mo.id = %s
-        """, (order_id,))
-        r = cur.fetchone()
-        if not r:
-            return jsonify({'error': 'Заказ не найден'}), 404
-
-        order = {
-            'id': r[0],
-            'user_name': r[1],
-            'phone': r[2],
-            'email': r[3],
-            'address': r[4],
-            'comment': r[5],
-            'contact_time': r[6],
-            'order_date': _format_dt(r[7]),
-            'status': r[8],
-            'initial_height': r[9] or 0,
-            'cover_price': r[10] or 0,
-            'size_name': r[11] or '—',
-            'cover_name': r[12] or '—',
-            'cover_code': r[13] or '',
-        }
-
-        cur.execute("""
-            SELECT layer_code, layer_name, quantity, price_per_unit, total_price
-            FROM mattress_order_items WHERE order_id = %s ORDER BY id
-        """, (order_id,))
-        items = []
-        layers_total = 0
-        layers_height = 0
-        for it in cur.fetchall():
-            qty = it[2] or 1
-            item_total = it[4] if it[4] is not None else (it[3] or 0) * qty
-            layers_total += item_total
-            layers_height += 5 * qty
-            items.append({
-                'layer_code': it[0],
-                'layer_name': it[1],
-                'quantity': qty,
-                'price_per_unit': it[3] or 0,
-                'total_price': item_total,
-            })
-
-        total_height = order['initial_height'] + layers_height
-        grand_total = layers_total + order['cover_price']
-
-        return jsonify({
-            'order': order,
-            'items': items,
-            'layers_total': layers_total,
-            'layers_height': layers_height,
-            'total_height': total_height,
-            'grand_total': grand_total,
-        })
-    except Exception as e:
-        logger.exception("admin.py: mattress_order_details")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-# ============================================================
-#                ИЗМЕНЕНИЕ СТАТУСА / УДАЛЕНИЕ
-# ============================================================
 @admin_bp.route('/api/admin/orders/products/<int:order_id>/status', methods=['PUT'])
 def update_product_status(order_id):
     if not _require_admin():
@@ -593,37 +380,6 @@ def update_product_status(order_id):
     except Exception as e:
         conn.rollback()
         logger.exception("admin.py: update_product_status")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-@admin_bp.route('/api/admin/orders/mattresses/<int:order_id>/status', methods=['PUT'])
-def update_mattress_status(order_id):
-    if not _require_admin():
-        return _unauthorized()
-    data = _json_body()
-    new_status = (data.get('status') or '').strip()
-    if new_status not in STATUSES:
-        return jsonify({'error': 'Недопустимый статус'}), 400
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        logger.exception("admin.py: ошибка подключения к БД")
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE mattress_orders SET status = %s WHERE id = %s",
-                    (new_status, order_id))
-        affected = cur.rowcount
-        conn.commit()
-        if affected == 0:
-            return jsonify({'error': 'Заказ не найден'}), 404
-        return jsonify({'success': True})
-    except Exception as e:
-        conn.rollback()
-        logger.exception("admin.py: update_mattress_status")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -656,6 +412,254 @@ def delete_product_order(order_id):
         conn.close()
 
 
+# ============================================================
+#                    ЗАКАЗЫ МАТРАСОВ
+# ============================================================
+@admin_bp.route('/api/admin/orders/mattresses')
+def list_mattress_orders():
+    if not _require_admin():
+        return _unauthorized()
+    page = max(0, request.args.get('page', 0, type=int))
+    empty = {
+        'orders': [], 'total': 0, 'page': 0,
+        'page_size': PAGE_SIZE, 'total_pages': 1,
+    }
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        if not _table_exists(cur, 'mattress_orders'):
+            return jsonify(empty)
+
+        cols = _table_columns(cur, 'mattress_orders')
+        size_join = ""
+        size_select = "'—' AS size_name"
+        if 'size_id' in cols and _table_exists(cur, 'mattress_sizes'):
+            size_join = "LEFT JOIN mattress_sizes s ON o.size_id = s.id"
+            size_select = "COALESCE(s.name, '—') AS size_name"
+
+        date_col = 'order_date' if 'order_date' in cols else 'id'
+        order_dir = 'DESC' if 'order_date' in cols else 'DESC'
+
+        cur.execute("SELECT COUNT(*) FROM mattress_orders")
+        total = cur.fetchone()[0]
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        if page >= total_pages:
+            page = total_pages - 1
+        offset = page * PAGE_SIZE
+
+        cur.execute(f"""
+            SELECT o.id, o.user_name, o.phone, o.{date_col}, o.status,
+                   {size_select}
+            FROM mattress_orders o
+            {size_join}
+            ORDER BY o.{date_col} {order_dir}
+            OFFSET %s LIMIT %s
+        """, (offset, PAGE_SIZE))
+        rows = cur.fetchall()
+        orders = [{
+            'id': r[0],
+            'user_name': r[1],
+            'phone': r[2],
+            'order_date': _format_dt(r[3]),
+            'status': r[4],
+            'size_name': r[5],
+        } for r in rows]
+
+        return jsonify({
+            'orders': orders,
+            'total': total,
+            'page': page,
+            'page_size': PAGE_SIZE,
+            'total_pages': total_pages,
+        })
+    except Exception as e:
+        logger.exception("admin.py: list_mattress_orders")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/orders/mattresses/<int:order_id>')
+def mattress_order_details(order_id):
+    if not _require_admin():
+        return _unauthorized()
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        if not _table_exists(cur, 'mattress_orders'):
+            return jsonify({'error': 'Заказ не найден'}), 404
+
+        cols = _table_columns(cur, 'mattress_orders')
+
+        base_cols = ['id', 'user_name', 'phone', 'email', 'address',
+                     'comment', 'contact_time', 'order_date', 'status']
+        select_parts = []
+        for c in base_cols:
+            if c in cols:
+                select_parts.append(c)
+            else:
+                select_parts.append(f"NULL AS {c}")
+        for c in ['size_id', 'cover_id', 'initial_height', 'total_height',
+                  'total_price', 'layers_height']:
+            if c in cols:
+                select_parts.append(c)
+            else:
+                select_parts.append(f"NULL AS {c}")
+
+        cur.execute(
+            f"SELECT {', '.join(select_parts)} FROM mattress_orders WHERE id = %s",
+            (order_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({'error': 'Заказ не найден'}), 404
+
+        col_names = base_cols + ['size_id', 'cover_id', 'initial_height',
+                                 'total_height', 'total_price', 'layers_height']
+        o = dict(zip(col_names, row))
+
+        size_name = '—'
+        if o.get('size_id') and _table_exists(cur, 'mattress_sizes'):
+            cur.execute("SELECT name FROM mattress_sizes WHERE id = %s", (o['size_id'],))
+            r = cur.fetchone()
+            if r:
+                size_name = r[0]
+
+        cover_name = '—'
+        cover_price = 0
+        if o.get('cover_id') and _table_exists(cur, 'mattress_cover'):
+            cur.execute("SELECT name FROM mattress_cover WHERE id = %s", (o['cover_id'],))
+            r = cur.fetchone()
+            if r:
+                cover_name = r[0]
+            if o.get('size_id') and _table_exists(cur, 'mattress_cover_prices'):
+                cur.execute(
+                    "SELECT price FROM mattress_cover_prices "
+                    "WHERE cover_id = %s AND size_id = %s",
+                    (o['cover_id'], o['size_id']),
+                )
+                r = cur.fetchone()
+                if r and r[0] is not None:
+                    cover_price = r[0]
+
+        order = {
+            'id': o['id'],
+            'user_name': o['user_name'],
+            'phone': o['phone'],
+            'email': o['email'],
+            'address': o['address'],
+            'comment': o['comment'],
+            'contact_time': o['contact_time'],
+            'order_date': _format_dt(o['order_date']),
+            'status': o['status'],
+            'size_name': size_name,
+            'initial_height': o.get('initial_height') or 0,
+            'cover_name': cover_name,
+            'cover_price': cover_price,
+        }
+
+        items = []
+        items_total = 0
+        if _table_exists(cur, 'mattress_order_layers'):
+            item_cols = _table_columns(cur, 'mattress_order_layers')
+            item_select = []
+            for c in ['layer_id', 'quantity', 'price_per_unit', 'total_price']:
+                item_select.append(c if c in item_cols else f"NULL AS {c}")
+
+            cur.execute(
+                f"SELECT {', '.join(item_select)} FROM mattress_order_layers "
+                f"WHERE order_id = %s ORDER BY id",
+                (order_id,),
+            )
+            for r in cur.fetchall():
+                layer_id, qty, price_per_unit, total_price = r
+                layer_name = '—'
+                layer_code = '—'
+                if layer_id and _table_exists(cur, 'mattress_layers'):
+                    cur.execute(
+                        "SELECT code, name FROM mattress_layers WHERE id = %s",
+                        (layer_id,),
+                    )
+                    lr = cur.fetchone()
+                    if lr:
+                        layer_code, layer_name = lr
+                qty = qty or 1
+                pu = price_per_unit or 0
+                tp = total_price if total_price is not None else pu * qty
+                items_total += tp or 0
+                items.append({
+                    'layer_name': layer_name,
+                    'layer_code': layer_code,
+                    'quantity': qty,
+                    'price_per_unit': pu,
+                    'total_price': tp or 0,
+                })
+
+        layers_height = o.get('layers_height') or 0
+        total_height = o.get('total_height') or 0
+        grand_total = o.get('total_price')
+        if grand_total is None:
+            grand_total = items_total + cover_price
+
+        return jsonify({
+            'order': order,
+            'items': items,
+            'layers_height': layers_height,
+            'total_height': total_height,
+            'grand_total': grand_total,
+        })
+    except Exception as e:
+        logger.exception("admin.py: mattress_order_details")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/orders/mattresses/<int:order_id>/status', methods=['PUT'])
+def update_mattress_status(order_id):
+    if not _require_admin():
+        return _unauthorized()
+    data = _json_body()
+    new_status = (data.get('status') or '').strip()
+    if new_status not in STATUSES:
+        return jsonify({'error': 'Недопустимый статус'}), 400
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        if not _table_exists(cur, 'mattress_orders'):
+            return jsonify({'error': 'Заказ не найден'}), 404
+        cur.execute(
+            "UPDATE mattress_orders SET status = %s WHERE id = %s",
+            (new_status, order_id),
+        )
+        affected = cur.rowcount
+        conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Заказ не найден'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: update_mattress_status")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 @admin_bp.route('/api/admin/orders/mattresses/<int:order_id>', methods=['DELETE'])
 def delete_mattress_order(order_id):
     if not _require_admin():
@@ -667,6 +671,8 @@ def delete_mattress_order(order_id):
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
+        if not _table_exists(cur, 'mattress_orders'):
+            return jsonify({'error': 'Заказ не найден'}), 404
         cur.execute("DELETE FROM mattress_orders WHERE id = %s", (order_id,))
         affected = cur.rowcount
         conn.commit()
@@ -689,7 +695,7 @@ def delete_mattress_order(order_id):
 def customer_orders(phone):
     if not _require_admin():
         return _unauthorized()
-    exclude_type = request.args.get('exclude_type', '')
+    exclude_type = request.args.get('exclude_type')
     exclude_id = request.args.get('exclude_id', type=int)
 
     try:
@@ -716,25 +722,32 @@ def customer_orders(phone):
                 'status': r[4],
             })
 
-        cur.execute("""
-            SELECT mo.id, mo.user_name, mo.phone, mo.order_date, mo.status,
-                   ms.name AS size_name
-            FROM mattress_orders mo
-            LEFT JOIN mattress_sizes ms ON mo.size_id = ms.id
-            WHERE mo.phone = %s ORDER BY mo.order_date DESC
-        """, (phone,))
         mattresses = []
-        for r in cur.fetchall():
-            if exclude_type == 'mattress' and r[0] == exclude_id:
-                continue
-            mattresses.append({
-                'id': r[0],
-                'user_name': r[1],
-                'phone': r[2],
-                'order_date': _format_dt(r[3]),
-                'status': r[4],
-                'size_name': r[5] or '—',
-            })
+        if _table_exists(cur, 'mattress_orders'):
+            cols = _table_columns(cur, 'mattress_orders')
+            size_join = ""
+            size_select = "'—' AS size_name"
+            if 'size_id' in cols and _table_exists(cur, 'mattress_sizes'):
+                size_join = "LEFT JOIN mattress_sizes s ON o.size_id = s.id"
+                size_select = "COALESCE(s.name, '—') AS size_name"
+            date_col = 'order_date' if 'order_date' in cols else 'id'
+
+            cur.execute(f"""
+                SELECT o.id, o.{date_col}, o.status, {size_select}
+                FROM mattress_orders o
+                {size_join}
+                WHERE o.phone = %s
+                ORDER BY o.{date_col} DESC
+            """, (phone,))
+            for r in cur.fetchall():
+                if exclude_type == 'mattress' and r[0] == exclude_id:
+                    continue
+                mattresses.append({
+                    'id': r[0],
+                    'order_date': _format_dt(r[1]),
+                    'status': r[2],
+                    'size_name': r[3],
+                })
 
         return jsonify({
             'phone': phone,
@@ -1512,20 +1525,34 @@ def gallery_delete_project(section, name):
 
 
 # ============================================================
-#        КОНСТРУКТОР МАТРАСОВ: СЛОИ, ЧЕХЛЫ, РАЗМЕРЫ, ЦЕНЫ, ХАРАКТЕРИСТИКИ
+#          МАТРАСЫ: ОБЩИЕ ХЕЛПЕРЫ ДЛЯ ФОТО
 # ============================================================
-
-# ---------- Медиа-файлы ----------
 def _layer_photo_path(code):
-    return MATTRESS_LAYERS_MEDIA / f"{code}.webp"
+    return LAYERS_MEDIA / f"{code}.webp"
 
 
 def _cover_photo_path(code):
-    return MATTRESS_COVERS_MEDIA / f"{code}.webp"
+    return COVERS_MEDIA / f"{code}.webp"
 
 
-def _save_mattress_photo(file_storage, target_path):
+def _has_layer_photo(code):
+    try:
+        return _layer_photo_path(code).exists()
+    except Exception:
+        return False
+
+
+def _has_cover_photo(code):
+    try:
+        return _cover_photo_path(code).exists()
+    except Exception:
+        return False
+
+
+def _save_image_as_webp(file_storage, target_path):
+    """Сохраняет загруженный файл как WebP."""
     if not PIL_AVAILABLE:
+        logger.error("admin.py: PIL не установлен")
         return False
     try:
         file_bytes = file_storage.read()
@@ -1536,19 +1563,38 @@ def _save_mattress_photo(file_storage, target_path):
             img = rgb_img
         target_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(target_path, 'WEBP', quality=85)
-        try:
-            os.chmod(target_path, 0o666)
-        except Exception:
-            pass
+        _ensure_write_permission(target_path)
         return True
     except Exception as e:
-        logger.error(f"admin.py: ошибка сохранения фото матраса: {e}")
+        logger.error(f"admin.py: ошибка сохранения фото: {e}")
         return False
 
 
-# ---------- СЛОИ ----------
+def _delete_file_if_exists(path):
+    try:
+        if path.exists():
+            _ensure_write_permission(path)
+            path.unlink()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить {path}: {e}")
+
+
+def _move_photo(old_path, new_path):
+    try:
+        if old_path.exists():
+            if new_path.exists():
+                _delete_file_if_exists(new_path)
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            old_path.rename(new_path)
+    except Exception as e:
+        logger.warning(f"Не удалось переименовать фото {old_path} → {new_path}: {e}")
+
+
+# ============================================================
+#          МАТРАСЫ: СЛОИ
+# ============================================================
 @admin_bp.route('/api/admin/mattresses/layers')
-def mattresses_layers_list():
+def list_layers():
     if not _require_admin():
         return _unauthorized()
     page = max(0, request.args.get('page', 0, type=int))
@@ -1565,6 +1611,7 @@ def mattresses_layers_list():
         if page >= total_pages:
             page = total_pages - 1
         offset = page * MATTRESS_PAGE_SIZE
+
         cur.execute(
             "SELECT id, code, name, description FROM mattress_layers "
             "ORDER BY code OFFSET %s LIMIT %s",
@@ -1572,21 +1619,61 @@ def mattresses_layers_list():
         )
         layers = []
         for r in cur.fetchall():
-            has_photo = _layer_photo_path(r[1]).exists()
             layers.append({
                 'id': r[0],
                 'code': r[1],
                 'name': r[2],
                 'description': r[3] or '',
-                'has_photo': has_photo,
-                'photo_url': f"/media/layers/{r[1]}.webp" if has_photo else None,
+                'has_photo': _has_layer_photo(r[1]),
             })
+
         return jsonify({
-            'layers': layers, 'total': total, 'page': page,
-            'page_size': MATTRESS_PAGE_SIZE, 'total_pages': total_pages,
+            'layers': layers,
+            'total': total,
+            'page': page,
+            'page_size': MATTRESS_PAGE_SIZE,
+            'total_pages': total_pages,
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_layers_list")
+        logger.exception("admin.py: list_layers")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/layers', methods=['POST'])
+def create_layer():
+    if not _require_admin():
+        return _unauthorized()
+    data = _json_body()
+    code = (data.get('code') or '').strip()
+    name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip()
+    if not code or not name:
+        return jsonify({'error': 'Код и название обязательны'}), 400
+
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM mattress_layers WHERE code = %s", (code,))
+        if cur.fetchone():
+            return jsonify({'error': 'Слой с таким кодом уже существует'}), 400
+        cur.execute(
+            "INSERT INTO mattress_layers (code, name, description) "
+            "VALUES (%s, %s, %s) RETURNING id",
+            (code, name, description),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return jsonify({'success': True, 'id': new_id})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: create_layer")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1594,7 +1681,7 @@ def mattresses_layers_list():
 
 
 @admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>')
-def mattresses_layer_detail(layer_id):
+def get_layer(layer_id):
     if not _require_admin():
         return _unauthorized()
     try:
@@ -1611,7 +1698,7 @@ def mattresses_layer_detail(layer_id):
         r = cur.fetchone()
         if not r:
             return jsonify({'error': 'Слой не найден'}), 404
-        has_photo = _layer_photo_path(r[1]).exists()
+        has_photo = _has_layer_photo(r[1])
         return jsonify({
             'layer': {
                 'id': r[0],
@@ -1623,47 +1710,7 @@ def mattresses_layer_detail(layer_id):
             }
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_layer_detail")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-@admin_bp.route('/api/admin/mattresses/layers', methods=['POST'])
-def mattresses_layer_create():
-    if not _require_admin():
-        return _unauthorized()
-    data = _json_body()
-    code = (data.get('code') or '').strip()
-    name = (data.get('name') or '').strip()
-    description = (data.get('description') or '').strip()
-
-    if not code or not name:
-        return jsonify({'error': 'Код и название обязательны'}), 400
-
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        logger.exception("admin.py: ошибка подключения к БД")
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT id FROM mattress_layers WHERE code = %s", (code,))
-        if cur.fetchone():
-            return jsonify({'error': 'Слой с таким кодом уже существует'}), 400
-
-        cur.execute(
-            "INSERT INTO mattress_layers (code, name, description) "
-            "VALUES (%s, %s, %s) RETURNING id",
-            (code, name, description),
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return jsonify({'success': True, 'id': new_id})
-    except Exception as e:
-        conn.rollback()
-        logger.exception("admin.py: mattresses_layer_create")
+        logger.exception("admin.py: get_layer")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1671,15 +1718,14 @@ def mattresses_layer_create():
 
 
 @admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>', methods=['PUT'])
-def mattresses_layer_update(layer_id):
+def update_layer(layer_id):
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
-    new_code = (data.get('code') or '').strip()
-    new_name = (data.get('name') or '').strip()
-    new_desc = data.get('description', '') or ''
-
-    if not new_code or not new_name:
+    code = (data.get('code') or '').strip()
+    name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip()
+    if not code or not name:
         return jsonify({'error': 'Код и название обязательны'}), 400
 
     try:
@@ -1695,33 +1741,27 @@ def mattresses_layer_update(layer_id):
             return jsonify({'error': 'Слой не найден'}), 404
         old_code = r[0]
 
-        if new_code != old_code:
-            cur.execute("SELECT id FROM mattress_layers WHERE code = %s AND id != %s",
-                        (new_code, layer_id))
+        if code != old_code:
+            cur.execute(
+                "SELECT id FROM mattress_layers WHERE code = %s AND id != %s",
+                (code, layer_id),
+            )
             if cur.fetchone():
                 return jsonify({'error': 'Слой с таким кодом уже существует'}), 400
 
         cur.execute(
             "UPDATE mattress_layers SET code=%s, name=%s, description=%s WHERE id=%s",
-            (new_code, new_name, new_desc, layer_id),
+            (code, name, description, layer_id),
         )
         conn.commit()
 
-        if new_code != old_code:
-            old_p = _layer_photo_path(old_code)
-            new_p = _layer_photo_path(new_code)
-            if old_p.exists():
-                try:
-                    if new_p.exists():
-                        new_p.unlink()
-                    old_p.rename(new_p)
-                except Exception as e:
-                    logger.warning(f"admin.py: не удалось переименовать фото слоя: {e}")
+        if code != old_code:
+            _move_photo(_layer_photo_path(old_code), _layer_photo_path(code))
 
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_layer_update")
+        logger.exception("admin.py: update_layer")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1729,7 +1769,7 @@ def mattresses_layer_update(layer_id):
 
 
 @admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>', methods=['DELETE'])
-def mattresses_layer_delete(layer_id):
+def delete_layer(layer_id):
     if not _require_admin():
         return _unauthorized()
     try:
@@ -1745,23 +1785,20 @@ def mattresses_layer_delete(layer_id):
             return jsonify({'error': 'Слой не найден'}), 404
         code = r[0]
 
-        cur.execute("DELETE FROM mattress_layers_prices WHERE layer_id = %s", (layer_id,))
-        cur.execute("DELETE FROM mattress_layer_main_features WHERE layer_id = %s", (layer_id,))
-        cur.execute("DELETE FROM mattress_layer_extra_features WHERE layer_id = %s", (layer_id,))
+        if _table_exists(cur, 'mattress_layers_prices'):
+            cur.execute("DELETE FROM mattress_layers_prices WHERE layer_id = %s", (layer_id,))
+        if _table_exists(cur, 'mattress_layer_main_features'):
+            cur.execute("DELETE FROM mattress_layer_main_features WHERE layer_id = %s", (layer_id,))
+        if _table_exists(cur, 'mattress_layer_extra_features'):
+            cur.execute("DELETE FROM mattress_layer_extra_features WHERE layer_id = %s", (layer_id,))
         cur.execute("DELETE FROM mattress_layers WHERE id = %s", (layer_id,))
         conn.commit()
 
-        photo = _layer_photo_path(code)
-        if photo.exists():
-            try:
-                photo.unlink()
-            except Exception as e:
-                logger.warning(f"admin.py: не удалось удалить фото слоя: {e}")
-
+        _delete_file_if_exists(_layer_photo_path(code))
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_layer_delete")
+        logger.exception("admin.py: delete_layer")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1769,11 +1806,15 @@ def mattresses_layer_delete(layer_id):
 
 
 @admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/photo', methods=['POST'])
-def mattresses_layer_photo_upload(layer_id):
+def upload_layer_photo(layer_id):
     if not _require_admin():
         return _unauthorized()
     if not PIL_AVAILABLE:
-        return jsonify({'error': 'На сервере отсутствует библиотека Pillow'}), 500
+        return jsonify({'error': 'На сервере отсутствует Pillow'}), 500
+
+    file = request.files.get('photo')
+    if not file or not file.filename:
+        return jsonify({'error': 'Не передан файл'}), 400
 
     try:
         conn = _get_db_connection()
@@ -1787,28 +1828,20 @@ def mattresses_layer_photo_upload(layer_id):
         if not r:
             return jsonify({'error': 'Слой не найден'}), 404
         code = r[0]
+        target = _layer_photo_path(code)
+        if not _save_image_as_webp(file, target):
+            return jsonify({'error': 'Не удалось сохранить фото'}), 500
+        return jsonify({'success': True, 'photo_url': f"/media/layers/{code}.webp"})
+    except Exception as e:
+        logger.exception("admin.py: upload_layer_photo")
+        return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
-    file = request.files.get('photo')
-    if not file or not file.filename:
-        return jsonify({'error': 'Файл не передан'}), 400
-
-    target = _layer_photo_path(code)
-    if target.exists():
-        try:
-            target.unlink()
-        except Exception:
-            pass
-
-    if not _save_mattress_photo(file, target):
-        return jsonify({'error': 'Не удалось сохранить фото'}), 500
-    return jsonify({'success': True})
-
 
 @admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/photo', methods=['DELETE'])
-def mattresses_layer_photo_delete(layer_id):
+def remove_layer_photo(layer_id):
     if not _require_admin():
         return _unauthorized()
     try:
@@ -1822,24 +1855,217 @@ def mattresses_layer_photo_delete(layer_id):
         r = cur.fetchone()
         if not r:
             return jsonify({'error': 'Слой не найден'}), 404
-        code = r[0]
+        _delete_file_if_exists(_layer_photo_path(r[0]))
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.exception("admin.py: remove_layer_photo")
+        return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
-    target = _layer_photo_path(code)
-    if target.exists():
-        try:
-            target.unlink()
-        except Exception as e:
-            logger.warning(f"admin.py: не удалось удалить фото: {e}")
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'success': True})
+
+@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/main-features')
+def list_layer_main_features(layer_id):
+    if not _require_admin():
+        return _unauthorized()
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT mft.id as feature_id, mft.name as feature_name,
+                   COALESCE(pmf.value, '') as value
+            FROM mattress_layer_main_features_types mft
+            LEFT JOIN mattress_layer_main_features pmf
+                ON mft.id = pmf.feature_id AND pmf.layer_id = %s
+            ORDER BY mft.name
+        """, (layer_id,))
+        features = [{
+            'feature_id': r[0],
+            'feature_name': r[1],
+            'value': r[2] or '',
+        } for r in cur.fetchall()]
+        return jsonify({'features': features})
+    except Exception as e:
+        logger.exception("admin.py: list_layer_main_features")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
 
 
-# ---------- ЧЕХЛЫ ----------
+@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/main-features/<int:feature_id>', methods=['PUT'])
+def set_layer_main_feature(layer_id, feature_id):
+    if not _require_admin():
+        return _unauthorized()
+    data = _json_body()
+    value = (data.get('value') or '').strip()
+
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO mattress_layer_main_features (layer_id, feature_id, value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (layer_id, feature_id) DO UPDATE SET value = EXCLUDED.value
+        """, (layer_id, feature_id, value))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: set_layer_main_feature")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/extra-features')
+def list_layer_extra_features(layer_id):
+    if not _require_admin():
+        return _unauthorized()
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, name, value FROM mattress_layer_extra_features "
+            "WHERE layer_id = %s ORDER BY name",
+            (layer_id,),
+        )
+        features = [{'id': r[0], 'name': r[1], 'value': r[2] or ''} for r in cur.fetchall()]
+        return jsonify({'features': features})
+    except Exception as e:
+        logger.exception("admin.py: list_layer_extra_features")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/extra-features', methods=['POST'])
+def add_layer_extra_feature(layer_id):
+    if not _require_admin():
+        return _unauthorized()
+    data = _json_body()
+    name = (data.get('name') or '').strip()
+    value = (data.get('value') or '').strip()
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM mattress_layers WHERE id = %s", (layer_id,))
+        if not cur.fetchone():
+            return jsonify({'error': 'Слой не найден'}), 404
+        cur.execute(
+            "INSERT INTO mattress_layer_extra_features (layer_id, name, value) "
+            "VALUES (%s, %s, %s) RETURNING id",
+            (layer_id, name, value),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return jsonify({'success': True, 'id': new_id})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: add_layer_extra_feature")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/extra-features/<int:feat_id>', methods=['PUT'])
+def update_extra_feature(feat_id):
+    if not _require_admin():
+        return _unauthorized()
+    data = _json_body()
+    updates = {}
+    if 'name' in data:
+        updates['name'] = (data.get('name') or '').strip()
+    if 'value' in data:
+        updates['value'] = (data.get('value') or '').strip()
+    if not updates:
+        return jsonify({'error': 'Нет данных'}), 400
+
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        set_parts = []
+        values = []
+        for col, val in updates.items():
+            set_parts.append(f"{col} = %s")
+            values.append(val)
+        values.append(feat_id)
+        cur.execute(
+            f"UPDATE mattress_layer_extra_features SET {', '.join(set_parts)} WHERE id = %s",
+            values,
+        )
+        affected = cur.rowcount
+        conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Характеристика не найдена'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: update_extra_feature")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/extra-features/<int:feat_id>', methods=['DELETE'])
+def delete_extra_feature(feat_id):
+    if not _require_admin():
+        return _unauthorized()
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM mattress_layer_extra_features WHERE id = %s", (feat_id,))
+        affected = cur.rowcount
+        conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Характеристика не найдена'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        logger.exception("admin.py: delete_extra_feature")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ============================================================
+#          МАТРАСЫ: ЧЕХЛЫ
+# ============================================================
 @admin_bp.route('/api/admin/mattresses/covers')
-def mattresses_covers_list():
+def list_covers():
     if not _require_admin():
         return _unauthorized()
     page = max(0, request.args.get('page', 0, type=int))
@@ -1856,6 +2082,7 @@ def mattresses_covers_list():
         if page >= total_pages:
             page = total_pages - 1
         offset = page * MATTRESS_PAGE_SIZE
+
         cur.execute(
             "SELECT id, code, name, description FROM mattress_cover "
             "ORDER BY code OFFSET %s LIMIT %s",
@@ -1863,58 +2090,23 @@ def mattresses_covers_list():
         )
         covers = []
         for r in cur.fetchall():
-            has_photo = _cover_photo_path(r[1]).exists()
             covers.append({
                 'id': r[0],
                 'code': r[1],
                 'name': r[2],
                 'description': r[3] or '',
-                'has_photo': has_photo,
-                'photo_url': f"/media/covers/{r[1]}.webp" if has_photo else None,
+                'has_photo': _has_cover_photo(r[1]),
             })
+
         return jsonify({
-            'covers': covers, 'total': total, 'page': page,
-            'page_size': MATTRESS_PAGE_SIZE, 'total_pages': total_pages,
+            'covers': covers,
+            'total': total,
+            'page': page,
+            'page_size': MATTRESS_PAGE_SIZE,
+            'total_pages': total_pages,
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_covers_list")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-@admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>')
-def mattresses_cover_detail(cover_id):
-    if not _require_admin():
-        return _unauthorized()
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        logger.exception("admin.py: ошибка подключения к БД")
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "SELECT id, code, name, description FROM mattress_cover WHERE id = %s",
-            (cover_id,),
-        )
-        r = cur.fetchone()
-        if not r:
-            return jsonify({'error': 'Чехол не найден'}), 404
-        has_photo = _cover_photo_path(r[1]).exists()
-        return jsonify({
-            'cover': {
-                'id': r[0],
-                'code': r[1],
-                'name': r[2],
-                'description': r[3] or '',
-                'has_photo': has_photo,
-                'photo_url': f"/media/covers/{r[1]}.webp" if has_photo else None,
-            }
-        })
-    except Exception as e:
-        logger.exception("admin.py: mattresses_cover_detail")
+        logger.exception("admin.py: list_covers")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1922,7 +2114,7 @@ def mattresses_cover_detail(cover_id):
 
 
 @admin_bp.route('/api/admin/mattresses/covers', methods=['POST'])
-def mattresses_cover_create():
+def create_cover():
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
@@ -1931,9 +2123,11 @@ def mattresses_cover_create():
     description = (data.get('description') or '').strip()
     if not code or not name:
         return jsonify({'error': 'Код и название обязательны'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -1950,7 +2144,44 @@ def mattresses_cover_create():
         return jsonify({'success': True, 'id': new_id})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_cover_create")
+        logger.exception("admin.py: create_cover")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>')
+def get_cover(cover_id):
+    if not _require_admin():
+        return _unauthorized()
+    try:
+        conn = _get_db_connection()
+    except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
+        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, code, name, description FROM mattress_cover WHERE id = %s",
+            (cover_id,),
+        )
+        r = cur.fetchone()
+        if not r:
+            return jsonify({'error': 'Чехол не найден'}), 404
+        has_photo = _has_cover_photo(r[1])
+        return jsonify({
+            'cover': {
+                'id': r[0],
+                'code': r[1],
+                'name': r[2],
+                'description': r[3] or '',
+                'has_photo': has_photo,
+                'photo_url': f"/media/covers/{r[1]}.webp" if has_photo else None,
+            }
+        })
+    except Exception as e:
+        logger.exception("admin.py: get_cover")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -1958,18 +2189,20 @@ def mattresses_cover_create():
 
 
 @admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>', methods=['PUT'])
-def mattresses_cover_update(cover_id):
+def update_cover(cover_id):
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
-    new_code = (data.get('code') or '').strip()
-    new_name = (data.get('name') or '').strip()
-    new_desc = data.get('description', '') or ''
-    if not new_code or not new_name:
+    code = (data.get('code') or '').strip()
+    name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip()
+    if not code or not name:
         return jsonify({'error': 'Код и название обязательны'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -1978,30 +2211,28 @@ def mattresses_cover_update(cover_id):
         if not r:
             return jsonify({'error': 'Чехол не найден'}), 404
         old_code = r[0]
-        if new_code != old_code:
-            cur.execute("SELECT id FROM mattress_cover WHERE code = %s AND id != %s",
-                        (new_code, cover_id))
+
+        if code != old_code:
+            cur.execute(
+                "SELECT id FROM mattress_cover WHERE code = %s AND id != %s",
+                (code, cover_id),
+            )
             if cur.fetchone():
                 return jsonify({'error': 'Чехол с таким кодом уже существует'}), 400
+
         cur.execute(
             "UPDATE mattress_cover SET code=%s, name=%s, description=%s WHERE id=%s",
-            (new_code, new_name, new_desc, cover_id),
+            (code, name, description, cover_id),
         )
         conn.commit()
-        if new_code != old_code:
-            old_p = _cover_photo_path(old_code)
-            new_p = _cover_photo_path(new_code)
-            if old_p.exists():
-                try:
-                    if new_p.exists():
-                        new_p.unlink()
-                    old_p.rename(new_p)
-                except Exception as e:
-                    logger.warning(f"admin.py: не удалось переименовать фото чехла: {e}")
+
+        if code != old_code:
+            _move_photo(_cover_photo_path(old_code), _cover_photo_path(code))
+
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_cover_update")
+        logger.exception("admin.py: update_cover")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2009,12 +2240,13 @@ def mattresses_cover_update(cover_id):
 
 
 @admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>', methods=['DELETE'])
-def mattresses_cover_delete(cover_id):
+def delete_cover(cover_id):
     if not _require_admin():
         return _unauthorized()
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -2023,19 +2255,17 @@ def mattresses_cover_delete(cover_id):
         if not r:
             return jsonify({'error': 'Чехол не найден'}), 404
         code = r[0]
-        cur.execute("DELETE FROM mattress_cover_prices WHERE cover_id = %s", (cover_id,))
+
+        if _table_exists(cur, 'mattress_cover_prices'):
+            cur.execute("DELETE FROM mattress_cover_prices WHERE cover_id = %s", (cover_id,))
         cur.execute("DELETE FROM mattress_cover WHERE id = %s", (cover_id,))
         conn.commit()
-        photo = _cover_photo_path(code)
-        if photo.exists():
-            try:
-                photo.unlink()
-            except Exception as e:
-                logger.warning(f"admin.py: не удалось удалить фото чехла: {e}")
+
+        _delete_file_if_exists(_cover_photo_path(code))
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_cover_delete")
+        logger.exception("admin.py: delete_cover")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2043,14 +2273,20 @@ def mattresses_cover_delete(cover_id):
 
 
 @admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>/photo', methods=['POST'])
-def mattresses_cover_photo_upload(cover_id):
+def upload_cover_photo(cover_id):
     if not _require_admin():
         return _unauthorized()
     if not PIL_AVAILABLE:
-        return jsonify({'error': 'На сервере отсутствует библиотека Pillow'}), 500
+        return jsonify({'error': 'На сервере отсутствует Pillow'}), 500
+
+    file = request.files.get('photo')
+    if not file or not file.filename:
+        return jsonify({'error': 'Не передан файл'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -2059,31 +2295,26 @@ def mattresses_cover_photo_upload(cover_id):
         if not r:
             return jsonify({'error': 'Чехол не найден'}), 404
         code = r[0]
+        target = _cover_photo_path(code)
+        if not _save_image_as_webp(file, target):
+            return jsonify({'error': 'Не удалось сохранить фото'}), 500
+        return jsonify({'success': True, 'photo_url': f"/media/covers/{code}.webp"})
+    except Exception as e:
+        logger.exception("admin.py: upload_cover_photo")
+        return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
-    file = request.files.get('photo')
-    if not file or not file.filename:
-        return jsonify({'error': 'Файл не передан'}), 400
-    target = _cover_photo_path(code)
-    if target.exists():
-        try:
-            target.unlink()
-        except Exception:
-            pass
-    if not _save_mattress_photo(file, target):
-        return jsonify({'error': 'Не удалось сохранить фото'}), 500
-    return jsonify({'success': True})
-
 
 @admin_bp.route('/api/admin/mattresses/covers/<int:cover_id>/photo', methods=['DELETE'])
-def mattresses_cover_photo_delete(cover_id):
+def remove_cover_photo(cover_id):
     if not _require_admin():
         return _unauthorized()
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -2091,28 +2322,28 @@ def mattresses_cover_photo_delete(cover_id):
         r = cur.fetchone()
         if not r:
             return jsonify({'error': 'Чехол не найден'}), 404
-        code = r[0]
+        _delete_file_if_exists(_cover_photo_path(r[0]))
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.exception("admin.py: remove_cover_photo")
+        return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
-    target = _cover_photo_path(code)
-    if target.exists():
-        try:
-            target.unlink()
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'success': True})
 
 
-# ---------- РАЗМЕРЫ ----------
+# ============================================================
+#          МАТРАСЫ: РАЗМЕРЫ
+# ============================================================
 @admin_bp.route('/api/admin/mattresses/sizes')
-def mattresses_sizes_list():
+def list_sizes():
     if not _require_admin():
         return _unauthorized()
     page = max(0, request.args.get('page', 0, type=int))
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -2122,37 +2353,22 @@ def mattresses_sizes_list():
         if page >= total_pages:
             page = total_pages - 1
         offset = page * MATTRESS_PAGE_SIZE
+
         cur.execute(
             "SELECT id, name FROM mattress_sizes ORDER BY name OFFSET %s LIMIT %s",
             (offset, MATTRESS_PAGE_SIZE),
         )
         sizes = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
+
         return jsonify({
-            'sizes': sizes, 'total': total, 'page': page,
-            'page_size': MATTRESS_PAGE_SIZE, 'total_pages': total_pages,
+            'sizes': sizes,
+            'total': total,
+            'page': page,
+            'page_size': MATTRESS_PAGE_SIZE,
+            'total_pages': total_pages,
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_sizes_list")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
-
-
-@admin_bp.route('/api/admin/mattresses/sizes/all')
-def mattresses_sizes_all():
-    if not _require_admin():
-        return _unauthorized()
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT id, name FROM mattress_sizes ORDER BY name")
-        sizes = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
-        return jsonify({'sizes': sizes})
-    except Exception as e:
+        logger.exception("admin.py: list_sizes")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2160,28 +2376,34 @@ def mattresses_sizes_all():
 
 
 @admin_bp.route('/api/admin/mattresses/sizes', methods=['POST'])
-def mattresses_size_create():
+def create_size():
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'error': 'Название обязательно'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
         cur.execute("SELECT id FROM mattress_sizes WHERE name = %s", (name,))
         if cur.fetchone():
             return jsonify({'error': 'Размер с таким названием уже существует'}), 400
-        cur.execute("INSERT INTO mattress_sizes (name) VALUES (%s) RETURNING id", (name,))
+        cur.execute(
+            "INSERT INTO mattress_sizes (name) VALUES (%s) RETURNING id",
+            (name,),
+        )
         new_id = cur.fetchone()[0]
         conn.commit()
         return jsonify({'success': True, 'id': new_id})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: create_size")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2189,30 +2411,39 @@ def mattresses_size_create():
 
 
 @admin_bp.route('/api/admin/mattresses/sizes/<int:size_id>', methods=['PUT'])
-def mattresses_size_update(size_id):
+def update_size(size_id):
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
-    new_name = (data.get('name') or '').strip()
-    if not new_name:
+    name = (data.get('name') or '').strip()
+    if not name:
         return jsonify({'error': 'Название обязательно'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM mattress_sizes WHERE name = %s AND id != %s",
-                    (new_name, size_id))
+        cur.execute(
+            "SELECT id FROM mattress_sizes WHERE name = %s AND id != %s",
+            (name, size_id),
+        )
         if cur.fetchone():
             return jsonify({'error': 'Размер с таким названием уже существует'}), 400
-        cur.execute("UPDATE mattress_sizes SET name = %s WHERE id = %s", (new_name, size_id))
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Размер не найден'}), 404
+        cur.execute(
+            "UPDATE mattress_sizes SET name = %s WHERE id = %s",
+            (name, size_id),
+        )
+        affected = cur.rowcount
         conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Размер не найден'}), 404
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: update_size")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2220,148 +2451,152 @@ def mattresses_size_update(size_id):
 
 
 @admin_bp.route('/api/admin/mattresses/sizes/<int:size_id>', methods=['DELETE'])
-def mattresses_size_delete(size_id):
+def delete_size(size_id):
     if not _require_admin():
         return _unauthorized()
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM mattress_layers_prices WHERE size_id = %s", (size_id,))
-        cur.execute("DELETE FROM mattress_cover_prices WHERE size_id = %s", (size_id,))
+        if _table_exists(cur, 'mattress_layers_prices'):
+            cur.execute("DELETE FROM mattress_layers_prices WHERE size_id = %s", (size_id,))
+        if _table_exists(cur, 'mattress_cover_prices'):
+            cur.execute("DELETE FROM mattress_cover_prices WHERE size_id = %s", (size_id,))
         cur.execute("DELETE FROM mattress_sizes WHERE id = %s", (size_id,))
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Размер не найден'}), 404
+        affected = cur.rowcount
         conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Размер не найден'}), 404
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: delete_size")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-# ---------- ЦЕНЫ ----------
-@admin_bp.route('/api/admin/mattresses/prices/<string:price_type>/<int:entity_id>')
-def mattresses_prices_list(price_type, entity_id):
+# ============================================================
+#          МАТРАСЫ: ЦЕНЫ
+# ============================================================
+def _price_config(price_type):
+    if price_type == 'layers':
+        return 'mattress_layers_prices', 'layer_id'
+    if price_type == 'covers':
+        return 'mattress_cover_prices', 'cover_id'
+    return None, None
+
+
+@admin_bp.route('/api/admin/mattresses/prices/<price_type>/<int:entity_id>')
+def get_prices(price_type, entity_id):
     if not _require_admin():
         return _unauthorized()
-    if price_type not in ('layers', 'covers'):
-        return jsonify({'error': 'Неверный тип'}), 400
+    price_table, entity_col = _price_config(price_type)
+    if not price_table:
+        return jsonify({'error': 'Неверный тип цен'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, name FROM mattress_sizes ORDER BY name")
-        all_sizes = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
+        cur.execute(f"""
+            SELECT s.id, s.name, p.price
+            FROM mattress_sizes s
+            LEFT JOIN {price_table} p
+                ON p.size_id = s.id AND p.{entity_col} = %s
+            ORDER BY s.name
+        """, (entity_id,))
+        prices = [{
+            'size_id': r[0],
+            'size_name': r[1],
+            'price': r[2],
+        } for r in cur.fetchall()]
 
-        if price_type == 'layers':
-            cur.execute(
-                "SELECT size_id, price FROM mattress_layers_prices WHERE layer_id = %s",
-                (entity_id,),
-            )
-        else:
-            cur.execute(
-                "SELECT size_id, price FROM mattress_cover_prices WHERE cover_id = %s",
-                (entity_id,),
-            )
-        prices_map = {r[0]: r[1] for r in cur.fetchall()}
-
-        result = []
-        for s in all_sizes:
-            result.append({
-                'size_id': s['id'],
-                'size_name': s['name'],
-                'price': prices_map.get(s['id']),
-            })
         return jsonify({
+            'prices': prices,
             'price_type': price_type,
             'entity_id': entity_id,
-            'prices': result,
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_prices_list")
+        logger.exception("admin.py: get_prices")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-@admin_bp.route('/api/admin/mattresses/prices/<string:price_type>/<int:entity_id>/<int:size_id>', methods=['PUT'])
-def mattresses_price_set(price_type, entity_id, size_id):
+@admin_bp.route(
+    '/api/admin/mattresses/prices/<price_type>/<int:entity_id>/<int:size_id>',
+    methods=['PUT'],
+)
+def set_price(price_type, entity_id, size_id):
     if not _require_admin():
         return _unauthorized()
-    if price_type not in ('layers', 'covers'):
-        return jsonify({'error': 'Неверный тип'}), 400
+    price_table, entity_col = _price_config(price_type)
+    if not price_table:
+        return jsonify({'error': 'Неверный тип цен'}), 400
+
     data = _json_body()
-    raw = data.get('price')
-    if raw is None or raw == '':
-        price = None
-    else:
+    price = data.get('price')
+    if price is not None and price != '':
         try:
-            price = int(raw)
-            if price < 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Введите положительное целое число'}), 400
+            price = int(price)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Неверная цена'}), 400
+        if price < 0:
+            return jsonify({'error': 'Цена должна быть неотрицательной'}), 400
+    else:
+        price = None
 
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
         if price is None:
-            if price_type == 'layers':
-                cur.execute(
-                    "DELETE FROM mattress_layers_prices WHERE layer_id = %s AND size_id = %s",
-                    (entity_id, size_id),
-                )
-            else:
-                cur.execute(
-                    "DELETE FROM mattress_cover_prices WHERE cover_id = %s AND size_id = %s",
-                    (entity_id, size_id),
-                )
+            cur.execute(
+                f"DELETE FROM {price_table} WHERE {entity_col} = %s AND size_id = %s",
+                (entity_id, size_id),
+            )
         else:
-            if price_type == 'layers':
-                cur.execute(
-                    "INSERT INTO mattress_layers_prices (layer_id, size_id, price) "
-                    "VALUES (%s, %s, %s) "
-                    "ON CONFLICT (layer_id, size_id) DO UPDATE SET price = EXCLUDED.price",
-                    (entity_id, size_id, price),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO mattress_cover_prices (cover_id, size_id, price) "
-                    "VALUES (%s, %s, %s) "
-                    "ON CONFLICT (cover_id, size_id) DO UPDATE SET price = EXCLUDED.price",
-                    (entity_id, size_id, price),
-                )
+            cur.execute(f"""
+                INSERT INTO {price_table} ({entity_col}, size_id, price)
+                VALUES (%s, %s, %s)
+                ON CONFLICT ({entity_col}, size_id)
+                DO UPDATE SET price = EXCLUDED.price
+            """, (entity_id, size_id, price))
         conn.commit()
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
-        logger.exception("admin.py: mattresses_price_set")
+        logger.exception("admin.py: set_price")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-# ---------- ОСНОВНЫЕ ХАРАКТЕРИСТИКИ (СПРАВОЧНИК) ----------
+# ============================================================
+#          МАТРАСЫ: СПРАВОЧНИК ХАРАКТЕРИСТИК
+# ============================================================
 @admin_bp.route('/api/admin/mattresses/feature-types')
-def mattresses_feature_types_list():
+def list_feature_types():
     if not _require_admin():
         return _unauthorized()
     page = max(0, request.args.get('page', 0, type=int))
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
@@ -2371,18 +2606,23 @@ def mattresses_feature_types_list():
         if page >= total_pages:
             page = total_pages - 1
         offset = page * MATTRESS_PAGE_SIZE
+
         cur.execute(
             "SELECT id, name FROM mattress_layer_main_features_types "
             "ORDER BY name OFFSET %s LIMIT %s",
             (offset, MATTRESS_PAGE_SIZE),
         )
         types = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
+
         return jsonify({
-            'types': types, 'total': total, 'page': page,
-            'page_size': MATTRESS_PAGE_SIZE, 'total_pages': total_pages,
+            'types': types,
+            'total': total,
+            'page': page,
+            'page_size': MATTRESS_PAGE_SIZE,
+            'total_pages': total_pages,
         })
     except Exception as e:
-        logger.exception("admin.py: mattresses_feature_types_list")
+        logger.exception("admin.py: list_feature_types")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2390,26 +2630,38 @@ def mattresses_feature_types_list():
 
 
 @admin_bp.route('/api/admin/mattresses/feature-types', methods=['POST'])
-def mattresses_feature_type_create():
+def create_feature_type():
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'error': 'Название обязательно'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO mattress_layer_main_features_types (name) "
-                    "VALUES (%s) RETURNING id", (name,))
+        cur.execute(
+            "SELECT id FROM mattress_layer_main_features_types WHERE name = %s",
+            (name,),
+        )
+        if cur.fetchone():
+            return jsonify({'error': 'Такая характеристика уже существует'}), 400
+        cur.execute(
+            "INSERT INTO mattress_layer_main_features_types (name) "
+            "VALUES (%s) RETURNING id",
+            (name,),
+        )
         new_id = cur.fetchone()[0]
         conn.commit()
         return jsonify({'success': True, 'id': new_id})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: create_feature_type")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2417,27 +2669,40 @@ def mattresses_feature_type_create():
 
 
 @admin_bp.route('/api/admin/mattresses/feature-types/<int:feat_id>', methods=['PUT'])
-def mattresses_feature_type_update(feat_id):
+def update_feature_type(feat_id):
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
-    new_name = (data.get('name') or '').strip()
-    if not new_name:
+    name = (data.get('name') or '').strip()
+    if not name:
         return jsonify({'error': 'Название обязательно'}), 400
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE mattress_layer_main_features_types SET name = %s WHERE id = %s",
-                    (new_name, feat_id))
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Не найдено'}), 404
+        cur.execute(
+            "SELECT id FROM mattress_layer_main_features_types "
+            "WHERE name = %s AND id != %s",
+            (name, feat_id),
+        )
+        if cur.fetchone():
+            return jsonify({'error': 'Такая характеристика уже существует'}), 400
+        cur.execute(
+            "UPDATE mattress_layer_main_features_types SET name = %s WHERE id = %s",
+            (name, feat_id),
+        )
+        affected = cur.rowcount
         conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Характеристика не найдена'}), 404
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: update_feature_type")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
@@ -2445,298 +2710,548 @@ def mattresses_feature_type_update(feat_id):
 
 
 @admin_bp.route('/api/admin/mattresses/feature-types/<int:feat_id>', methods=['DELETE'])
-def mattresses_feature_type_delete(feat_id):
+def delete_feature_type(feat_id):
     if not _require_admin():
         return _unauthorized()
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM mattress_layer_main_features_types WHERE id = %s", (feat_id,))
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Не найдено'}), 404
+        if _table_exists(cur, 'mattress_layer_main_features'):
+            cur.execute(
+                "DELETE FROM mattress_layer_main_features WHERE feature_id = %s",
+                (feat_id,),
+            )
+        cur.execute(
+            "DELETE FROM mattress_layer_main_features_types WHERE id = %s",
+            (feat_id,),
+        )
+        affected = cur.rowcount
         conn.commit()
+        if affected == 0:
+            return jsonify({'error': 'Характеристика не найдена'}), 404
         return jsonify({'success': True})
     except Exception as e:
         conn.rollback()
+        logger.exception("admin.py: delete_feature_type")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-# ---------- ОСНОВНЫЕ ХАРАКТЕРИСТИКИ СЛОЯ ----------
-@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/main-features')
-def mattresses_layer_main_features(layer_id):
+# ============================================================
+#          МАТРАСЫ: ЭКСПОРТ EXCEL (000000.xlsx)
+# ============================================================
+def _build_mattress_export_workbook(cur):
+    """Строит workbook 000000.xlsx из данных БД."""
+    cur.execute("SELECT id, name FROM mattress_sizes ORDER BY name")
+    sizes = cur.fetchall()
+    cur.execute("SELECT id, code FROM mattress_layers ORDER BY code")
+    layers = cur.fetchall()
+    cur.execute("SELECT id, code FROM mattress_cover ORDER BY code")
+    covers = cur.fetchall()
+
+    cur.execute("SELECT layer_id, size_id, price FROM mattress_layers_prices")
+    layer_prices = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+    cur.execute("SELECT cover_id, size_id, price FROM mattress_cover_prices")
+    cover_prices = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "000000"
+
+    headers = ["Размер"] + [l[1] for l in layers] + [c[1] for c in covers]
+    ws.append(headers)
+
+    for size in sizes:
+        row = [size[1]]
+        for layer in layers:
+            row.append(layer_prices.get((layer[0], size[0]), ""))
+        for cover in covers:
+            row.append(cover_prices.get((cover[0], size[0]), ""))
+        ws.append(row)
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill("solid", fgColor="DDDDDD")
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.fill = header_fill
+        cell.border = border
+
+    for row_cells in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+        for cell in row_cells:
+            cell.border = border
+            if cell.column == 1:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.freeze_panes = "A2"
+
+    for col_idx in range(1, ws.max_column + 1):
+        letter = get_column_letter(col_idx)
+        max_len = 0
+        for row_idx in range(1, ws.max_row + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value is not None:
+                max_len = max(max_len, len(str(value)))
+        ws.column_dimensions[letter].width = min(min(max_len + 2, 50), 50)
+
+    return wb
+
+
+@admin_bp.route('/api/admin/mattresses/export')
+def export_mattresses_excel():
     if not _require_admin():
         return _unauthorized()
+    if not OPENPYXL_AVAILABLE:
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
+
     try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute("""
-            SELECT mft.id, mft.name, COALESCE(pmf.value, '')
-            FROM mattress_layer_main_features_types mft
-            LEFT JOIN mattress_layer_main_features pmf
-                ON mft.id = pmf.feature_id AND pmf.layer_id = %s
-            ORDER BY mft.name
-        """, (layer_id,))
-        features = [{'feature_id': r[0], 'feature_name': r[1], 'value': r[2]}
-                    for r in cur.fetchall()]
-        return jsonify({'features': features})
-    except Exception as e:
-        logger.exception("admin.py: mattresses_layer_main_features")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
+        wb = _build_mattress_export_workbook(cur)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
 
-
-@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/main-features/<int:feature_id>', methods=['PUT'])
-def mattresses_layer_main_feature_set(layer_id, feature_id):
-    if not _require_admin():
-        return _unauthorized()
-    data = _json_body()
-    value = (data.get('value') or '').strip()
-    try:
-        conn = _get_db_connection()
-    except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "INSERT INTO mattress_layer_main_features (layer_id, feature_id, value) "
-            "VALUES (%s, %s, %s) "
-            "ON CONFLICT (layer_id, feature_id) DO UPDATE SET value = EXCLUDED.value",
-            (layer_id, feature_id, value),
+        return send_file(
+            buffer,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='000000.xlsx',
         )
-        conn.commit()
-        return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
+        logger.exception("admin.py: export_mattresses_excel")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-# ---------- ДОПОЛНИТЕЛЬНЫЕ ХАРАКТЕРИСТИКИ СЛОЯ ----------
-@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/extra-features')
-def mattresses_layer_extra_features(layer_id):
+# ============================================================
+#          ПАРТНЁРСКИЕ ЦЕНЫ (аналог partners_prices_bot.py)
+# ============================================================
+_PARTNER_NAME_RE = re.compile(r"[0-9a-zA-Zа-яА-ЯёЁ_\-]+")
+
+
+def _partner_file_path(name):
+    return PARTNERS_BASE / f"{name}.xlsx"
+
+
+def _partner_is_valid_name(name):
+    if not name or len(name) > 40:
+        return False
+    if name == ORIGINAL_PARTNER_NAME:
+        return False
+    return bool(_PARTNER_NAME_RE.fullmatch(name))
+
+
+def _partner_list_files():
+    if not PARTNERS_BASE.exists():
+        return []
+    files = [f for f in PARTNERS_BASE.glob("*.xlsx") if f.is_file()]
+    files.sort(key=lambda p: (p.stem != ORIGINAL_PARTNER_NAME, p.stem.lower()))
+    return files
+
+
+def _ensure_partner_template_file():
+    """Гарантирует наличие partners/000000.xlsx. Возвращает True при успехе."""
+    path = _partner_file_path(ORIGINAL_PARTNER_NAME)
+    if path.exists():
+        return True
+    if not OPENPYXL_AVAILABLE:
+        return False
+    try:
+        conn = _get_db_connection()
+        cur = conn.cursor()
+        try:
+            wb = _build_mattress_export_workbook(cur)
+            PARTNERS_BASE.mkdir(parents=True, exist_ok=True)
+            wb.save(path)
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning(f"admin.py: не удалось создать шаблон 000000.xlsx: {e}")
+        return False
+
+
+def _validate_partner_upload(new_path, template_path):
+    """Проверяет структуру загруженного xlsx по шаблону."""
+    if not template_path.exists():
+        return True, "OK"
+    try:
+        wb1 = load_workbook(template_path)
+        ws1 = wb1.active
+        wb2 = load_workbook(new_path)
+        ws2 = wb2.active
+    except Exception as e:
+        return False, f"не удалось прочитать файл ({e})"
+
+    if ws1.max_row != ws2.max_row:
+        return False, (f"число строк не совпадает "
+                       f"(ожидается {ws1.max_row}, получено {ws2.max_row})")
+    if ws1.max_column != ws2.max_column:
+        return False, (f"число столбцов не совпадает "
+                       f"(ожидается {ws1.max_column}, получено {ws2.max_column})")
+
+    for c in range(2, ws1.max_column + 1):
+        v1 = ws1.cell(1, c).value
+        v2 = ws2.cell(1, c).value
+        if str(v1) != str(v2):
+            return False, f"заголовок столбца {c} не совпадает ('{v1}' vs '{v2}')"
+
+    for r in range(2, ws1.max_row + 1):
+        v1 = ws1.cell(r, 1).value
+        v2 = ws2.cell(r, 1).value
+        if str(v1) != str(v2):
+            return False, f"метка строки {r} не совпадает ('{v1}' vs '{v2}')"
+
+    for r in range(2, ws1.max_row + 1):
+        for c in range(2, ws1.max_column + 1):
+            v = ws2.cell(r, c).value
+            if v is None or v == "":
+                return False, f"ячейка ({r},{c}) пуста"
+            try:
+                float(v)
+            except (ValueError, TypeError):
+                return False, f"ячейка ({r},{c}) не является числом"
+
+    return True, "OK"
+
+
+@admin_bp.route('/api/admin/partners/files')
+def partner_list_files():
     if not _require_admin():
         return _unauthorized()
     try:
+        files = _partner_list_files()
+        result = []
+        for f in files:
+            try:
+                size_kb = round(f.stat().st_size / 1024, 1)
+            except Exception:
+                size_kb = 0
+            result.append({
+                'name': f.stem,
+                'is_original': f.stem == ORIGINAL_PARTNER_NAME,
+                'size_kb': size_kb,
+            })
+        return jsonify({'files': result})
+    except Exception as e:
+        logger.exception("admin.py: partner_list_files")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/partners/template')
+def partner_download_template():
+    """Генерирует 000000.xlsx из БД, сохраняет в partners/ и отдаёт на скачивание."""
+    if not _require_admin():
+        return _unauthorized()
+    if not OPENPYXL_AVAILABLE:
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
+    try:
         conn = _get_db_connection()
     except Exception as e:
+        logger.exception("admin.py: ошибка подключения к БД")
         return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
     cur = conn.cursor()
     try:
-        cur.execute(
-            "SELECT id, name, value FROM mattress_layer_extra_features "
-            "WHERE layer_id = %s ORDER BY name",
-            (layer_id,),
+        wb = _build_mattress_export_workbook(cur)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        content = buffer.getvalue()
+
+        PARTNERS_BASE.mkdir(parents=True, exist_ok=True)
+        template_path = _partner_file_path(ORIGINAL_PARTNER_NAME)
+        with open(template_path, 'wb') as f:
+            f.write(content)
+
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='000000.xlsx',
         )
-        features = [{'id': r[0], 'name': r[1], 'value': r[2]} for r in cur.fetchall()]
-        return jsonify({'features': features})
     except Exception as e:
+        logger.exception("admin.py: partner_download_template")
         return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
-@admin_bp.route('/api/admin/mattresses/layers/<int:layer_id>/extra-features', methods=['POST'])
-def mattresses_layer_extra_feature_create(layer_id):
+@admin_bp.route('/api/admin/partners/files', methods=['POST'])
+def partner_create_copy():
     if not _require_admin():
         return _unauthorized()
     data = _json_body()
     name = (data.get('name') or '').strip()
-    value = (data.get('value') or '').strip()
-    if not name:
-        return jsonify({'error': 'Название обязательно'}), 400
+    if not _partner_is_valid_name(name):
+        return jsonify({'error': 'Недопустимое имя файла'}), 400
+    dst = _partner_file_path(name)
+    if dst.exists():
+        return jsonify({'error': 'Файл с таким именем уже существует'}), 400
+
+    if not _ensure_partner_template_file():
+        return jsonify({'error': 'Шаблон 000000.xlsx не найден. Нажмите «Скачать 000000.xlsx».'}), 400
+
+    src = _partner_file_path(ORIGINAL_PARTNER_NAME)
     try:
-        conn = _get_db_connection()
+        shutil.copy(str(src), str(dst))
+        return jsonify({'success': True, 'name': name})
     except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            "INSERT INTO mattress_layer_extra_features (layer_id, name, value) "
-            "VALUES (%s, %s, %s) RETURNING id",
-            (layer_id, name, value),
-        )
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return jsonify({'success': True, 'id': new_id})
-    except Exception as e:
-        conn.rollback()
+        logger.exception("admin.py: partner_create_copy")
         return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
 
 
-@admin_bp.route('/api/admin/mattresses/extra-features/<int:feat_id>', methods=['PUT'])
-def mattresses_layer_extra_feature_update(feat_id):
+@admin_bp.route('/api/admin/partners/files/<name>/download')
+def partner_download_file(name):
     if not _require_admin():
         return _unauthorized()
+    path = _partner_file_path(name)
+    if not path.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    try:
+        return send_file(
+            str(path),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f'{name}.xlsx',
+        )
+    except Exception as e:
+        logger.exception("admin.py: partner_download_file")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/partners/files/<name>/grid')
+def partner_file_grid(name):
+    if not _require_admin():
+        return _unauthorized()
+    path = _partner_file_path(name)
+    if not path.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    if not OPENPYXL_AVAILABLE:
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
+    try:
+        wb = load_workbook(path)
+        ws = wb.active
+        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        row_labels = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
+        values = []
+        for r in range(1, ws.max_row + 1):
+            row_vals = []
+            for c in range(1, ws.max_column + 1):
+                row_vals.append(ws.cell(r, c).value)
+            values.append(row_vals)
+        return jsonify({
+            'name': name,
+            'is_original': name == ORIGINAL_PARTNER_NAME,
+            'headers': headers,
+            'row_labels': row_labels,
+            'values': values,
+            'max_row': ws.max_row,
+            'max_column': ws.max_column,
+        })
+    except Exception as e:
+        logger.exception("admin.py: partner_file_grid")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/partners/files/<name>/bulk', methods=['PUT'])
+def partner_bulk_update(name):
+    if not _require_admin():
+        return _unauthorized()
+    if name == ORIGINAL_PARTNER_NAME:
+        return jsonify({'error': 'Нельзя изменять шаблон'}), 400
+    path = _partner_file_path(name)
+    if not path.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    if not OPENPYXL_AVAILABLE:
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
+
     data = _json_body()
-    name = data.get('name')
-    value = data.get('value')
     try:
-        conn = _get_db_connection()
-    except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
+        pct = float(data.get('percent'))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Неверный процент'}), 400
+
     try:
-        set_parts, vals = [], []
-        if name is not None:
-            set_parts.append("name = %s")
-            vals.append(_to_str(name))
-        if value is not None:
-            set_parts.append("value = %s")
-            vals.append(_to_str(value))
-        if not set_parts:
-            return jsonify({'error': 'Нет данных'}), 400
-        vals.append(feat_id)
-        cur.execute(
-            f"UPDATE mattress_layer_extra_features SET {', '.join(set_parts)} WHERE id = %s",
-            vals,
-        )
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Не найдено'}), 404
-        conn.commit()
+        wb = load_workbook(path)
+        ws = wb.active
+        for r in range(2, ws.max_row + 1):
+            for c in range(2, ws.max_column + 1):
+                v = ws.cell(r, c).value
+                if v is None or v == "":
+                    continue
+                try:
+                    old = float(v)
+                except (ValueError, TypeError):
+                    continue
+                ws.cell(r, c).value = int(round(old * (1 + pct / 100.0)))
+        wb.save(path)
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
+        logger.exception("admin.py: partner_bulk_update")
         return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
 
 
-@admin_bp.route('/api/admin/mattresses/extra-features/<int:feat_id>', methods=['DELETE'])
-def mattresses_layer_extra_feature_delete(feat_id):
+@admin_bp.route('/api/admin/partners/files/<name>/cell', methods=['PUT'])
+def partner_update_cell(name):
     if not _require_admin():
         return _unauthorized()
+    if name == ORIGINAL_PARTNER_NAME:
+        return jsonify({'error': 'Нельзя изменять шаблон'}), 400
+    path = _partner_file_path(name)
+    if not path.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    if not OPENPYXL_AVAILABLE:
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
+
+    data = _json_body()
     try:
-        conn = _get_db_connection()
+        row = int(data.get('row'))
+        col = int(data.get('col'))
+        value = float(data.get('value'))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Неверные параметры'}), 400
+    op = data.get('op')
+    if op not in ('set', 'mul', 'add', 'sub'):
+        return jsonify({'error': 'Неизвестная операция'}), 400
+
+    try:
+        wb = load_workbook(path)
+        ws = wb.active
+        if row < 2 or row > ws.max_row or col < 2 or col > ws.max_column:
+            return jsonify({'error': 'Неверные координаты ячейки'}), 400
+        old_raw = ws.cell(row, col).value
+        try:
+            old = float(old_raw)
+        except (ValueError, TypeError):
+            old = 0.0
+
+        if op == 'set':
+            new = value
+        elif op == 'mul':
+            new = old * value
+        elif op == 'add':
+            new = old + value
+        else:  # sub
+            new = old - value
+
+        new_int = int(round(new))
+        ws.cell(row, col).value = new_int
+        wb.save(path)
+        return jsonify({'success': True, 'old': old, 'new': new_int})
     except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
+        logger.exception("admin.py: partner_update_cell")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/partners/files/<name>/rename', methods=['PUT'])
+def partner_rename_file(name):
+    if not _require_admin():
+        return _unauthorized()
+    if name == ORIGINAL_PARTNER_NAME:
+        return jsonify({'error': 'Нельзя переименовать шаблон'}), 400
+    data = _json_body()
+    new_name = (data.get('new_name') or '').strip()
+    if not _partner_is_valid_name(new_name):
+        return jsonify({'error': 'Недопустимое имя'}), 400
+    src = _partner_file_path(name)
+    dst = _partner_file_path(new_name)
+    if not src.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    if dst.exists():
+        return jsonify({'error': 'Файл с таким именем уже существует'}), 400
     try:
-        cur.execute("DELETE FROM mattress_layer_extra_features WHERE id = %s", (feat_id,))
-        if cur.rowcount == 0:
-            return jsonify({'error': 'Не найдено'}), 404
-        conn.commit()
+        src.rename(dst)
+        return jsonify({'success': True, 'name': new_name})
+    except Exception as e:
+        logger.exception("admin.py: partner_rename_file")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/partners/files/<name>', methods=['DELETE'])
+def partner_delete_file(name):
+    if not _require_admin():
+        return _unauthorized()
+    if name == ORIGINAL_PARTNER_NAME:
+        return jsonify({'error': 'Нельзя удалить шаблон 000000.xlsx'}), 400
+    path = _partner_file_path(name)
+    if not path.exists():
+        return jsonify({'error': 'Файл не найден'}), 404
+    try:
+        path.unlink()
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
+        logger.exception("admin.py: partner_delete_file")
         return jsonify({'error': str(e)}), 500
-    finally:
-        cur.close()
-        conn.close()
 
 
-# ---------- ЭКСПОРТ В EXCEL ----------
-@admin_bp.route('/api/admin/mattresses/export')
-def mattresses_export():
+@admin_bp.route('/api/admin/partners/upload', methods=['POST'])
+def partner_upload():
     if not _require_admin():
         return _unauthorized()
     if not OPENPYXL_AVAILABLE:
-        return jsonify({'error': 'openpyxl не установлен на сервере'}), 500
+        return jsonify({'error': 'На сервере отсутствует openpyxl'}), 500
 
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'error': 'Файл не передан'}), 400
+    if not file.filename.lower().endswith('.xlsx'):
+        return jsonify({'error': 'Поддерживаются только .xlsx файлы'}), 400
+
+    mode = (request.form.get('mode') or 'new').strip()
+    target_name = (request.form.get('name') or '').strip()
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix='partner_upload_'))
+    tmp_path = tmp_dir / file.filename
     try:
-        conn = _get_db_connection()
+        file.save(str(tmp_path))
+
+        if not _ensure_partner_template_file():
+            return jsonify({'error': 'Не удалось получить шаблон для проверки'}), 500
+
+        template_path = _partner_file_path(ORIGINAL_PARTNER_NAME)
+        ok, msg = _validate_partner_upload(tmp_path, template_path)
+        if not ok:
+            return jsonify({'error': f'Файл не прошёл проверку: {msg}'}), 400
+
+        if mode == 'replace':
+            if not target_name or target_name == ORIGINAL_PARTNER_NAME:
+                return jsonify({'error': 'Нельзя заменить шаблон'}), 400
+            if not _partner_is_valid_name(target_name):
+                return jsonify({'error': 'Недопустимое имя'}), 400
+            dst = _partner_file_path(target_name)
+            if not dst.exists():
+                return jsonify({'error': 'Файл для замены не найден'}), 404
+        else:  # mode == 'new'
+            if not _partner_is_valid_name(target_name):
+                return jsonify({'error': 'Недопустимое имя'}), 400
+            dst = _partner_file_path(target_name)
+            if dst.exists():
+                return jsonify({'error': 'Файл с таким именем уже существует'}), 400
+
+        shutil.copy(str(tmp_path), str(dst))
+        return jsonify({'success': True, 'name': target_name})
     except Exception as e:
-        return jsonify({'error': f'Ошибка подключения к БД: {e}'}), 500
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT id, code FROM mattress_layers ORDER BY code")
-        layers = cur.fetchall()
-        cur.execute("SELECT id, code FROM mattress_cover ORDER BY code")
-        covers = cur.fetchall()
-        cur.execute("SELECT id, name FROM mattress_sizes ORDER BY name")
-        sizes = cur.fetchall()
-        cur.execute("SELECT layer_id, size_id, price FROM mattress_layers_prices")
-        layer_prices = {(r[0], r[1]): r[2] for r in cur.fetchall()}
-        cur.execute("SELECT cover_id, size_id, price FROM mattress_cover_prices")
-        cover_prices = {(r[0], r[1]): r[2] for r in cur.fetchall()}
-
-        wb = _XLWorkbook()
-        ws = wb.active
-        ws.title = "000000"
-
-        headers = ["Размер"]
-        for l in layers:
-            headers.append(l[1])
-        for c in covers:
-            headers.append(c[1])
-        ws.append(headers)
-
-        def excel_price(v):
-            if v is None:
-                return ""
-            if isinstance(v, Decimal):
-                if v == v.to_integral_value():
-                    return int(v)
-                return float(v)
-            return v
-
-        for size in sizes:
-            row = [size[1]]
-            for layer in layers:
-                row.append(excel_price(layer_prices.get((layer[0], size[0]), "")))
-            for cover in covers:
-                row.append(excel_price(cover_prices.get((cover[0], size[0]), "")))
-            ws.append(row)
-
-        header_font = _XLFont(bold=True)
-        header_fill = _XLFill("solid", fgColor="DDDDDD")
-        thin = _XLSide(style="thin", color="000000")
-        border = _XLBorder(left=thin, right=thin, top=thin, bottom=thin)
-
-        for cell in ws[1]:
-            cell.font = header_font
-            cell.alignment = _XLAlign(horizontal="center", vertical="center", wrap_text=True)
-            cell.fill = header_fill
-            cell.border = border
-
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
-            for cell in row:
-                cell.border = border
-                if cell.column == 1:
-                    cell.alignment = _XLAlign(horizontal="left", vertical="center")
-                else:
-                    cell.alignment = _XLAlign(horizontal="center", vertical="center")
-
-        ws.freeze_panes = "A2"
-
-        for col_idx in range(1, ws.max_column + 1):
-            letter = _xl_col_letter(col_idx)
-            max_len = 0
-            for row_idx in range(1, ws.max_row + 1):
-                value = ws.cell(row=row_idx, column=col_idx).value
-                if value is not None:
-                    max_len = max(max_len, len(str(value)))
-            ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 50)
-
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
-
-        return _send_excel_bytes(output, '000000.xlsx')
-    except Exception as e:
-        logger.exception("admin.py: mattresses_export")
+        logger.exception("admin.py: partner_upload")
         return jsonify({'error': str(e)}), 500
     finally:
-        cur.close()
-        conn.close()
-
-
-# Автоматическая инициализация схемы таблиц при импорте модуля
-_ensure_mattress_tables()
+        shutil.rmtree(tmp_dir, ignore_errors=True)

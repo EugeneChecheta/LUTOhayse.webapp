@@ -850,6 +850,13 @@ body {
     box-shadow: 0 0 0 3px rgba(98, 139, 53, 0.15);
 }
 
+/* Селекты (используются в партнёрских ценах) — наследуют стили .edit-input */
+select.edit-input {
+    background: #fff;
+    cursor: pointer;
+    padding-right: 40px;
+}
+
 /* ========== ГАЛЕРЕЯ ========== */
 textarea.edit-input {
     resize: vertical;

@@ -190,10 +190,10 @@
                         <span class="admin-menu-title">Характеристики</span>
                         <span class="admin-menu-desc">Справочник основных характеристик</span>
                     </button>
-                    <button type="button" class="admin-menu-card" data-action="download-mattress-excel">
-                        <span class="admin-menu-icon">📥</span>
-                        <span class="admin-menu-title">Скачать 000000.xlsx</span>
-                        <span class="admin-menu-desc">Таблица цен (аналог /partner0)</span>
+                    <button type="button" class="admin-menu-card" data-action="open-partner-prices">
+                        <span class="admin-menu-icon">💼</span>
+                        <span class="admin-menu-title">Партнёрские цены</span>
+                        <span class="admin-menu-desc">Файлы цен партнёров · 000000.xlsx и копии</span>
                     </button>
                 </div>
             </div>
@@ -470,7 +470,7 @@
 
 
     // ============================================================
-    // МИНИ-ПРИЛОЖЕНИЕ «ЗАКАЗЫ, КЛИЕНТЫ, ГАЛЕРЕЯ, МАТРАСЫ»
+    // МИНИ-ПРИЛОЖЕНИЕ «ЗАКАЗЫ, КЛИЕНТЫ, ГАЛЕРЕЯ, МАТРАСЫ, ПАРТНЁРСКИЕ ЦЕНЫ»
     // ============================================================
     (function () {
         'use strict';
@@ -502,6 +502,10 @@
             editCoverPage: 0,
             priceType: null,
             priceEntityId: null,
+            // Partners state
+            partnerFiles: [],
+            partnerCurrentFile: null,
+            partnerGrid: null,
         };
 
         let views = {
@@ -2534,7 +2538,7 @@
         }
 
         // ============================================================
-        //                    ЭКСПОРТ EXCEL
+        //                    ЭКСПОРТ EXCEL (старая кнопка, оставлена для совместимости)
         // ============================================================
         async function downloadExcel() {
             try {
@@ -2558,6 +2562,482 @@
         }
 
         // ============================================================
+        //                    ПАРТНЁРСКИЕ ЦЕНЫ
+        // ============================================================
+        async function loadPartnerFiles() {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet('/api/admin/partners/files');
+                state.partnerFiles = data.files || [];
+                renderPartnerFiles();
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderPartnerFiles() {
+            const files = state.partnerFiles;
+            let html = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="mattresses_menu">← К разделам</button>
+                    <h2 class="view-title">💼 Партнёрские цены</h2>
+                    <span class="orders-count">Файлов: ${files.length}</span>
+                </div>
+                <div class="detail-actions" style="margin-bottom: 20px;">
+                    <button type="button" class="action-btn primary" data-action="partner-download-template">📥 Скачать 000000.xlsx</button>
+                    <button type="button" class="action-btn" data-action="partner-create-form">➕ Создать копию из 000000</button>
+                    <button type="button" class="action-btn" data-action="partner-upload-form">📤 Загрузить свой xlsx</button>
+                </div>
+            `;
+            if (!files.length) {
+                html += '<div class="orders-empty">Файлов пока нет. Нажмите «Скачать 000000.xlsx» для создания шаблона.</div>';
+            } else {
+                html += '<div class="orders-list">';
+                for (const f of files) {
+                    const marker = f.is_original ? '🔒' : '📄';
+                    html += `
+                        <div class="order-card compact">
+                            <div class="order-card-info">
+                                <div class="order-row"><span class="order-id">${marker}</span> <span class="order-name">${esc(f.name)}.xlsx</span></div>
+                                <div class="order-row"><span class="order-label">💾</span> ${f.size_kb} KB</div>
+                            </div>
+                            <div class="order-card-actions">
+                                <button type="button" class="action-btn primary" data-action="partner-open-file" data-name="${esc(f.name)}">📂 Открыть</button>
+                                <button type="button" class="action-btn" data-action="partner-download-file" data-name="${esc(f.name)}">📥 Скачать</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+            views.content.innerHTML = html;
+        }
+
+        function loadPartnerFileDetail(name) {
+            const file = state.partnerFiles.find(f => f.name === name);
+            if (!file) {
+                loadPartnerFiles();
+                return;
+            }
+            state.partnerCurrentFile = name;
+            const isOriginal = !!file.is_original;
+            let actions = '';
+            if (isOriginal) {
+                actions = `
+                    <button type="button" class="action-btn primary" data-action="partner-download-file" data-name="${esc(name)}">📥 Скачать</button>
+                    <button type="button" class="action-btn" data-action="partner-download-template">🔄 Пересоздать из БД</button>
+                `;
+            } else {
+                actions = `
+                    <button type="button" class="action-btn primary" data-action="partner-download-file" data-name="${esc(name)}">📥 Скачать</button>
+                    <button type="button" class="action-btn" data-action="partner-bulk-form" data-name="${esc(name)}">💰 Изменить все цены (%)</button>
+                    <button type="button" class="action-btn" data-action="partner-single-form" data-name="${esc(name)}">🎯 Изменить одну цену</button>
+                    <button type="button" class="action-btn" data-action="partner-rename-form" data-name="${esc(name)}">📝 Переименовать</button>
+                    <button type="button" class="action-btn danger" data-action="partner-delete" data-name="${esc(name)}">🗑️ Удалить</button>
+                `;
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_files">← К партнёрским ценам</button>
+                    <h2 class="view-title">📄 ${esc(name)}.xlsx</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row"><span class="detail-label">Размер:</span><span class="detail-value">${file.size_kb} KB</span></div>
+                    ${isOriginal ? '<div class="detail-row"><span class="detail-label">🔒 Статус:</span><span class="detail-value">Исходный шаблон. Доступен только просмотр и скачивание.</span></div>' : ''}
+                </div>
+                <div class="detail-actions">${actions}</div>
+            `;
+            showContent();
+        }
+
+        function showPartnerCreateForm() {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_files">← Назад</button>
+                    <h2 class="view-title">➕ Создать копию из 000000</h2>
+                </div>
+                <div class="detail-section">
+                    <p style="color:#777;margin-bottom:14px;">Разрешены буквы (рус/англ), цифры, <code>_</code> и <code>-</code>.</p>
+                    <div class="detail-row">
+                        <span class="detail-label">Имя файла:</span>
+                        <span class="detail-value"><input class="edit-input" id="partnerNewName" type="text" placeholder="без .xlsx"></span>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="partner-create-apply">✅ Создать</button>
+                    <button type="button" class="action-btn" data-back="partner_files">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+            const inp = document.getElementById('partnerNewName');
+            if (inp) inp.focus();
+        }
+
+        function showPartnerRenameForm(name) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_file_detail" data-name="${esc(name)}">← Назад</button>
+                    <h2 class="view-title">📝 Переименовать ${esc(name)}.xlsx</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row">
+                        <span class="detail-label">Новое имя:</span>
+                        <span class="detail-value"><input class="edit-input" id="partnerRenameName" type="text" value="${esc(name)}" placeholder="без .xlsx"></span>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="partner-rename-apply" data-name="${esc(name)}">💾 Переименовать</button>
+                    <button type="button" class="action-btn" data-back="partner_file_detail" data-name="${esc(name)}">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+            const inp = document.getElementById('partnerRenameName');
+            if (inp) inp.focus();
+        }
+
+        function showPartnerBulkForm(name) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_file_detail" data-name="${esc(name)}">← Назад</button>
+                    <h2 class="view-title">💰 Изменить все цены — ${esc(name)}.xlsx</h2>
+                </div>
+                <div class="detail-section">
+                    <p style="color:#777;margin-bottom:14px;">Введите процент изменения. Примеры: <code>10</code> (+10%), <code>-7.5</code> (−7.5%). Округление до целых.</p>
+                    <div class="detail-row">
+                        <span class="detail-label">Процент:</span>
+                        <span class="detail-value"><input class="edit-input" id="partnerBulkPercent" type="number" step="any" placeholder="например 10 или -5"></span>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="partner-bulk-apply" data-name="${esc(name)}">✅ Применить</button>
+                    <button type="button" class="action-btn" data-back="partner_file_detail" data-name="${esc(name)}">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+            const inp = document.getElementById('partnerBulkPercent');
+            if (inp) inp.focus();
+        }
+
+        async function loadPartnerSingleForm(name) {
+            showContent();
+            renderLoading();
+            try {
+                const data = await apiGet(`/api/admin/partners/files/${encodeURIComponent(name)}/grid`);
+                state.partnerGrid = data;
+                renderPartnerSingleForm(data);
+            } catch (e) {
+                renderError(e.message);
+            }
+        }
+
+        function renderPartnerSingleForm(grid) {
+            const name = grid.name;
+            const { headers, row_labels, values, max_row, max_column } = grid;
+            let rowOptions = '';
+            for (let r = 2; r <= max_row; r++) {
+                rowOptions += `<option value="${r}">${esc(row_labels[r-1])}</option>`;
+            }
+            let colOptions = '';
+            for (let c = 2; c <= max_column; c++) {
+                colOptions += `<option value="${c}">${esc(headers[c-1])}</option>`;
+            }
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_file_detail" data-name="${esc(name)}">← К файлу</button>
+                    <h2 class="view-title">🎯 Изменить одну цену — ${esc(name)}.xlsx</h2>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-row">
+                        <span class="detail-label">Строка:</span>
+                        <span class="detail-value"><select class="edit-input" id="partnerRowSelect">${rowOptions}</select></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Столбец:</span>
+                        <span class="detail-value"><select class="edit-input" id="partnerColSelect">${colOptions}</select></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Текущее значение:</span>
+                        <span class="detail-value"><strong id="partnerCurrentValue">—</strong></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Операция:</span>
+                        <span class="detail-value">
+                            <select class="edit-input" id="partnerOpSelect">
+                                <option value="set">Установить</option>
+                                <option value="mul">Умножить</option>
+                                <option value="add">Прибавить</option>
+                                <option value="sub">Вычесть</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Значение:</span>
+                        <span class="detail-value"><input class="edit-input" id="partnerValueInput" type="number" step="any" placeholder="Введите число"></span>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="partner-cell-apply" data-name="${esc(name)}">💾 Применить</button>
+                    <button type="button" class="action-btn" data-back="partner_file_detail" data-name="${esc(name)}">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+
+            const rowSel = document.getElementById('partnerRowSelect');
+            const colSel = document.getElementById('partnerColSelect');
+            const curValEl = document.getElementById('partnerCurrentValue');
+            const updateCur = () => {
+                const r = parseInt(rowSel.value, 10);
+                const c = parseInt(colSel.value, 10);
+                const val = (values[r-1] && values[r-1][c-1]);
+                curValEl.textContent = (val !== null && val !== undefined && val !== '') ? val : '—';
+            };
+            rowSel.addEventListener('change', updateCur);
+            colSel.addEventListener('change', updateCur);
+            updateCur();
+        }
+
+        async function applyPartnerCreate() {
+            const inp = document.getElementById('partnerNewName');
+            const name = inp ? inp.value.trim() : '';
+            if (!name) { alert('Введите имя файла'); return; }
+            try {
+                await apiPost('/api/admin/partners/files', { name });
+                await loadPartnerFiles();
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function applyPartnerBulk(name) {
+            const inp = document.getElementById('partnerBulkPercent');
+            const val = inp ? inp.value.trim().replace(',', '.') : '';
+            if (!val) { alert('Введите процент'); return; }
+            const pct = parseFloat(val);
+            if (isNaN(pct)) { alert('Введите число'); return; }
+            try {
+                await apiPut(`/api/admin/partners/files/${encodeURIComponent(name)}/bulk`, { percent: pct });
+                await loadPartnerFileDetail(name);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function applyPartnerCell(name) {
+            const rowSel = document.getElementById('partnerRowSelect');
+            const colSel = document.getElementById('partnerColSelect');
+            const opSel = document.getElementById('partnerOpSelect');
+            const valInp = document.getElementById('partnerValueInput');
+            if (!rowSel || !colSel || !opSel || !valInp) return;
+            const row = parseInt(rowSel.value, 10);
+            const col = parseInt(colSel.value, 10);
+            const op = opSel.value;
+            const rawVal = valInp.value.trim().replace(',', '.');
+            if (!rawVal) { alert('Введите число'); return; }
+            const value = parseFloat(rawVal);
+            if (isNaN(value)) { alert('Введите число'); return; }
+            try {
+                const res = await apiPut(
+                    `/api/admin/partners/files/${encodeURIComponent(name)}/cell`,
+                    { row, col, op, value }
+                );
+                alert(`Готово: было ${res.old}, стало ${res.new}`);
+                // Перезагружаем форму с новыми значениями
+                await loadPartnerSingleForm(name);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function applyPartnerRename(name) {
+            const inp = document.getElementById('partnerRenameName');
+            const newName = inp ? inp.value.trim() : '';
+            if (!newName) { alert('Введите новое имя'); return; }
+            if (newName === name) { showMattressesMenu(); return; }
+            try {
+                await apiPut(
+                    `/api/admin/partners/files/${encodeURIComponent(name)}/rename`,
+                    { new_name: newName }
+                );
+                await loadPartnerFiles();
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function showPartnerDeleteConfirm(name) {
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_file_detail" data-name="${esc(name)}">← Назад</button>
+                    <h2 class="view-title">🗑️ Удаление файла</h2>
+                </div>
+                <div class="confirm-box">
+                    <p>⚠️ Удалить файл <strong>${esc(name)}.xlsx</strong> навсегда?</p>
+                    <div class="confirm-actions">
+                        <button type="button" class="action-btn danger" data-action="partner-delete-confirm" data-name="${esc(name)}">✅ Да, удалить</button>
+                        <button type="button" class="action-btn" data-back="partner_file_detail" data-name="${esc(name)}">❌ Нет</button>
+                    </div>
+                </div>
+            `;
+            showContent();
+        }
+
+        async function applyPartnerDelete(name) {
+            try {
+                await apiDelete(`/api/admin/partners/files/${encodeURIComponent(name)}`);
+                await loadPartnerFiles();
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function downloadPartnerTemplate() {
+            try {
+                const resp = await fetch('/api/admin/partners/template', { credentials: 'include' });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || 'Ошибка экспорта');
+                }
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '000000.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                // Обновляем список, чтобы шаблон появился на диске
+                if (views.content.style.display !== 'none') {
+                    await loadPartnerFiles();
+                }
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        async function downloadPartnerFile(name) {
+            try {
+                const resp = await fetch(
+                    `/api/admin/partners/files/${encodeURIComponent(name)}/download`,
+                    { credentials: 'include' }
+                );
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || 'Ошибка скачивания');
+                }
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${name}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function showPartnerUploadForm() {
+            // Список файлов для режима "заменить" (без 000000)
+            const nonOriginalFiles = state.partnerFiles.filter(f => !f.is_original);
+            let replaceOptions = '';
+            if (nonOriginalFiles.length) {
+                for (const f of nonOriginalFiles) {
+                    replaceOptions += `<option value="${esc(f.name)}">${esc(f.name)}.xlsx</option>`;
+                }
+            } else {
+                replaceOptions = '<option value="">— нет файлов —</option>';
+            }
+
+            views.content.innerHTML = `
+                <div class="orders-header">
+                    <button type="button" class="back-button" data-back="partner_files">← Назад</button>
+                    <h2 class="view-title">📤 Загрузить свой xlsx</h2>
+                </div>
+                <div class="detail-section">
+                    <p style="color:#777;margin-bottom:14px;">
+                        Файл должен совпадать по структуре с <code>000000.xlsx</code> (заголовки и первый столбец),
+                        все ценовые ячейки должны быть заполнены числами.
+                    </p>
+                    <div class="detail-row">
+                        <span class="detail-label">Файл (.xlsx):</span>
+                        <span class="detail-value"><input type="file" id="partnerUploadFile" accept=".xlsx"></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Режим:</span>
+                        <span class="detail-value">
+                            <label style="margin-right:14px;"><input type="radio" name="partnerUploadMode" value="new" checked> Создать новый</label>
+                            <label><input type="radio" name="partnerUploadMode" value="replace"> Заменить существующий</label>
+                        </span>
+                    </div>
+                    <div class="detail-row" id="partnerUploadNewNameRow">
+                        <span class="detail-label">Имя нового файла:</span>
+                        <span class="detail-value"><input class="edit-input" id="partnerUploadNewName" type="text" placeholder="без .xlsx"></span>
+                    </div>
+                    <div class="detail-row" id="partnerUploadReplaceRow" style="display:none;">
+                        <span class="detail-label">Файл для замены:</span>
+                        <span class="detail-value"><select class="edit-input" id="partnerUploadReplaceSelect">${replaceOptions}</select></span>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button type="button" class="action-btn primary" data-action="partner-upload-apply">📤 Загрузить</button>
+                    <button type="button" class="action-btn" data-back="partner_files">❌ Отмена</button>
+                </div>
+            `;
+            showContent();
+
+            const radios = views.content.querySelectorAll('input[name="partnerUploadMode"]');
+            radios.forEach(r => {
+                r.addEventListener('change', (e) => {
+                    const mode = e.target.value;
+                    document.getElementById('partnerUploadNewNameRow').style.display = mode === 'new' ? '' : 'none';
+                    document.getElementById('partnerUploadReplaceRow').style.display = mode === 'replace' ? '' : 'none';
+                });
+            });
+        }
+
+        async function applyPartnerUpload() {
+            const fileEl = document.getElementById('partnerUploadFile');
+            if (!fileEl || !fileEl.files || !fileEl.files[0]) {
+                alert('Выберите файл');
+                return;
+            }
+            const file = fileEl.files[0];
+            if (!file.name.toLowerCase().endsWith('.xlsx')) {
+                alert('Поддерживаются только .xlsx файлы');
+                return;
+            }
+            const modeEl = views.content.querySelector('input[name="partnerUploadMode"]:checked');
+            const mode = modeEl ? modeEl.value : 'new';
+            let name = '';
+            if (mode === 'new') {
+                const inp = document.getElementById('partnerUploadNewName');
+                name = inp ? inp.value.trim() : '';
+                if (!name) { alert('Введите имя нового файла'); return; }
+            } else {
+                const sel = document.getElementById('partnerUploadReplaceSelect');
+                name = sel ? sel.value : '';
+                if (!name) { alert('Выберите файл для замены'); return; }
+            }
+
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('mode', mode);
+            fd.append('name', name);
+
+            try {
+                const res = await apiUpload('/api/admin/partners/upload', fd);
+                alert(`Готово: ${res.name}.xlsx`);
+                await loadPartnerFiles();
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        // ============================================================
         //                    ОБРАБОТКА «НАЗАД»
         // ============================================================
         function handleBack(el) {
@@ -2565,6 +3045,7 @@
             const id = parseInt(el.dataset.id || '0', 10);
             const page = parseInt(el.dataset.page || '0', 10);
             const type = el.dataset.type;
+            const name = el.dataset.name || '';
 
             switch (target) {
                 case 'orders_menu': showOrdersMenu(); break;
@@ -2615,6 +3096,12 @@
                 case 'sizes_list': loadSizesList(state.mattressSizesPage); break;
                 case 'prices_menu': loadPricesMenu(); break;
                 case 'price_type': loadPriceType(type || 'layers'); break;
+                // Partners
+                case 'partner_files': loadPartnerFiles(); break;
+                case 'partner_file_detail':
+                    if (name) loadPartnerFileDetail(name);
+                    else loadPartnerFiles();
+                    break;
                 default: showOrdersMenu();
             }
         }
@@ -2653,6 +3140,7 @@
                 const type = el.dataset.type;
                 const id = parseInt(el.dataset.id, 10);
                 const page = parseInt(el.dataset.page || '0', 10);
+                const name = el.dataset.name || '';
 
                 if (action === 'view') {
                     if (type === 'product') loadProductDetails(id, page);
@@ -2689,7 +3177,6 @@
                 else if (action === 'new-gallery-project') { showGalleryCreateForm(); }
                 else if (action === 'create-gallery-project') { submitGalleryCreate(); }
                 else if (action === 'view-gallery-project') {
-                    const name = el.dataset.name;
                     if (name) loadGalleryProject(state.gallerySection, name);
                 } else if (action === 'save-gallery-description') {
                     const ta = document.getElementById('galleryProjectDesc');
@@ -2705,8 +3192,8 @@
                     const input = document.getElementById('galleryUploadInput');
                     if (input) input.click();
                 } else if (action === 'delete-gallery-project') {
-                    const name = el.dataset.name || state.galleryProjectName;
-                    if (name) { state.galleryProjectName = name; showGalleryDeleteConfirm(name); }
+                    const projName = el.dataset.name || state.galleryProjectName;
+                    if (projName) { state.galleryProjectName = projName; showGalleryDeleteConfirm(projName); }
                 } else if (action === 'confirm-delete-gallery-project') {
                     applyGalleryDeleteProject();
                 }
@@ -2766,8 +3253,24 @@
                 else if (action === 'create-feature-type') { createFeatureType(); }
                 else if (action === 'edit-feature-type') { editFeatureType(id, el.dataset.name || ''); }
                 else if (action === 'delete-feature-type') { deleteFeatureType(id); }
-                // --- Excel ---
+                // --- Excel (старая кнопка) ---
                 else if (action === 'download-mattress-excel') { downloadExcel(); }
+                // --- Партнёрские цены ---
+                else if (action === 'partner-download-template') { downloadPartnerTemplate(); }
+                else if (action === 'partner-download-file') { downloadPartnerFile(name); }
+                else if (action === 'partner-open-file') { loadPartnerFileDetail(name); }
+                else if (action === 'partner-create-form') { showPartnerCreateForm(); }
+                else if (action === 'partner-create-apply') { applyPartnerCreate(); }
+                else if (action === 'partner-upload-form') { showPartnerUploadForm(); }
+                else if (action === 'partner-upload-apply') { applyPartnerUpload(); }
+                else if (action === 'partner-bulk-form') { showPartnerBulkForm(name); }
+                else if (action === 'partner-bulk-apply') { applyPartnerBulk(name); }
+                else if (action === 'partner-single-form') { loadPartnerSingleForm(name); }
+                else if (action === 'partner-cell-apply') { applyPartnerCell(name); }
+                else if (action === 'partner-rename-form') { showPartnerRenameForm(name); }
+                else if (action === 'partner-rename-apply') { applyPartnerRename(name); }
+                else if (action === 'partner-delete') { showPartnerDeleteConfirm(name); }
+                else if (action === 'partner-delete-confirm') { applyPartnerDelete(name); }
                 return;
             }
 
@@ -2848,7 +3351,7 @@
                     else if (action === 'open-mattress-sizes') loadSizesList(0);
                     else if (action === 'open-mattress-prices') loadPricesMenu();
                     else if (action === 'open-mattress-features') loadFeatureTypes(0);
-                    else if (action === 'download-mattress-excel') downloadExcel();
+                    else if (action === 'open-partner-prices') loadPartnerFiles();
                 });
             }
 
